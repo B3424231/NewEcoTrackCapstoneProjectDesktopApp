@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EcoTrack - Authentication</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Check local storage for theme preference immediately to prevent flash
+        (function() {
+            const savedTheme = localStorage.getItem('ecoTrackTheme');
+            const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            if (savedTheme === 'dark' || (!savedTheme && systemPrefersDark)) {
+                document.documentElement.classList.add('dark');
+            } else {
+                document.documentElement.classList.remove('dark');
+            }
+        })();
+        
+        tailwind.config = {
+          darkMode: 'class'
+        }
+    </script>
+    <link rel="stylesheet" href="styles.css?v=38">
+
+    <!-- Supabase Client & Dual Database Router -->
+    <script src="./js/supabase.umd.js"></script>
+    <script>
+      if (!window.supabase) {
+        document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"><\/script>');
+      }
+    </script>
+    <script src="./js/supabase-client.js"></script>
+    <script src="./js/shared.js"></script>
+
+    <style>
+        body {
+            background: #18392B !important;
+            transition: background-color 0.2s ease;
+        }
+        .dark body {
+            background: #070b19 !important;
+        }
+        body::before {
+            display: none !important;
+        }
+
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(16px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .animate-fade-up {
+            animation: fadeUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        .custom-checkbox {
+            appearance: none;
+            background-color: #fff;
+            margin: 0;
+            font: inherit;
+            color: currentColor;
+            width: 1.15em;
+            height: 1.15em;
+            border: 2px solid #cbd5e1;
+            border-radius: 0.3em;
+            display: grid;
+            place-content: center;
+            transition: all 0.2s ease-in-out;
+            cursor: pointer;
+        }
+
+        .dark .custom-checkbox {
+            background-color: rgba(15, 23, 42, 0.6);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .custom-checkbox::before {
+            content: "";
+            width: 0.65em;
+            height: 0.65em;
+            transform: scale(0);
+            transition: 120ms transform ease-in-out;
+            box-shadow: inset 1em 1em white;
+            background-color: currentColor;
+            transform-origin: bottom left;
+            clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+        }
+
+        .custom-checkbox:checked {
+            background-color: #10b981;
+            border-color: #10b981;
+        }
+
+        .custom-checkbox:checked::before {
+            transform: scale(1);
+        }
+
+        #show-register-btn,
+        #show-login-btn {
+            color: #18392B;
+            position: relative;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            display: inline-block;
+        }
+        .dark #show-register-btn,
+        .dark #show-login-btn {
+            color: #22d3ee;
+        }
+        #show-register-btn:hover,
+        #show-login-btn:hover {
+            color: #10b981;
+            text-shadow: 0 0 8px rgba(16, 185, 129, 0.15);
+        }
+        #show-register-btn::after,
+        #show-login-btn::after {
+            content: '';
+            position: absolute;
+            width: 100%;
+            transform: scaleX(0);
+            height: 2px;
+            bottom: -2px;
+            left: 0;
+            background-color: #10b981;
+            transform-origin: bottom right;
+            transition: transform 0.25s ease-out;
+        }
+        #show-register-btn:hover::after,
+        #show-login-btn:hover::after {
+            transform: scaleX(1);
+            transform-origin: bottom left;
+        }
+    </style>
+</head>
+
+<body class="bg-[#18392B] dark:bg-[#070b19] min-h-screen flex items-center justify-center p-4 selection:bg-[#10b981] selection:text-white transition-colors duration-200">
+    <div class="bg-white dark:bg-[#0c1328] border border-gray-100 dark:border-white/5 rounded-[2rem] w-full max-w-[440px] p-8 sm:p-10 shadow-2xl shadow-black/25 animate-fade-up relative overflow-hidden">
+        
+        <!-- Decorative Glow -->
+        <div class="absolute -top-24 -right-24 w-48 h-48 bg-[#10b981] rounded-full mix-blend-multiply filter blur-3xl opacity-10 pointer-events-none"></div>
+        <div class="absolute -bottom-24 -left-24 w-48 h-48 bg-cyan-400 rounded-full mix-blend-multiply filter blur-3xl opacity-10 pointer-events-none"></div>
+
+        <!-- Header -->
+        <div class="text-center mb-6 relative z-10">
+            <h1 class="text-3xl font-extrabold text-[#18392B] dark:text-cyan-400 flex items-center justify-center gap-3 mb-2">
+                <img src="../assets/ecoTrack.png" alt="EcoTrack Icon" class="w-10 h-10 object-contain rounded-lg shadow-sm">
+                EcoTrack
+            </h1>
+            <p id="form-subtitle" class="text-gray-500 dark:text-gray-400 text-sm font-medium">Welcome back! Please login to your account.</p>
+        </div>
+
+        <!-- Dynamic Inline Alert Banner -->
+        <div id="auth-alert" class="hidden mb-5 p-3.5 rounded-xl text-sm font-medium flex items-start gap-2.5 transition-all"></div>
+
+        <!-- Login Form -->
+        <form id="login-form" class="relative z-10" autocomplete="on">
+            <div class="mb-4">
+                <label for="username" class="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">Username or Email</label>
+                <input type="text" id="username" name="username" placeholder="admin or admin@ecotrack.local" required autocomplete="username"
+                    class="w-full bg-gray-50 dark:bg-slate-950/40 border-2 border-gray-200 dark:border-white/10 text-gray-800 dark:text-gray-100 rounded-xl px-4 py-3 focus:outline-none focus:border-[#10b981] focus:bg-white dark:focus:bg-slate-950/60 transition-colors font-medium placeholder-gray-400">
+            </div>
+
+            <div class="mb-4">
+                <label for="password" class="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">Password</label>
+                <div class="relative flex items-center">
+                    <input type="password" id="password" name="password" placeholder="••••••••" required autocomplete="current-password"
+                        class="w-full bg-gray-50 dark:bg-slate-950/40 border-2 border-gray-200 dark:border-white/10 text-gray-800 dark:text-gray-100 rounded-xl px-4 py-3 pr-12 focus:outline-none focus:border-[#10b981] focus:bg-white dark:focus:bg-slate-950/60 transition-colors font-medium placeholder-gray-400">
+                    <button type="button" class="password-toggle-btn absolute right-3 p-2 text-gray-400 hover:text-[#10b981] transition-colors border-0 bg-transparent cursor-pointer" aria-label="Toggle password visibility">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex items-center justify-between mb-6">
+                <label class="flex items-center gap-2 cursor-pointer select-none">
+                    <input type="checkbox" id="remember-me" name="remember" class="custom-checkbox">
+                    <span class="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Remember me</span>
+                </label>
+                <span class="text-xs text-gray-400 dark:text-gray-500 font-medium">Desktop v2.4</span>
+            </div>
+
+            <button type="submit" class="submit-btn w-full bg-[#10b981] hover:bg-emerald-400 active:scale-[0.98] text-white font-extrabold text-lg rounded-xl py-3.5 shadow-lg shadow-emerald-500/30 hover:shadow-emerald-500/40 hover:-translate-y-0.5 transition-all duration-200 uppercase tracking-wide border-0 cursor-pointer">
+                Login
+            </button>
+            
+            <div class="mt-6 text-center">
+                <a href="#" id="show-register-btn" class="text-sm font-bold text-cyan-500 hover:text-cyan-400 transition-colors">Admin Registration →</a>
+            </div>
+        </form>
+
+        <!-- Registration Form -->
+        <form id="register-form" style="display: none;" class="relative z-10" autocomplete="on">
+            <div class="mb-4">
+                <label for="reg-username" class="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1.5">Username</label>
+                <input type="text" id="reg-username" name="username" placeholder="e.g. admin2" required autocomplete="username" minlength="3"
+                    class="w-full bg-gray-50 dark:bg-slate-950/40 border-2 border-gray-200 dark:border-white/10 text-gray-800 dark:text-gray-100 rounded-xl px-4 py-2.5 focus:outline-none focus:border-[#10b981] focus:bg-white dark:focus:bg-slate-950/60 transition-colors font-medium placeholder-gray-400">
+                <p class="text-[11px] text-gray-400 mt-1">Minimum 3 characters (letters, numbers, underscore)</p>
+            </div>
+
+            <div class="mb-4">
+                <label for="reg-email" class="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1.5">Email Address</label>
+                <input type="email" id="reg-email" name="email" placeholder="admin@ecotrack.local" required autocomplete="email"
+                    class="w-full bg-gray-50 dark:bg-slate-950/40 border-2 border-gray-200 dark:border-white/10 text-gray-800 dark:text-gray-100 rounded-xl px-4 py-2.5 focus:outline-none focus:border-[#10b981] focus:bg-white dark:focus:bg-slate-950/60 transition-colors font-medium placeholder-gray-400">
+            </div>
+
+            <div class="mb-4">
+                <label for="reg-password" class="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1.5">Password</label>
+                <div class="relative flex items-center">
+                    <input type="password" id="reg-password" name="password" placeholder="••••••••" required minlength="8" autocomplete="new-password"
+                        class="w-full bg-gray-50 dark:bg-slate-950/40 border-2 border-gray-200 dark:border-white/10 text-gray-800 dark:text-gray-100 rounded-xl px-4 py-2.5 pr-12 focus:outline-none focus:border-[#10b981] focus:bg-white dark:focus:bg-slate-950/60 transition-colors font-medium placeholder-gray-400">
+                    <button type="button" class="password-toggle-btn absolute right-3 p-2 text-gray-400 hover:text-[#10b981] transition-colors border-0 bg-transparent cursor-pointer" aria-label="Toggle password visibility">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                    </button>
+                </div>
+                <p class="text-[11px] text-gray-400 mt-1">Minimum 8 characters</p>
+            </div>
+
+            <div class="mb-6">
+                <label for="reg-password-confirm" class="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1.5">Confirm Password</label>
+                <div class="relative flex items-center">
+                    <input type="password" id="reg-password-confirm" name="passwordConfirm" placeholder="••••••••" required minlength="8" autocomplete="new-password"
+                        class="w-full bg-gray-50 dark:bg-slate-950/40 border-2 border-gray-200 dark:border-white/10 text-gray-800 dark:text-gray-100 rounded-xl px-4 py-2.5 pr-12 focus:outline-none focus:border-[#10b981] focus:bg-white dark:focus:bg-slate-950/60 transition-colors font-medium placeholder-gray-400">
+                    <button type="button" class="password-toggle-btn absolute right-3 p-2 text-gray-400 hover:text-[#10b981] transition-colors border-0 bg-transparent cursor-pointer" aria-label="Toggle password visibility">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <button type="submit" class="submit-btn w-full bg-[#18392B] dark:bg-emerald-600 hover:bg-[#11291f] dark:hover:bg-emerald-500 active:scale-[0.98] text-white font-extrabold text-lg rounded-xl py-3.5 shadow-lg shadow-black/20 hover:-translate-y-0.5 transition-all duration-200 uppercase tracking-wide border-0 cursor-pointer">
+                Create Account
+            </button>
+            
+            <div class="mt-6 text-center">
+                <a href="#" id="show-login-btn" class="text-sm font-bold text-cyan-500 hover:text-cyan-400 transition-colors">← Back to Login</a>
+            </div>
+        </form>
+    </div>
+
+    <script src="js/login.js"></script>
+</body>
+</html>

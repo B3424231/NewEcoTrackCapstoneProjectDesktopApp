@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prediction Metrics - EcoTrack</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class'
+    }
+  </script>
+  <!-- Load Inter font for clean modern look -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="././styles.css?v=38">
+  <script src="./js/sidebar.js"></script>
+  <script src="./js/sidebar-loader.js?v=5"></script>
+  <script src="./js/supabase.umd.js"></script>
+  <script src="./js/supabase-client.js"></script>
+  <script src="./js/global-notifications.js"></script>
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    .metric-card { box-shadow: 0 2px 10px rgba(0,0,0,0.02); }
+  </style>
+</head>
+
+<body class="bg-slate-50 dark:bg-[#0a0f1d] flex h-screen text-slate-800 dark:text-gray-200 transition-colors duration-200">
+  <!-- Sidebar injected here by loader -->
+  <div id="sidebar-container" class="z-50"></div>
+
+  <main class="flex-1 flex flex-col overflow-hidden bg-slate-50 dark:bg-[#0a0f1d] relative transition-colors duration-200">
+    
+    <!-- Top Header -->
+    <header class="bg-white dark:bg-[#0c1328] border-b border-gray-100 dark:border-white/5 px-8 py-5 flex items-center z-10 shadow-sm">
+      <div class="flex items-center gap-3">
+        <!-- Green Line Chart Icon -->
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
+        </svg>
+        <div class="flex items-center">
+          <h2 class="text-2xl font-bold text-[#0f2e24] dark:text-cyan-400">Prediction Metrics</h2>
+          
+          <!-- Tooltip Container -->
+          <div class="relative group cursor-pointer ml-3 flex items-center">
+            <!-- Icon -->
+            <div class="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-[#10b981] hover:bg-emerald-100 dark:hover:bg-emerald-950/40 transition-colors shadow-sm border border-emerald-200 dark:border-emerald-800/40">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            
+            <!-- Tooltip Content -->
+            <div class="absolute left-0 top-full mt-3 w-[450px] p-5 bg-white dark:bg-[#0c1328] border border-gray-100 dark:border-white/5 rounded-xl shadow-[0_20px_60px_-15px_rgba(0,0,0,0.3)] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-[99999] text-sm">
+              <div class="text-[#0f2e24] dark:text-cyan-400 font-bold mb-3 text-base border-b border-gray-100 dark:border-white/5 pb-2 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                </svg>
+                Which Algorithm is Best?
+              </div>
+              <ul class="space-y-4 text-gray-600 dark:text-gray-300">
+                <li class="p-3 bg-emerald-50 dark:bg-emerald-950/20 rounded-lg border border-emerald-100/50 dark:border-emerald-800/20">
+                  <strong class="text-emerald-700 dark:text-emerald-400 block mb-1">1. XGBoost (Recommended)</strong>
+                  The most powerful and accurate model. It excels at handling complex, non-linear sensor data and provides the best performance for energy tracking, making it the industry standard.
+                </li>
+                <li>
+                  <strong class="text-gray-800 dark:text-gray-200 block mb-1">2. Random Forest</strong>
+                  A robust, ensemble-based model. It prevents the overfitting issues of single Decision Trees, making it highly reliable, though slightly less accurate than XGBoost on complex data.
+                </li>
+                <li>
+                  <strong class="text-gray-800 dark:text-gray-200 block mb-1">3. Decision Tree</strong>
+                  A simple, highly interpretable model. While it is very fast, it is prone to overfitting and struggles with complex, noisy telemetry data.
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Scrollable Content -->
+    <div class="flex-1 overflow-auto p-8">
+      <div class="max-w-[1400px] mx-auto space-y-6">
+
+        <!-- Model Selection Buttons -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+          
+          <!-- Random Forest -->
+          <button onclick="loadModel('random_forest', this)" class="model-btn w-full bg-white dark:bg-[#0c1328]/70 dark:backdrop-blur-md border border-emerald-100 dark:border-[#10b981]/20 rounded-2xl p-6 flex items-start gap-4 transition-all hover:shadow-md border-l-4 border-l-emerald-600 dark:border-l-[#10b981] shadow-sm cursor-pointer text-left">
+            <div class="w-14 h-14 rounded-full bg-emerald-50 dark:bg-emerald-950/20 flex items-center justify-center shrink-0">
+              <!-- Pine Trees -->
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7 text-emerald-700 dark:text-[#10b981]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
+              </svg>
+            </div>
+            <div>
+              <h4 class="text-[15px] font-bold text-[#0f2e24] dark:text-cyan-400">Random Forest Regression</h4>
+              <p class="text-xs text-slate-500 dark:text-gray-400 mt-1 leading-relaxed">Robust ensemble method highly resilient to outliers. Excellent for non-linear state mapping.</p>
+            </div>
+          </button>
+
+          <!-- Decision Tree -->
+          <button onclick="loadModel('decision_tree', this)" class="model-btn w-full bg-white dark:bg-[#0c1328]/70 dark:backdrop-blur-md border border-gray-100 dark:border-white/5 rounded-2xl p-6 flex items-start gap-4 transition-all hover:shadow-md hover:border-emerald-200 dark:hover:border-[#10b981]/40 cursor-pointer text-left">
+            <div class="w-14 h-14 rounded-full bg-emerald-50 dark:bg-emerald-950/20 flex items-center justify-center shrink-0">
+              <!-- Tree Node -->
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7 text-emerald-700 dark:text-[#10b981]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6a7.5 7.5 0 107.5 7.5h-7.5V6z" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 10.5H21A7.5 7.5 0 0013.5 3v7.5z" />
+              </svg>
+            </div>
+            <div>
+              <h4 class="text-[15px] font-bold text-[#0f2e24] dark:text-cyan-400">Decision Tree Regression</h4>
+              <p class="text-xs text-slate-500 dark:text-gray-400 mt-1 leading-relaxed">Highly interpretable single-tree model. Susceptible to high variance on complex HVAC patterns.</p>
+            </div>
+          </button>
+
+          <!-- XGBoost -->
+          <button onclick="loadModel('xgboost', this)" class="model-btn w-full bg-white dark:bg-[#0c1328]/70 dark:backdrop-blur-md border border-gray-100 dark:border-white/5 rounded-2xl p-6 flex items-start gap-4 transition-all hover:shadow-md hover:border-emerald-200 dark:hover:border-[#10b981]/40 cursor-pointer text-left">
+            <div class="w-14 h-14 rounded-full bg-emerald-50 dark:bg-emerald-950/20 flex items-center justify-center shrink-0">
+              <!-- Rocket -->
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7 text-emerald-700 dark:text-[#10b981]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15.59 14.37a6 6 0 01-5.84 7.38v-4.8m5.84-2.58a14.98 14.98 0 006.16-12.12A14.98 14.98 0 009.631 8.41m5.96 5.96a14.926 14.926 0 01-5.841 2.58m-.119-8.54a6 6 0 00-7.381 5.84h4.8m2.581-5.84a14.927 14.927 0 00-2.58 5.84m2.699 2.7c-.103.021-.207.041-.311.06a15.09 15.09 0 01-2.448-2.448 14.9 14.9 0 01.06-.312m-2.24 2.39a4.49 4.49 0 001.415.51M9 15l-3 3m0 0l-3 3m3-3l3-3" />
+              </svg>
+            </div>
+            <div>
+              <h4 class="text-[15px] font-bold text-[#0f2e24] dark:text-cyan-400">XGBoost Regression</h4>
+              <p class="text-xs text-slate-500 dark:text-gray-400 mt-1 leading-relaxed">State-of-the-art gradient boosting framework. Provides the highest accuracy and performance.</p>
+            </div>
+          </button>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="loadingIndicator" class="hidden flex justify-center py-12">
+          <div class="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+        </div>
+
+        <!-- Metrics Section (Hidden initially) -->
+        <div id="resultsSection" class="hidden animate-fade-in">
+          <div class="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-6">
+            
+            <!-- R2 Score -->
+            <div onclick="openMetricModal('r2')" class="metric-card bg-white dark:bg-[#0c1328]/70 dark:backdrop-blur-md border border-emerald-300 dark:border-emerald-800/40 rounded-2xl p-6 flex items-center gap-4 cursor-pointer hover:shadow-xl hover:-translate-y-1 transition-all">
+              <div class="w-12 h-12 rounded-full bg-[#0a4d3c] dark:bg-emerald-950/40 border dark:border-emerald-800/20 flex items-center justify-center shrink-0 shadow-lg shadow-emerald-900/20">
+                <!-- Line Chart Up -->
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                </svg>
+              </div>
+              <div>
+                <p class="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-1">R² Score</p>
+                <p id="metricR2" class="text-3xl font-extrabold text-slate-800 dark:text-gray-100 tracking-tight leading-none">--</p>
+              </div>
+            </div>
+
+            <!-- MSE -->
+            <div onclick="openMetricModal('mse')" class="metric-card bg-white dark:bg-[#0c1328]/70 dark:backdrop-blur-md border border-emerald-300 dark:border-emerald-800/40 rounded-2xl p-6 flex items-center gap-4 cursor-pointer hover:shadow-xl hover:-translate-y-1 transition-all">
+              <div class="w-12 h-12 rounded-full bg-[#0a4d3c] dark:bg-emerald-950/40 border dark:border-emerald-800/20 flex items-center justify-center shrink-0 shadow-lg shadow-emerald-900/20">
+                <!-- Target -->
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </div>
+              <div>
+                <p class="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-1">Mean Sq Error</p>
+                <p id="metricMSE" class="text-3xl font-extrabold text-slate-800 dark:text-gray-100 tracking-tight leading-none">--</p>
+              </div>
+            </div>
+
+            <!-- MAE -->
+            <div onclick="openMetricModal('mae')" class="metric-card bg-white dark:bg-[#0c1328]/70 dark:backdrop-blur-md border border-emerald-300 dark:border-emerald-800/40 rounded-2xl p-6 flex items-center gap-4 cursor-pointer hover:shadow-xl hover:-translate-y-1 transition-all">
+              <div class="w-12 h-12 rounded-full bg-[#0a4d3c] dark:bg-emerald-950/40 border dark:border-emerald-800/20 flex items-center justify-center shrink-0 shadow-lg shadow-emerald-900/20">
+                <!-- Bar Chart -->
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+              </div>
+              <div>
+                <p class="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-1">Mean Abs Error</p>
+                <p id="metricMAE" class="text-3xl font-extrabold text-slate-800 dark:text-gray-100 tracking-tight leading-none">--</p>
+              </div>
+            </div>
+
+            <!-- RMSE -->
+            <div onclick="openMetricModal('rmse')" class="metric-card bg-white dark:bg-[#0c1328]/70 dark:backdrop-blur-md border border-emerald-300 dark:border-emerald-800/40 rounded-2xl p-6 flex items-center gap-4 cursor-pointer hover:shadow-xl hover:-translate-y-1 transition-all">
+              <div class="w-12 h-12 rounded-full bg-[#0a4d3c] dark:bg-emerald-950/40 border dark:border-emerald-800/20 flex items-center justify-center shrink-0 shadow-lg shadow-emerald-900/20">
+                <!-- Ruler -->
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />
+                </svg>
+              </div>
+              <div>
+                <p class="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-1">Root Mean Sq</p>
+                <p id="metricRMSE" class="text-3xl font-extrabold text-slate-800 dark:text-gray-100 tracking-tight leading-none">--</p>
+              </div>
+            </div>
+
+            <!-- EVS -->
+            <div onclick="openMetricModal('evs')" class="metric-card bg-white dark:bg-[#0c1328]/70 dark:backdrop-blur-md border border-emerald-300 dark:border-emerald-800/40 rounded-2xl p-6 flex items-center gap-4 cursor-pointer hover:shadow-xl hover:-translate-y-1 transition-all">
+              <div class="w-12 h-12 rounded-full bg-[#0a4d3c] dark:bg-emerald-950/40 border dark:border-emerald-800/20 flex items-center justify-center shrink-0 shadow-lg shadow-emerald-900/20">
+                <!-- Sparkles -->
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                </svg>
+              </div>
+              <div>
+                <p class="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-1">Exp. Variance</p>
+                <p id="metricEVS" class="text-3xl font-extrabold text-slate-800 dark:text-gray-100 tracking-tight leading-none">--</p>
+              </div>
+            </div>
+
+          </div>
+        </div>
+        
+        </div>
+        
+        <!-- Dataset Information -->
+        <div class="bg-white dark:bg-[#0c1328]/70 dark:backdrop-blur-md border border-gray-100 dark:border-white/5 rounded-2xl p-8 shadow-sm mt-8">
+          <div class="flex items-center gap-4 mb-6">
+            <div class="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-950/20 flex items-center justify-center shrink-0">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+              </svg>
+            </div>
+            <div>
+              <h3 class="text-xl font-bold text-[#0f2e24] dark:text-cyan-400">Dataset Overview</h3>
+              <p class="text-sm text-slate-500 dark:text-gray-400 mt-1">Information regarding the data used for machine learning predictions</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div class="space-y-4">
+              <h4 class="font-bold text-slate-700 dark:text-gray-300 text-sm uppercase tracking-wider">Number of Datasets</h4>
+              <div class="bg-slate-50 dark:bg-slate-900/60 p-4 rounded-xl border border-gray-100 dark:border-white/5">
+                <div class="flex items-baseline gap-2">
+                  <p class="text-[2rem] font-black text-emerald-600 dark:text-emerald-400">1 <span class="text-sm font-normal text-slate-500 dark:text-gray-400 ml-1">Kaggle Dataset</span></p>
+                  <span class="px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 border dark:border-emerald-800/20 text-xs font-bold ml-auto flex-shrink-0">25,632 Records</span>
+                </div>
+                <p class="text-sm text-slate-600 dark:text-gray-300 mt-2">The models were trained on the <strong>"HVAC System Power Consumption and Sensor Data"</strong> dataset from Kaggle, mapping sensor readings to energy consumption patterns.</p>
+              </div>
+            </div>
+
+            <div class="space-y-4">
+              <h4 class="font-bold text-slate-700 dark:text-gray-300 text-sm uppercase tracking-wider">Data Required for Prediction</h4>
+              <ul class="space-y-4">
+                <li class="flex items-start gap-3">
+                  <div class="mt-1">
+                    <svg class="h-5 w-5 text-emerald-500 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                  </div>
+                  <div>
+                    <p class="text-[15px] font-semibold text-slate-800 dark:text-gray-200">Timestamp</p>
+                    <p class="text-sm text-slate-500 dark:text-gray-400 mt-0.5">Essential to derive the day, week, and month features. Without these, the model cannot make a prediction.</p>
+                  </div>
+                </li>
+                <li class="flex items-start gap-3">
+                  <div class="mt-1">
+                    <svg class="h-5 w-5 text-emerald-500 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                  </div>
+                  <div>
+                    <p class="text-[15px] font-semibold text-slate-800 dark:text-gray-200">On/Off Status</p>
+                    <p class="text-sm text-slate-500 dark:text-gray-400 mt-0.5">This categorical feature is used to generate one-hot encoded <code class="bg-gray-100 dark:bg-slate-800 px-1 rounded text-emerald-700 dark:text-emerald-400">status_</code> columns (e.g., <code class="bg-gray-100 dark:bg-slate-800 px-1 rounded">status_0.0</code>, <code class="bg-gray-100 dark:bg-slate-800 px-1 rounded">status_1.0</code>).</p>
+                  </div>
+                </li>
+                <li class="flex items-start gap-3">
+                  <div class="mt-1">
+                    <svg class="h-5 w-5 text-emerald-500 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                  </div>
+                  <div>
+                    <p class="text-[15px] font-semibold text-slate-800 dark:text-gray-200">Damper Position</p>
+                    <p class="text-sm text-slate-500 dark:text-gray-400 mt-0.5">Similar to on_off, this categorical feature also contributes to the one-hot encoded <code class="bg-gray-100 dark:bg-slate-800 px-1 rounded text-emerald-700 dark:text-emerald-400">status_</code> columns.</p>
+                  </div>
+                </li>
+                <li class="flex items-start gap-3">
+                  <div class="mt-1">
+                    <svg class="h-5 w-5 text-blue-500 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                  </div>
+                  <div>
+                    <p class="text-[15px] font-semibold text-blue-800 dark:text-cyan-400">Target Output Variable</p>
+                    <p class="text-sm text-slate-500 dark:text-gray-400 mt-0.5">These columns from the original <code class="bg-gray-100 dark:bg-slate-800 px-1 rounded">hvac_data_cleaned.parquet</code> dataset are transformed into the features that the model expects for making predictions of <strong>active_energy</strong>.</p>
+                  </div>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  <!-- Metric Modal -->
+  <div id="metricModal" class="hidden fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-[100] flex items-center justify-center animate-in fade-in duration-200">
+    <div class="bg-white dark:bg-[#0c1328] rounded-2xl w-full max-w-md shadow-2xl border dark:border-white/5 overflow-hidden">
+      <div class="px-6 py-4 border-b border-gray-100 dark:border-white/5 flex justify-between items-center bg-slate-50 dark:bg-slate-900/60">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 rounded-full bg-emerald-100 dark:bg-emerald-950/20 flex items-center justify-center shrink-0">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-emerald-700 dark:text-[#10b981]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <h3 id="modalTitle" class="text-lg font-bold text-[#0f2e24] dark:text-cyan-400">Metric Title</h3>
+        </div>
+        <button onclick="closeMetricModal()" class="text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors border-0 bg-transparent cursor-pointer">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div class="p-6">
+        <p class="text-[15px] text-slate-600 dark:text-gray-300 leading-relaxed" id="modalDescription">
+          Metric description goes here.
+        </p>
+      </div>
+      <div class="px-6 py-4 bg-slate-50 dark:bg-slate-900/60 border-t border-gray-100 dark:border-white/5 flex justify-end">
+        <button onclick="closeMetricModal()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg transition-colors shadow-sm border-0 cursor-pointer">Got it</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const metricInfo = {
+      r2: {
+        title: 'R² Score',
+        desc: 'The <strong>R² Score (Coefficient of Determination)</strong> measures the proportion of variance in the dependent variable that can be explained by the independent variables.<br><br>An R² of <strong>1.0</strong> indicates a perfect fit, meaning the model perfectly predicts the target variable. An R² of <strong>0.0</strong> indicates the model fails to explain any of the variation.'
+      },
+      mse: {
+        title: 'Mean Squared Error (MSE)',
+        desc: '<strong>MSE</strong> measures the average squared difference between the estimated values and the actual values. <br><br>It gives higher weight to large errors because the differences are squared before they are averaged. A lower MSE indicates better predictive accuracy.'
+      },
+      mae: {
+        title: 'Mean Absolute Error (MAE)',
+        desc: '<strong>MAE</strong> measures the average magnitude of the errors in a set of predictions, without considering their direction. <br><br>It is the average of the absolute differences between predictions and actual observations. A lower MAE indicates better model performance and is less sensitive to outliers than MSE.'
+      },
+      rmse: {
+        title: 'Root Mean Squared Error (RMSE)',
+        desc: '<strong>RMSE</strong> is the square root of the MSE. <br><br>It is measured in the same units as the target variable, making it highly interpretable. A lower RMSE indicates the model\'s predictions are closer to the actual observed values.'
+      },
+      evs: {
+        title: 'Explained Variance Score',
+        desc: '<strong>Explained Variance</strong> measures how much of the mathematical variance in your dataset can be explained by the model. <br><br>Unlike R², it does not account for systematic offsets (bias). A score of <strong>1.0</strong> is perfect.'
+      }
+    };
+
+    function openMetricModal(type) {
+      const modal = document.getElementById('metricModal');
+      const titleEl = document.getElementById('modalTitle');
+      const descEl = document.getElementById('modalDescription');
+      
+      if (metricInfo[type]) {
+        titleEl.textContent = metricInfo[type].title;
+        descEl.innerHTML = metricInfo[type].desc;
+        modal.classList.remove('hidden');
+      }
+    }
+
+    function closeMetricModal() {
+      const modal = document.getElementById('metricModal');
+      modal.classList.add('hidden');
+    }
+
+    // Close modal when clicking outside
+    window.addEventListener('click', (e) => {
+      const modal = document.getElementById('metricModal');
+      if (e.target === modal) {
+        closeMetricModal();
+      }
+    });
+
+    // Initialize the first model on load
+    window.addEventListener('DOMContentLoaded', () => {
+      // Find the first model button and trigger it
+      const firstBtn = document.querySelector('.model-btn');
+      if (firstBtn) {
+        loadModel('random_forest', firstBtn);
+      }
+    });
+
+    async function loadModel(modelType, buttonElement) {
+      // UI Updates
+      document.getElementById('resultsSection').classList.add('hidden');
+      document.getElementById('loadingIndicator').classList.remove('hidden');
+      
+      // Update active button styling
+      document.querySelectorAll('.model-btn').forEach(btn => {
+        btn.classList.remove('border-l-4', 'border-l-emerald-600', 'dark:border-l-[#10b981]', 'border-emerald-100', 'dark:border-[#10b981]/20', 'shadow-sm');
+        btn.classList.add('border-gray-100', 'dark:border-white/5');
+      });
+      
+      buttonElement.classList.remove('border-gray-100', 'dark:border-white/5');
+      buttonElement.classList.add('border-l-4', 'border-l-emerald-600', 'dark:border-l-[#10b981]', 'border-emerald-100', 'dark:border-[#10b981]/20', 'shadow-sm');
+
+      try {
+        const response = await fetch(`http://localhost:5000/api/prediction-metrics?model=${modelType}`);
+        const data = await response.json();
+        
+        if (data.error) {
+          alert('Error: ' + data.error);
+          document.getElementById('loadingIndicator').classList.add('hidden');
+          return;
+        }
+
+        // Format numbers to look cleaner if they have too many decimals
+        const r2 = parseFloat(data.metrics.r2).toFixed(4);
+        const mseVal = parseFloat(data.metrics.mse);
+        // Using 6 decimal places shows the exact tiny number (e.g. 0.000004) without hyphens, preventing awkward line wrapping.
+        const mse = mseVal > 0 && mseVal < 0.0001 ? mseVal.toFixed(6) : mseVal.toFixed(4);
+        const rmse = parseFloat(data.metrics.rmse).toFixed(4);
+        const mae = parseFloat(data.metrics.mae).toFixed(4);
+        const evs = parseFloat(data.metrics.evs).toFixed(4);
+
+        // Update Metrics
+        document.getElementById('metricR2').innerText = r2;
+        
+        const mseEl = document.getElementById('metricMSE');
+        mseEl.innerText = mse;
+        if (mse.length > 6) {
+          mseEl.classList.remove('text-3xl');
+          mseEl.classList.add('text-xl'); // shrinks text slightly to fit
+        } else {
+          mseEl.classList.remove('text-xl');
+          mseEl.classList.add('text-3xl');
+        }
+
+        document.getElementById('metricRMSE').innerText = rmse;
+        document.getElementById('metricMAE').innerText = mae;
+        document.getElementById('metricEVS').innerText = evs;
+
+        // Show Results
+        document.getElementById('loadingIndicator').classList.add('hidden');
+        document.getElementById('resultsSection').classList.remove('hidden');
+        
+      } catch (err) {
+        alert('Failed to load predictions. Is the backend running?');
+        console.error(err);
+        document.getElementById('loadingIndicator').classList.add('hidden');
+      }
+    }
+  </script>
+</body>
+</html>

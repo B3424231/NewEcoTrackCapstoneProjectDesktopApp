@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sensor Scheduler - EcoTrack</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class'
+    }
+  </script>
+  <link rel="stylesheet" href="./styles.css?v=51">
+  <script src="./js/sidebar.js"></script>
+  <script src="./js/sidebar-loader.js?v=5"></script>
+  <script src="./js/icons.js"></script>
+  <script src="./js/maintenance-modal.js?v=64"></script>
+</head>
+
+<body class="app-shell bg-gray-50 dark:bg-[#0a0f1d] transition-colors duration-200">
+  <div class="flex h-screen">
+    <!-- Sidebar will be injected here by sidebar-loader.js -->
+
+    <!-- MAIN CONTENT -->
+    <main class="flex-1 flex flex-col overflow-hidden">
+      <header
+        class="bg-white dark:bg-[#0c1328] border-b border-gray-200 dark:border-white/5 px-6 py-4 flex justify-between items-center z-10 shadow-sm relative">
+        <h2 class="text-2xl font-bold text-[#18392B] dark:text-cyan-400 flex items-center gap-2"><svg viewBox="0 0 24 24" width="24"
+            height="24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-[#10b981]">
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </svg>Sensor Scheduler</h2>
+
+      </header>
+
+      <div class="flex-1 flex overflow-hidden gap-4 p-4">
+
+        <!-- LEFT PANEL: Room Cabinet -->
+        <div class="w-64 glass-surface glass-panel p-6 flex flex-col overflow-hidden">
+          <h3 class="text-lg font-bold text-[#10b981] mb-4 flex items-center gap-2"><svg viewBox="0 0 24 24" width="20" fill="none"
+              stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="text-[#10b981]">
+              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+              <circle cx="12" cy="10" r="3" />
+            </svg>Location</h3>
+          <div id="roomsList" class="flex-1 overflow-y-auto space-y-3">
+            <!-- Rooms will be added dynamically here -->
+          </div>
+        </div>
+
+        <!-- RIGHT PANEL: Schedule Table -->
+        <div class="flex-1 bg-white dark:bg-[#0c1328]/70 dark:backdrop-blur-md border-[2px] border-[#10b981] dark:border-[#10b981]/25 rounded-2xl shadow-sm p-4 flex flex-col overflow-hidden">
+          <div class="flex justify-between items-center mb-4">
+            <h3 id="tableTitle" class="text-lg font-bold text-cyan-400 flex items-center gap-2"><svg viewBox="0 0 24 24"
+                width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" class="text-cyan-400">
+                <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5z" />
+                <path d="M12 12l-8-4.3 8-4.3 8 4.3" />
+              </svg>AC Sensor Schedules</h3>
+          </div>
+
+          <!-- Table Wrapper with Scroll -->
+          <div class="flex-1 overflow-auto scheduler-table-scroll">
+            <table class="w-full min-w-[900px]">
+              <thead class="sched-table-header sticky top-0">
+                <tr class="text-left text-xs font-bold text-white uppercase tracking-widest">
+                  <th class="px-6 py-4 whitespace-nowrap rounded-tl-xl">AC Sensor Name</th>
+                  <th class="px-6 py-4 whitespace-nowrap">Attached Aircon Type</th>
+                  <th class="px-6 py-4 whitespace-nowrap">Temperature</th>
+                  <th class="px-6 py-4 whitespace-nowrap">Airflow Pressure</th>
+                  <th class="px-6 py-4 whitespace-nowrap">Current State</th>
+                  <th class="px-6 py-4 whitespace-nowrap">Wake Time</th>
+                  <th class="px-6 py-4 whitespace-nowrap">Sleep Time</th>
+                  <th class="px-6 py-4 whitespace-nowrap">Send Interval</th>
+                  <th class="px-6 py-4 whitespace-nowrap rounded-tr-xl">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="schedulerTableBody" class="divide-y divide-gray-200 dark:divide-white/5 bg-white dark:bg-transparent text-gray-800 dark:text-gray-200">
+                <!-- AC Sensors will be dynamically inserted here -->
+                <tr class="text-center bg-white dark:bg-transparent">
+                  <td colspan="9" class="px-4 py-6 text-gray-500 dark:text-gray-400 font-medium">Select a room to view AC sensor schedules</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- GLOBAL NOTIFICATION POPUP -->
+  <div id="globalNotificationDialog"
+    style="display: none; position: fixed; top: 1.25rem; left: 1.25rem; background: transparent !important; background-color: transparent !important; z-index: 99999; pointer-events: none; max-width: 28rem; width: calc(100% - 2.5rem);"
+    class="flex flex-col">
+    <div class="bg-white dark:bg-[#0c1328] border-2 border-[#10b981] dark:border-[#10b981]/50 rounded-2xl p-5 shadow-2xl backdrop-blur-md pointer-events-auto">
+      <div class="flex items-center gap-3 mb-3">
+        <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2"
+          class="text-rose-500">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+          <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+        </svg>
+        <h3 class="text-xl font-bold text-[#18392B] dark:text-cyan-400">New Notification!</h3>
+      </div>
+      <p id="globalNotificationMessage" class="text-gray-700 dark:text-gray-200 text-sm font-medium mb-5 leading-relaxed">A scheduled message has been triggered.</p>
+      <div class="flex gap-3">
+        <a href="Notification.html"
+          class="flex-1 px-4 py-2 bg-[#10b981] hover:bg-emerald-400 text-white font-bold rounded-xl text-sm transition-colors text-center shadow-md border-0 cursor-pointer">
+          View Notifications
+        </a>
+        <button id="dismissNotificationBtn"
+          class="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-800 dark:text-gray-200 font-bold rounded-xl text-sm transition-colors border-0 cursor-pointer">
+          Dismiss
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sensor Logs Engine (PocketBase) -->
+  <script src="./js/pocketbase.umd.js"></script>
+  <script>
+    if (!window.PocketBase) {
+      document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/pocketbase/0.26.2/pocketbase.umd.js"><\/script>');
+    }
+  </script>
+  <!-- Cloud Database Engine (Supabase) -->
+  <script src="./js/supabase.umd.js"></script>
+  <script>
+    if (!window.supabase) {
+      document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"><\/script>');
+    }
+  </script>
+  <script src="./js/supabase-client.js"></script>
+  <script src="./js/node-sync.js"></script>
+  <script src="./js/shared.js"></script>
+  <script src="./js/global-notifications.js"></script>
+  <script src="./js/sidebar.js"></script>
+  <script src="./js/scheduler.js?v=12"></script>
+</body>
+
+</html>
+
+
+
+
+
+
+
+
+
+
+

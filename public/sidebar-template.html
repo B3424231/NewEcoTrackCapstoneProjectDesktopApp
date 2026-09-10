@@ -1,0 +1,111 @@
+<!-- SIDEBAR TEMPLATE -->
+<!-- Copy and paste this code into any page that needs the sidebar -->
+
+<!-- Floating Expand Button (appears when collapsed) -->  
+<aside id="sidebar" class="w-64 glass-sidebar flex flex-col">
+  <style>
+    #sidebar .nav-link svg,
+    #sidebar .nav-link svg.text-cyan-400,
+    .glass-sidebar .nav-link svg,
+    .glass-sidebar .nav-link svg.text-cyan-400,
+    html:not(.dark) #sidebar .nav-link svg,
+    html:not(.dark) .glass-sidebar .nav-link svg,
+    html:not(.dark) #sidebar svg.text-cyan-400,
+    html:not(.dark) .glass-sidebar svg.text-cyan-400 {
+      color: #22d3ee !important;
+      stroke: #22d3ee !important;
+    }
+    #sidebar .sidebar-title,
+    #sidebar .sidebar-title span,
+    .glass-sidebar .sidebar-title,
+    .glass-sidebar .sidebar-title span,
+    html:not(.dark) #sidebar .sidebar-title,
+    html:not(.dark) .glass-sidebar .sidebar-title,
+    html:not(.dark) #sidebar .sidebar-title span,
+    html:not(.dark) .glass-sidebar .sidebar-title span {
+      color: #22d3ee !important;
+    }
+    #sidebar .sidebar-subtitle,
+    .glass-sidebar .sidebar-subtitle,
+    html:not(.dark) #sidebar .sidebar-subtitle,
+    html:not(.dark) .glass-sidebar .sidebar-subtitle {
+      color: #94a3b8 !important;
+    }
+  </style>
+  <div class="p-6 border-b border-white/5 flex items-center justify-between flex-shrink-0 sidebar-header">
+    <div class="flex-1 sidebar-content">
+      <h1 class="text-2xl font-bold text-cyan-400 flex items-center gap-2 sidebar-title"><img src="../assets/ecoTrack.png" alt="EcoTrack Icon" class="brand-logo"> <span>EcoTrack</span></h1>
+      <p class="text-xs mt-1 sidebar-subtitle" style="color: #94a3b8 !important;">v1.0 Dashboard</p>
+    </div>
+    <button id="sidebarToggle" class="p-2 rounded-lg btn-glass text-cyan-200 flex-shrink-0 sidebar-toggle">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="3" y1="6" x2="21" y2="6"/>
+        <line x1="3" y1="12" x2="21" y2="12"/>
+        <line x1="3" y1="18" x2="21" y2="18"/>
+      </svg>
+    </button>
+  </div>
+
+  <nav id="sidebarNav" class="flex-1 overflow-y-auto py-4 space-y-2 px-4 transition-all duration-300">
+    <a href="analytics.html" class="nav-link" data-tooltip="Analytics">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-cyan-400"><line x1="3" y1="20" x2="21" y2="20"/><line x1="3" y1="3" x2="3" y2="20"/><line x1="7" y1="20" x2="7" y2="12"/><line x1="12" y1="20" x2="12" y2="8"/><line x1="17" y1="20" x2="17" y2="14"/></svg>
+      <span>Analytics</span>
+    </a>
+    <a href="telemetry.html" class="nav-link" data-tooltip="Telemetry">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-cyan-400"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/><path d="M12 6c-3.31 0-6 2.69-6 6m12 0c0-3.31-2.69-6-6-6m0 8a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"/></svg>
+      <span>Telemetry</span>
+    </a>
+    <a href="scheduler.html" class="nav-link" data-tooltip="Sensor Scheduler">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-cyan-400"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      <span>Sensor Scheduler</span>
+    </a>
+    <a href="rules.html" class="nav-link" data-tooltip="Rules Management">
+     <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-cyan-400"><path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5z"/><path d="M12 12l-8-4.3 8-4.3 8 4.3"/></svg>
+      <span>Rules Management</span>
+    </a>
+    <a href="Notification.html?v=4" class="nav-link relative" data-tooltip="Notification">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-cyan-400"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+      <span>Notification</span>
+      <span id="notificationBadge" class="notif-badge hidden bg-red-600 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">0</span>
+    </a>
+    <a href="logs.html" class="nav-link" data-tooltip="Sensor Log">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-cyan-400"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      <span>Sensor Log</span>
+    </a>
+    <a href="staff.html" class="nav-link" data-tooltip="Maintenance Management">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-cyan-400">
+        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+      </svg>
+      <span>Maintenance Management</span>
+    </a>
+  </nav>
+    <div class="user-container flex flex-col items-center justify-center p-4 border-t border-white/5 mt-4">
+    <a href="profile.html" class="nav-link w-full justify-center mb-2" data-tooltip="Admin Profile">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-cyan-400">
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+        <circle cx="12" cy="7" r="4" />
+      </svg>
+      <span>Admin Profile</span>
+    </a>
+    <button id="logoutButton" class="nav-link w-full justify-center" data-tooltip="Logout">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-cyan-400">
+        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+        <polyline points="16 17 21 12 16 7"/>
+        <line x1="21" y1="12" x2="9" y2="12"/>
+      </svg>
+      <span>Logout</span>
+    </button>
+  </div>
+</aside>
+
+<!-- Logout Confirmation Modal -->
+<div id="logoutModal" class="hidden fixed inset-0 bg-slate-950/70 flex items-center justify-center z-[9999]" style="display: none;">
+  <div class="glass-elevated glass-card p-6 max-w-sm w-[90%]">
+    <h3 class="text-xl font-bold text-cyan-400 mb-4">Confirm Logout</h3>
+    <p class="text-gray-300 mb-6">Are you sure you want to logout? You will be redirected to the login page.</p>
+    <div class="flex gap-3 justify-end">
+      <button id="logoutCancel" class="px-4 py-2 btn-glass rounded-lg transition-colors">Cancel</button>
+      <button id="logoutConfirm" class="px-4 py-2 bg-rose-500/20 border border-rose-400/40 text-rose-100 rounded-lg transition-colors font-semibold">Logout</button>
+    </div>
+  </div>
+</div>

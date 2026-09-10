@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sensor AC Sensor - EcoTrack</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class'
+    }
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="./styles.css?v=51">
+  <script src="./js/sidebar.js"></script>
+  <script src="./js/sidebar-loader.js?v=5"></script>
+  <script src="./js/skeletons.js?v=1"></script>
+  <script src="./js/icons.js"></script>
+  <script src="./js/supabase.umd.js"></script>
+  <script src="./js/supabase-client.js"></script>
+  <script src="./js/maintenance-modal.js?v=64"></script>
+</head>
+
+<body class="app-shell bg-gray-50 dark:bg-[#0a0f1d] transition-colors duration-200">
+  <div class="flex h-screen">
+    <!-- Sidebar will be injected here by sidebar-loader.js -->
+
+    <!-- MAIN CONTENT -->
+    <main class="flex-1 flex flex-col overflow-hidden">
+      <header
+        class="bg-white dark:bg-[#0c1328] border-b border-gray-200 dark:border-white/5 px-6 py-4 flex justify-between items-center z-10 shadow-sm relative">
+        <h2 class="text-2xl font-bold text-[#18392B] dark:text-cyan-400 flex items-center gap-2"><svg
+            viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5"
+            class="text-[#10b981]">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" />
+            <path d="M12 6c-3.31 0-6 2.69-6 6m12 0c0-3.31-2.69-6-6-6m0 8a2 2 0 1 1 0-4 2 2 0 0 1 0 4z" />
+          </svg>Telemetry</h2>
+
+      </header>
+
+      <div class="flex-1 flex overflow-hidden gap-4 p-4">
+
+        <!-- LEFT PANEL: Room/Folder Cabinet -->
+        <div class="w-80 shrink-0 glass-surface glass-panel p-4 flex flex-col overflow-hidden">
+          <h3 class="text-lg font-bold text-[#10b981] mb-3 flex items-center justify-between">
+            <span class="flex items-center gap-2"><svg viewBox="0 0 24 24" width="20" height="20" fill="none"
+                stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+                class="text-[#10b981]">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                <circle cx="12" cy="10" r="3" />
+              </svg>Location Hierarchy</span>
+            <div class="flex items-center gap-1">
+
+              <button id="clearRoomCabinetBtn"
+                class="p-1.5 bg-rose-500/15 hover:bg-rose-500/30 text-rose-500 border border-rose-400/40 rounded-lg transition-colors cursor-pointer"
+                title="Clear all AC sensors" aria-label="Clear all AC sensors">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M3 6h18" />
+                  <path d="M8 6V4h8v2" />
+                  <path d="M6 6l1 14h10l1-14" />
+                </svg>
+              </button>
+            </div>
+          </h3>
+          <div id="roomsList" class="flex-1 overflow-y-auto space-y-3 eco-slim-scrollbar pr-1">
+            <!-- Rooms will be added dynamically here -->
+          </div>
+          <button id="addBuildingBtn"
+            class="w-full mt-3 px-4 py-2.5 bg-[#10b981] hover:bg-[#059669] text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-emerald-500/20 flex items-center justify-center gap-2 cursor-pointer border-0">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+              <polyline points="9 22 9 12 15 12 15 22" />
+            </svg>Add Building
+          </button>
+        </div>
+
+        <!-- MODAL: Add Building -->
+        <div id="addBuildingModal"
+          class="modal-overlay fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-[100] flex items-center justify-center p-4 transition-opacity duration-200"
+          style="display:none;">
+          <div
+            class="bg-white dark:bg-[#0c1328] border-[2px] border-[#10b981] dark:border-[#10b981]/40 rounded-2xl shadow-sm p-6 w-96 transform transition-all duration-200 scale-100"
+            onclick="event.stopPropagation();" onmousedown="event.stopPropagation();">
+            <h3 class="text-xl font-bold text-[#18392B] dark:text-cyan-400 mb-4 flex items-center gap-2">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5"
+                class="text-[#10b981]">
+                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                <polyline points="9 22 9 12 15 12 15 22" />
+              </svg>Add New Building
+            </h3>
+            <div class="mb-4">
+              <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Building Name</label>
+              <input type="text" id="buildingNameInput" placeholder="e.g., Main Campus"
+                class="w-full px-3 py-2 bg-gray-50 dark:bg-slate-950/40 border-[2px] border-[#10b981] dark:border-[#10b981]/40 rounded-lg text-gray-800 dark:text-gray-100 placeholder-gray-400 focus:outline-none"
+                style="pointer-events: auto; cursor: text; font-size: 16px;" onmousedown="event.stopPropagation();"
+                onclick="event.stopPropagation();">
+            </div>
+            <div class="flex gap-3">
+              <button id="confirmBuildingBtn"
+                class="flex-1 px-4 py-2.5 bg-[#18392B] dark:bg-[#10b981] text-white dark:text-[#042f24] rounded-lg text-sm font-bold transition-colors hover:bg-[#10b981] dark:hover:bg-emerald-600 border-0 cursor-pointer"
+                style="pointer-events: auto;" onclick="event.stopPropagation();">Confirm</button>
+              <button id="cancelBuildingBtn"
+                class="flex-1 px-4 py-2.5 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-white/20 rounded-lg text-sm font-bold transition-colors hover:bg-gray-200 dark:hover:bg-slate-700 cursor-pointer"
+                style="pointer-events: auto;" onclick="event.stopPropagation();">Cancel</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- MODAL: Add Floor -->
+        <div id="addFloorModal"
+          class="modal-overlay fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-[100] flex items-center justify-center p-4 transition-opacity duration-200"
+          style="display:none;">
+          <div
+            class="bg-white dark:bg-[#0c1328] border-[2px] border-[#10b981] dark:border-[#10b981]/40 rounded-2xl shadow-sm p-6 w-96 transform transition-all duration-200 scale-100"
+            onclick="event.stopPropagation();" onmousedown="event.stopPropagation();">
+            <h3 class="text-xl font-bold text-[#18392B] dark:text-cyan-400 mb-4 flex items-center gap-2">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5"
+                class="text-[#10b981]">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>Add New Floor
+            </h3>
+            <div class="mb-4">
+              <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Floor Name</label>
+              <input type="text" id="floorNameInput" placeholder="e.g., First Floor"
+                class="w-full px-3 py-2 bg-gray-50 dark:bg-slate-950/40 border-[2px] border-[#10b981] dark:border-[#10b981]/40 rounded-lg text-gray-800 dark:text-gray-100 placeholder-gray-400 focus:outline-none"
+                style="pointer-events: auto; cursor: text; font-size: 16px;" onmousedown="event.stopPropagation();"
+                onclick="event.stopPropagation();">
+            </div>
+            <div class="flex gap-3">
+              <button id="confirmFloorBtn"
+                class="flex-1 px-4 py-2.5 bg-[#18392B] dark:bg-[#10b981] text-white dark:text-[#042f24] rounded-lg text-sm font-bold transition-colors hover:bg-[#10b981] dark:hover:bg-emerald-600 border-0 cursor-pointer"
+                style="pointer-events: auto;" onclick="event.stopPropagation();">Confirm</button>
+              <button id="cancelFloorBtn"
+                class="flex-1 px-4 py-2.5 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-white/20 rounded-lg text-sm font-bold transition-colors hover:bg-gray-200 dark:hover:bg-slate-700 cursor-pointer"
+                style="pointer-events: auto;" onclick="event.stopPropagation();">Cancel</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- MODAL: Add Room -->
+        <div id="addRoomModal"
+          class="modal-overlay fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-[100] flex items-center justify-center p-4 transition-opacity duration-200"
+          style="display:none;">
+          <div
+            class="bg-white dark:bg-[#0c1328] border-[2px] border-[#10b981] dark:border-[#10b981]/40 rounded-2xl shadow-sm p-6 w-96 transform transition-all duration-200 scale-100"
+            onclick="event.stopPropagation();" onmousedown="event.stopPropagation();">
+            <h3 id="roomModalTitle"
+              class="text-xl font-bold text-[#18392B] dark:text-cyan-400 mb-4 flex items-center gap-2"><svg
+                viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5"
+                class="text-[#10b981]">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>Add New Room</h3>
+
+            <!-- Room Name Input -->
+            <div class="mb-4">
+              <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Room Name</label>
+              <input type="text" id="roomNameInput" placeholder="e.g., Living Room"
+                class="w-full px-3 py-2 bg-gray-50 dark:bg-slate-950/40 border-[2px] border-[#10b981] dark:border-[#10b981]/40 rounded-lg text-gray-800 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all shadow-sm"
+                style="pointer-events: auto; cursor: text; font-size: 16px;" onmousedown="event.stopPropagation();"
+                onclick="event.stopPropagation();">
+            </div>
+
+            <!-- AC Sensor Count Output Form -->
+            <div class="mb-6">
+              <div class="flex items-center justify-between mb-2">
+                <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300">AC Sensor Count</label>
+                <span class="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-500/20">Read-Only</span>
+              </div>
+              <div id="roomSensorCountDisplay"
+                class="w-full px-3.5 py-2.5 bg-gray-100/90 dark:bg-slate-950/60 border-[2px] border-gray-200 dark:border-white/10 rounded-lg flex items-center justify-between text-gray-800 dark:text-gray-100 font-semibold select-none shadow-inner transition-colors">
+                <div class="flex items-center gap-2.5">
+                  <div class="w-7 h-7 rounded-lg bg-emerald-500/15 dark:bg-emerald-500/20 flex items-center justify-center text-[#10b981]">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                      <line x1="8" y1="21" x2="16" y2="21"></line>
+                      <line x1="12" y1="17" x2="12" y2="21"></line>
+                    </svg>
+                  </div>
+                  <div class="flex items-baseline gap-1.5">
+                    <span id="roomSensorCountValue" class="text-base font-bold text-gray-900 dark:text-emerald-400">0</span>
+                    <span id="roomSensorCountLabel" class="text-xs font-medium text-gray-500 dark:text-gray-400">sensors assigned</span>
+                  </div>
+                </div>
+              </div>
+              <p class="text-[11px] text-gray-500 dark:text-gray-400 mt-1.5 flex items-center gap-1">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-400 shrink-0">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <line x1="12" y1="16" x2="12" y2="12"></line>
+                  <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                </svg>
+                Automatically calculated from sensors placed in this room.
+              </p>
+              <input type="hidden" id="nodeLimitInput" value="10">
+            </div>
+
+            <!-- Buttons -->
+            <div class="flex gap-3">
+              <button id="confirmRoomBtn"
+                class="flex-1 px-4 py-2.5 bg-[#18392B] dark:bg-[#10b981] text-white dark:text-[#042f24] rounded-lg text-sm font-bold transition-colors hover:bg-[#10b981] dark:hover:bg-emerald-600 border-0 cursor-pointer"
+                style="pointer-events: auto;" onclick="event.stopPropagation();">Confirm</button>
+              <button id="cancelRoomBtn"
+                class="flex-1 px-4 py-2.5 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-white/20 rounded-lg text-sm font-bold transition-colors hover:bg-gray-200 dark:hover:bg-slate-700 cursor-pointer"
+                style="pointer-events: auto;" onclick="event.stopPropagation();">Cancel</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- MODAL: Clear AC Sensors Confirmation -->
+        <div id="clearNodesModal"
+          class="modal-overlay fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-[100] flex items-center justify-center p-4 transition-opacity duration-200"
+          style="display:none;">
+          <div class="glass-elevated glass-card p-6 w-full max-w-sm transform transition-all duration-200 scale-100"
+            onclick="event.stopPropagation();" onmousedown="event.stopPropagation();">
+            <div class="flex items-center gap-3 mb-4">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round" class="text-yellow-500">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z">
+                </path>
+                <line x1="12" y1="9" x2="12" y2="13"></line>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+              <h3 class="text-xl font-bold text-yellow-500">Confirm Clear</h3>
+            </div>
+            <p class="text-gray-200 text-sm mb-6">Are you sure you want to remove all AC sensors from this room?</p>
+            <div class="flex gap-3">
+              <button id="confirmClearBtn"
+                class="flex-1 px-4 py-2.5 bg-red-900/40 border border-red-500/50 text-white font-semibold rounded-lg hover:bg-red-900/60 transition-colors"
+                style="pointer-events: auto;">Confirm</button>
+              <button id="cancelClearBtn"
+                class="flex-1 px-4 py-2.5 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-white/20 font-bold rounded-lg hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors"
+                style="pointer-events: auto;">Cancel</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- MODAL: Clear Rooms Confirmation -->
+        <div id="clearRoomsModal"
+          class="modal-overlay fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-[100] flex items-center justify-center p-4 transition-opacity duration-200"
+          style="display:none;">
+          <div
+            class="bg-gray-50 dark:bg-[#0c1328] border-[2px] border-[#10b981] dark:border-[#10b981]/40 rounded-2xl shadow-sm p-6 w-full max-w-sm transform transition-all duration-200 scale-100"
+            onclick="event.stopPropagation();" onmousedown="event.stopPropagation();">
+            <h3 class="text-xl font-bold text-yellow-500 mb-4 flex items-center gap-2">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5"
+                class="text-yellow-500">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                <line x1="12" y1="9" x2="12" y2="13" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>Confirm Clear All
+            </h3>
+            <p class="text-gray-700 dark:text-gray-300 text-sm mb-6">Are you sure you want to clear all rooms and their
+              AC sensors from the cabinet?</p>
+            <div class="flex gap-3">
+              <button id="confirmClearRoomsBtn"
+                class="flex-1 px-4 py-2.5 bg-[#18392B] dark:bg-[#10b981] text-white dark:text-[#042f24] rounded-lg text-sm font-bold transition-colors hover:bg-[#10b981] dark:hover:bg-emerald-600 border-0 cursor-pointer"
+                style="pointer-events: auto;">Confirm</button>
+              <button id="cancelClearRoomsBtn"
+                class="flex-1 px-4 py-2.5 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-white/20 rounded-lg text-sm font-bold transition-colors hover:bg-gray-200 dark:hover:bg-slate-700 cursor-pointer"
+                style="pointer-events: auto;">Cancel</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- MODAL: Delete Location Confirmation -->
+        <div id="deleteLocationModal"
+          class="modal-overlay fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4 transition-opacity duration-200"
+          style="display:none;">
+          <div
+            class="bg-white dark:bg-[#0c1328] border-2 border-rose-500/50 rounded-2xl p-6 w-full max-w-sm shadow-2xl transform transition-all duration-200 scale-100"
+            onclick="event.stopPropagation();" onmousedown="event.stopPropagation();">
+            <div class="flex items-center gap-3 mb-4">
+              <div
+                class="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-500 flex items-center justify-center shrink-0 border border-rose-500/30">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+              </div>
+              <div>
+                <h3 class="text-base font-extrabold text-gray-900 dark:text-white uppercase tracking-wider">Delete
+                  Location</h3>
+                <p class="text-xs text-rose-500 font-semibold">Destructive Action</p>
+              </div>
+            </div>
+            <p id="deleteLocationMessage"
+              class="text-gray-600 dark:text-gray-300 text-xs font-medium mb-6 leading-relaxed">
+              Are you sure you want to delete <span id="deleteLocationName"
+                class="text-rose-600 dark:text-rose-400 font-bold"></span>?
+            </p>
+            <div class="flex gap-3">
+              <button id="confirmDeleteLocationBtn"
+                class="flex-1 px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl transition-all shadow-lg shadow-rose-500/25 border-0 cursor-pointer">
+                Delete Location
+              </button>
+              <button id="cancelDeleteLocationBtn"
+                class="flex-1 px-4 py-2.5 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-white/10 font-bold text-xs rounded-xl hover:bg-gray-200 dark:hover:bg-slate-700 transition-colors cursor-pointer">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- CENTER PANEL: Main AC Sensor Interface -->
+        <div class="flex-1 glass-surface glass-panel p-4 flex flex-col min-h-0 min-w-0">
+          <div class="flex justify-between items-center mb-4">
+            <h3 id="nodeInterfaceTitle" class="text-lg font-bold text-cyan-400 flex items-center gap-2"><svg
+                viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5"
+                class="text-cyan-400">
+                <rect x="4" y="2" width="16" height="20" rx="2" ry="2" />
+                <path d="M12 2V6" stroke-width="2" />
+                <line x1="2" y1="12" x2="22" y2="12" stroke-width="1" />
+              </svg>AC Sensor Interface</h3>
+            <button id="clearNodesBtn"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold transition-colors bg-red-900/40 border border-red-500/50 text-red-300 rounded-lg hover:bg-red-900/60 hover:text-white">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 6h18" />
+                <path d="M8 6V4h8v2" />
+                <path d="M6 6l1 14h10l1-14" />
+              </svg>
+              Clear All
+            </button>
+          </div>
+          <!-- Scrolling Wrapper -->
+          <div class="flex-1 overflow-y-auto pr-2 eco-slim-scrollbar">
+            <!-- AC Sensor Interface Grid -->
+            <div id="nodeInterface" class="border-2 border-dashed border-white/15 rounded-lg p-4 w-full"
+              style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; justify-items: stretch; align-items: start; width: 100%;">
+              <div class="text-center col-span-full flex items-center justify-center pointer-events-none py-8">
+                <div>
+                  <p class="text-gray-500 text-sm mb-2">Drag AC sensors here</p>
+                  <p class="text-gray-600 text-xs">AC Sensors will appear in a grid</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- MODAL: AC Sensor Detail View -->
+        <div id="nodeDetailModal" class="modal-overlay">
+          <div
+            class="glass-elevated glass-card p-6 w-full max-w-2xl modal-card max-h-[85vh] overflow-y-auto eco-slim-scrollbar">
+            <div class="flex items-start justify-between gap-4 mb-5">
+              <div>
+                <h3 id="nodeDetailModalTitle" class="text-xl font-bold text-cyan-400">AC Sensor Details</h3>
+                <p id="nodeDetailModalSubtitle" class="text-xs text-gray-400 mt-1">Full sensor information</p>
+                <p id="nodeDetailAttachedType" class="text-xs text-emerald-400 font-semibold mt-1.5">Attached Aircon
+                  Type: <span id="nodeDetailAttachedTypeName" class="text-gray-300">Not assigned</span></p>
+              </div>
+              <div class="flex items-center gap-4">
+                <div class="flex flex-col items-end justify-center hidden" id="nodeDetailRegistrationInfo">
+                  <div class="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-1">Installed Date</div>
+                  <div class="flex items-center gap-1.5 text-cyan-400 font-bold text-sm">
+                    <label for="nodeDetailModalDate" class="cursor-pointer">
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                        <line x1="16" y1="2" x2="16" y2="6" />
+                        <line x1="8" y1="2" x2="8" y2="6" />
+                        <line x1="3" y1="10" x2="21" y2="10" />
+                      </svg>
+                    </label>
+                    <input type="date" id="nodeDetailModalDate"
+                      class="bg-transparent border-none text-cyan-400 outline-none cursor-pointer p-0 text-right uppercase w-[120px] font-bold" />
+                  </div>
+                  <div class="flex items-center gap-1.5 text-gray-400 font-medium text-xs mt-0.5 pointer-events-auto">
+                    <label for="nodeDetailModalTime" class="cursor-pointer">
+                      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <polyline points="12 6 12 12 16 14" />
+                      </svg>
+                    </label>
+                    <input type="time" id="nodeDetailModalTime"
+                      class="bg-transparent border-none text-gray-400 outline-none cursor-pointer p-0 text-right w-[80px]" />
+                  </div>
+                </div>
+                <button id="closeNodeDetailModalBtn"
+                  class="text-gray-400 hover:text-gray-200 text-2xl leading-none">✕</button>
+              </div>
+            </div>
+
+            <!-- Aircon Type Selector -->
+            <div class="mb-5 relative group">
+              <label for="nodeAirconTypeSelect"
+                class="text-xs font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap block mb-1">Attached
+                Aircon Type</label>
+              <select id="nodeAirconTypeSelect"
+                class="w-full bg-white border border-emerald-500/40 text-gray-800 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-emerald-400 cursor-pointer">
+                <option value="">-- Select Type --</option>
+              </select>
+            </div>
+
+            <div id="nodeDetailModalContent" class="node-detail-modal-body"></div>
+          </div>
+        </div>
+
+        <!-- RIGHT PANEL: Available AC Sensors -->
+        <div class="w-80 glass-surface glass-panel p-6 flex flex-col overflow-hidden">
+          <h3 class="text-lg font-bold text-cyan-400 mb-3 flex items-center gap-2"><svg viewBox="0 0 24 24" width="20"
+              height="20" fill="none" stroke="currentColor" stroke-width="1.5" class="text-cyan-400">
+              <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5z" />
+              <path d="M12 12l-8-4.3 8-4.3 8 4.3" />
+            </svg>Available AC Sensors</h3>
+          <div id="availableNodesList" class="flex-1 overflow-y-auto space-y-3 eco-slim-scrollbar pr-1">
+            <!-- AC Sensors will be dynamically added here -->
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- GLOBAL NOTIFICATION POPUP -->
+  <div id="globalNotificationDialog"
+    style="display: none; position: fixed; top: 1.25rem; left: 1.25rem; background: transparent !important; background-color: transparent !important; z-index: 99999; pointer-events: none; max-width: 28rem; width: calc(100% - 2.5rem);"
+    class="flex flex-col">
+    <div
+      class="bg-white dark:bg-[#0c1328] border-2 border-[#10b981] dark:border-[#10b981]/50 rounded-2xl p-5 shadow-2xl backdrop-blur-md pointer-events-auto">
+      <div class="flex items-center gap-3 mb-3">
+        <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2"
+          class="text-rose-500">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+          <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+        </svg>
+        <h3 class="text-xl font-bold text-[#18392B] dark:text-cyan-400">New Notification!</h3>
+      </div>
+      <p id="globalNotificationMessage"
+        class="text-gray-700 dark:text-gray-200 text-sm font-medium mb-5 leading-relaxed">A scheduled message has been
+        triggered.</p>
+      <div class="flex gap-3">
+        <a href="Notification.html"
+          class="flex-1 px-4 py-2 bg-[#10b981] hover:bg-emerald-400 text-white font-bold rounded-xl text-sm transition-colors text-center shadow-md border-0 cursor-pointer">
+          View Notifications
+        </a>
+        <button id="dismissNotificationBtn"
+          class="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-800 dark:text-gray-200 font-bold rounded-xl text-sm transition-colors border-0 cursor-pointer">
+          Dismiss
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sensor Logs Engine (PocketBase) -->
+  <script src="./js/pocketbase.umd.js"></script>
+  <script>
+    if (!window.PocketBase) {
+      document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/pocketbase/0.26.2/pocketbase.umd.js"><\/script>');
+    }
+  </script>
+  <!-- Cloud Database Engine (Supabase) -->
+  <script src="./js/supabase.umd.js"></script>
+  <script>
+    if (!window.supabase) {
+      document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"><\/script>');
+    }
+  </script>
+  <script src="./js/supabase-client.js"></script>
+  <script src="./js/node-sync.js"></script>
+  <script src="./js/shared.js"></script>
+  <script src="./js/global-notifications.js"></script>
+  <script src="./js/sidebar.js"></script>
+  <script src="./js/telemetry-new.js"></script>
+</body>
+
+</html>

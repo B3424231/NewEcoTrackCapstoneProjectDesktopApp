@@ -1,0 +1,55 @@
+{
+  "name": "ecotrack",
+  "version": "1.0.0",
+  "description": "EcoTrack - For Aircon Monitoring and Analysis",
+  "main": "src/main.js",
+  "homepage": "",
+  "scripts": {
+    "start": "electron .",
+    "dev": "concurrently \"npm run electron-dev\" \"npm run python-dev\"",
+    "electron-dev": "electron . --watch",
+    "python-dev": "venv\\Scripts\\python.exe backend/app.py",
+    "test": "node public/js/data-tests.js",
+    "transfer:sqlite": "node scripts/transfer_supabase_to_sqlite.js",
+    "test:all": "concurrently \"npm run dev\" \"npm run test\"",
+    "build": "electron-builder",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "keywords": [
+    "ecotrack",
+    "electron",
+    "python",
+    "desktop"
+  ],
+  "author": "Rey O. Solamillo",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^7.0.0",
+    "electron": "^29.4.6",
+    "electron-builder": "^24.0.0",
+    "electron-is-dev": "^2.0.0"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.112.4",
+    "axios": "^1.4.0",
+    "pocketbase": "^0.26.8"
+  },
+  "build": {
+    "appId": "com.ecotrack.app",
+    "productName": "EcoTrack",
+    "directories": {
+      "buildResources": "public"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

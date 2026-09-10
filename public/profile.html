@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Profile - EcoTrack</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class'
+    }
+  </script>
+  <link rel="stylesheet" href="./styles.css?v=48">
+  <script src="./js/sidebar.js"></script>
+  <script src="./js/sidebar-loader.js?v=5"></script>
+
+  <!-- Cloud Database Engine (Supabase) -->
+  <script src="./js/supabase.umd.js"></script>
+  <script>
+    if (!window.supabase) {
+      document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"><\/script>');
+    }
+  </script>
+  <script src="./js/supabase-client.js"></script>
+  <script src="./js/shared.js"></script>
+  <script src="./js/maintenance-modal.js?v=60"></script>
+</head>
+<body class="app-shell bg-gray-50 dark:bg-[#0a0f1d] transition-colors duration-200">
+  <div class="flex h-screen">
+    <!-- Sidebar injected here -->
+    <main class="flex-1 flex flex-col overflow-hidden">
+      <header class="bg-white dark:bg-[#0c1328] border-b border-gray-200 dark:border-white/5 px-6 py-4 flex justify-between items-center z-10 shadow-sm relative">
+        <h2 class="text-2xl font-bold text-[#18392B] dark:text-cyan-400 flex items-center gap-2">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-[#10b981]">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+            <circle cx="12" cy="7" r="4" />
+          </svg>
+          Admin Profile
+        </h2>
+        <button id="editProfileBtn" class="px-4 py-2 border border-gray-200 dark:border-white/10 rounded-lg text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-800 flex items-center gap-2 transition-colors">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#10b981" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          Edit Profile
+        </button>
+      </header>
+
+      <div class="flex-1 overflow-auto eco-slim-scrollbar p-6 bg-gray-50 dark:bg-[#0a0f1d]">
+        <div class="max-w-[1200px] mx-auto space-y-6">
+          
+          <!-- Banner Card -->
+          <div class="bg-white dark:bg-[#0c1328]/70 dark:backdrop-blur-md rounded-2xl shadow-sm border-2 border-emerald-200 dark:border-emerald-950/60 overflow-hidden relative flex flex-col md:flex-row p-8 items-start gap-8">
+            <!-- Top decorative curve -->
+            <div class="absolute top-0 left-0 right-0 h-32 bg-gradient-to-r from-emerald-50/50 to-teal-50/50 dark:from-emerald-950/25 dark:to-teal-950/25 opacity-60"></div>
+            
+            <!-- Subtle leaf patterns via SVG -->
+            <svg class="absolute right-0 top-0 text-emerald-100/50 dark:text-[#10b981]/5 w-64 h-64 -translate-y-10 translate-x-10 pointer-events-none" viewBox="0 0 200 200" fill="currentColor">
+              <path d="M20,100 Q60,20 180,10 Q140,90 100,160 Q60,230 20,100 Z" />
+              <path d="M60,130 Q100,60 190,50 Q160,120 120,180 Q80,240 60,130 Z" opacity="0.6"/>
+            </svg>
+
+            <div class="relative flex items-center gap-6 w-full md:w-auto md:flex-1">
+              <div class="relative group cursor-pointer" id="avatarContainer" title="Click to upload profile photo">
+                <div class="w-32 h-32 rounded-full bg-emerald-100/50 dark:bg-emerald-950/20 border-4 border-white dark:border-[#0c1328] flex items-center justify-center text-[#10b981] shadow-sm overflow-hidden relative">
+                  <svg id="profileAvatarSvg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" class="transition-transform duration-300">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                    <circle cx="12" cy="7" r="4" />
+                  </svg>
+                  <img id="profileAvatarImg" class="w-full h-full object-cover hidden" alt="Avatar">
+                  <div class="absolute inset-0 bg-black/45 rounded-full flex flex-col items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" class="mb-1">
+                      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                      <circle cx="12" cy="13" r="4"></circle>
+                    </svg>
+                    <span class="text-[10px] font-bold tracking-wider uppercase">Upload</span>
+                  </div>
+                </div>
+                <input type="file" id="avatarFileInput" accept="image/*" class="hidden">
+              </div>
+              <div>
+                <h2 id="profile-name" class="text-2xl font-bold text-[#18392B] dark:text-[#a7f3d0]">Administrator</h2>
+                <span id="profile-role-badge" class="inline-block mt-1 px-3 py-1 bg-emerald-50 dark:bg-emerald-950/40 text-[#10b981] text-xs font-semibold rounded-full mb-4">System Administrator</span>
+                
+                <div class="space-y-2 text-sm text-gray-500 dark:text-gray-400 font-medium">
+                  <div class="flex items-center gap-2"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#10b981" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> <span id="profile-email">admin@ecotrack.com</span></div>
+                  <div class="flex items-center gap-2"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#10b981" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> Joined on <span id="profile-joined">May 15, 2024</span></div>
+                  <div class="flex items-center gap-2"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#10b981" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg> <span id="profile-location">Philippines</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="relative w-full md:w-1/3 flex flex-col space-y-6 md:pl-10 md:border-l border-gray-100 dark:border-white/5">
+              <div class="flex items-start gap-4">
+                <div class="mt-1 w-8 h-8 rounded-full bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center text-[#10b981] shrink-0">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                </div>
+                <div>
+                  <p class="text-xs font-bold text-gray-800 dark:text-gray-200">Role</p>
+                  <p id="profile-role-text" class="text-sm font-medium text-gray-500 dark:text-gray-400">Administrator</p>
+                </div>
+              </div>
+              
+              <div class="flex items-start gap-4">
+                <div class="mt-1 w-8 h-8 rounded-full bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center text-[#10b981] shrink-0">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                </div>
+                <div>
+                  <p class="text-xs font-bold text-gray-800 dark:text-gray-200">Permissions</p>
+                  <p id="profile-permissions" class="text-sm font-medium text-gray-500 dark:text-gray-400">Full Access</p>
+                </div>
+              </div>
+              
+              <div class="flex items-start gap-4">
+                <div class="mt-1 w-8 h-8 rounded-full bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center text-[#10b981] shrink-0">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                </div>
+                <div>
+                  <p class="text-xs font-bold text-gray-800 dark:text-gray-200">Last Login</p>
+                  <p id="profile-last-login" class="text-sm font-medium text-gray-500 dark:text-gray-400">May 19, 2024 &bull; 09:42 AM</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 3 Cards Grid -->
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <!-- Account Overview -->
+            <div class="bg-white dark:bg-[#0c1328]/70 dark:backdrop-blur-md rounded-2xl shadow-sm border-2 border-emerald-200 dark:border-emerald-950/60 p-6 flex flex-col h-full">
+              <div class="flex items-center gap-2 mb-6">
+                <div class="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center text-[#10b981]">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                </div>
+                <h3 class="font-bold text-gray-800 dark:text-gray-100 text-sm">Account Overview</h3>
+              </div>
+              
+              <ul class="space-y-4 text-sm font-semibold flex-1">
+                <li class="flex justify-between items-center py-2">
+                  <span class="text-gray-500 dark:text-gray-400 font-medium">Username</span>
+                  <span id="overview-username" class="text-gray-800 dark:text-gray-200">admin</span>
+                </li>
+                <li class="flex justify-between items-center py-2">
+                  <span class="text-gray-500 dark:text-gray-400 font-medium">Email</span>
+                  <span id="overview-email" class="text-gray-800 dark:text-gray-200">admin@ecotrack.com</span>
+                </li>
+                <li class="flex justify-between items-center py-2.5">
+                  <span class="text-gray-600 dark:text-gray-300 font-semibold text-sm flex items-center gap-2">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" class="text-[#10b981]">
+                      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                    </svg>
+                    Dark Mode
+                  </span>
+                  <div class="flex items-center gap-3">
+                    <span id="dark-mode-status-text" class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-300 dark:bg-emerald-950/70 dark:text-emerald-400 dark:border-emerald-500/40 transition-colors shadow-sm">Light Mode</span>
+                    <label class="relative inline-flex items-center cursor-pointer select-none group" title="Toggle Dark Mode">
+                      <input type="checkbox" class="sr-only" id="dark-mode-toggle-ui">
+                      <div class="theme-toggle-track">
+                        <span class="theme-toggle-knob"></span>
+                      </div>
+                    </label>
+                  </div>
+                </li>
+                <li class="flex justify-between items-center py-2">
+                  <span class="text-gray-500 dark:text-gray-400 font-medium">Status</span>
+                  <span id="overview-status" class="px-3 py-1 bg-emerald-50 dark:bg-emerald-950/40 text-[#10b981] text-xs font-bold rounded-full">Active</span>
+                </li>
+              </ul>
+            </div>
+
+            <!-- Security -->
+            <div class="bg-white dark:bg-[#0c1328]/70 dark:backdrop-blur-md rounded-2xl shadow-sm border-2 border-emerald-200 dark:border-emerald-950/60 p-6 flex flex-col h-full">
+              <div class="flex items-center gap-2 mb-6">
+                <div class="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center text-[#10b981]">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                </div>
+                <h3 class="font-bold text-gray-800 dark:text-gray-100 text-sm">Security</h3>
+              </div>
+              
+              <ul class="space-y-4 text-sm font-semibold flex-1">
+                <li class="flex justify-between items-center py-2">
+                  <span class="text-gray-500 dark:text-gray-400 font-medium">Password</span>
+                  <div class="flex items-center gap-3">
+                    <span class="text-gray-400 tracking-[0.2em] font-normal">••••••••</span>
+                    <button id="changePasswordBtn" class="text-[#10b981] dark:text-emerald-400 hover:text-emerald-700 font-bold text-xs bg-emerald-50 dark:bg-emerald-950/40 px-3 py-1 rounded transition-colors cursor-pointer border-0">Change</button>
+                  </div>
+                </li>
+                <li class="flex justify-between items-center py-2">
+                  <span class="text-gray-500 dark:text-gray-400 font-medium">Session Timeout</span>
+                  <select id="session-timeout-select" class="bg-gray-50 dark:bg-slate-950/40 border border-gray-200 dark:border-white/10 rounded-lg px-2.5 py-1 text-xs font-bold text-gray-800 dark:text-gray-200 outline-none focus:border-emerald-500 cursor-pointer hover:border-emerald-300 transition-colors">
+                    <option value="15 minutes">15 minutes</option>
+                    <option value="30 minutes">30 minutes</option>
+                    <option value="60 minutes">60 minutes</option>
+                    <option value="Never">Never</option>
+                  </select>
+                </li>
+                <li class="flex justify-between items-center py-2">
+                  <span class="text-gray-500 dark:text-gray-400 font-medium">Login Activity</span>
+                  <button id="viewHistoryBtn" class="text-[#10b981] dark:text-emerald-400 hover:text-emerald-700 font-bold text-xs bg-emerald-50 dark:bg-emerald-950/40 px-3 py-1 rounded transition-colors cursor-pointer border-0">View History</button>
+                </li>
+              </ul>
+            </div>
+
+            <!-- Aircon Types -->
+            <div class="bg-white dark:bg-[#0c1328]/70 dark:backdrop-blur-md rounded-2xl shadow-sm border-2 border-emerald-200 dark:border-emerald-950/60 p-6 flex flex-col h-full">
+              <div class="flex items-center gap-2 mb-6">
+                <div class="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center text-[#10b981]">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/><path d="M11.5 6v6"/></svg>
+                </div>
+                <h3 class="font-bold text-gray-800 dark:text-gray-100 text-sm">Aircon Types</h3>
+              </div>
+              
+              <ul class="space-y-4 text-sm font-semibold flex-1">
+                <li class="flex justify-between items-center py-2">
+                  <span class="text-gray-500 dark:text-gray-400 font-medium">Available Types</span>
+                  <button id="viewAirconTypesBtn" class="text-[#10b981] dark:text-emerald-400 hover:text-emerald-700 font-bold text-xs bg-emerald-50 dark:bg-emerald-950/40 px-3 py-1 rounded transition-colors cursor-pointer border-0">View All</button>
+                </li>
+                <li class="flex justify-between items-center py-2">
+                  <span class="text-gray-500 dark:text-gray-400 font-medium">Add New Type</span>
+                  <button id="addAirconTypeBtn" class="text-[#10b981] dark:text-emerald-400 hover:text-emerald-700 font-bold text-xs bg-emerald-50 dark:bg-emerald-950/40 px-3 py-1 rounded transition-colors cursor-pointer border-0">Add</button>
+                </li>
+              </ul>
+            </div>
+          </div>
+          
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Modals -->
+  <!-- Edit Profile Modal -->
+  <div id="editProfileModal" class="hidden fixed inset-0 bg-slate-950/60 dark:bg-slate-950/80 z-50 flex items-center justify-center">
+    <div class="bg-white dark:bg-[#0c1328] rounded-2xl w-[500px] shadow-xl border-2 border-transparent dark:border-[#10b981]/20 overflow-hidden p-6 relative">
+      <button class="close-modal-btn absolute top-4 right-4 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 border-0 bg-transparent">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+      <h3 class="text-xl font-bold text-[#18392B] dark:text-cyan-400 mb-4">Edit Profile</h3>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Full Name</label>
+          <input type="text" id="edit-name" class="w-full border border-gray-300 dark:border-white/10 rounded-lg px-3 py-2 text-sm bg-white dark:bg-slate-950/40 text-gray-800 dark:text-gray-100 focus:outline-none focus:border-emerald-500" value="Administrator">
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Role</label>
+          <input type="text" id="edit-role" class="w-full border border-gray-300 dark:border-white/10 rounded-lg px-3 py-2 text-sm bg-white dark:bg-slate-950/40 text-gray-800 dark:text-gray-100 focus:outline-none focus:border-emerald-500" value="System Administrator">
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Email Address</label>
+          <input type="email" id="edit-email" class="w-full border border-gray-300 dark:border-white/10 rounded-lg px-3 py-2 text-sm bg-white dark:bg-slate-950/40 text-gray-800 dark:text-gray-100 focus:outline-none focus:border-emerald-500" value="admin@ecotrack.com">
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Location</label>
+          <input type="text" id="edit-location" class="w-full border border-gray-300 dark:border-white/10 rounded-lg px-3 py-2 text-sm bg-white dark:bg-slate-950/40 text-gray-800 dark:text-gray-100 focus:outline-none focus:border-emerald-500" value="Philippines">
+        </div>
+        <div class="flex gap-3 pt-2">
+          <button class="close-modal-btn flex-1 bg-white dark:bg-slate-900 border border-gray-300 dark:border-white/10 text-gray-700 dark:text-gray-200 font-bold py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">Cancel</button>
+          <button id="save-profile-btn" class="flex-1 bg-[#10b981] hover:bg-emerald-600 text-white font-bold py-2 rounded-lg transition-colors border-0">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Change Password Modal -->
+  <div id="changePasswordModal" class="hidden fixed inset-0 bg-slate-950/60 dark:bg-slate-950/80 z-50 flex items-center justify-center">
+    <div class="bg-white dark:bg-[#0c1328] rounded-2xl w-[400px] shadow-xl border-2 border-transparent dark:border-[#10b981]/20 overflow-hidden p-6 relative">
+      <button class="close-modal-btn absolute top-4 right-4 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 border-0 bg-transparent">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+      <h3 class="text-xl font-bold text-[#18392B] dark:text-cyan-400 mb-4">Change Password</h3>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Current Password</label>
+          <div class="relative flex items-center">
+            <input type="password" id="current-password" class="w-full border border-gray-300 dark:border-white/10 rounded-lg px-3 pr-10 py-2 text-sm bg-white dark:bg-slate-950/40 text-gray-800 dark:text-gray-100 focus:outline-none focus:border-emerald-500" placeholder="••••••••">
+            <button type="button" class="password-toggle-btn absolute right-2.5 p-1 text-gray-400 hover:text-emerald-500 transition-colors border-0 bg-transparent cursor-pointer flex items-center justify-center" aria-label="Toggle password visibility" title="Show/Hide Password">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">New Password</label>
+          <div class="relative flex items-center">
+            <input type="password" id="new-password" class="w-full border border-gray-300 dark:border-white/10 rounded-lg px-3 pr-10 py-2 text-sm bg-white dark:bg-slate-950/40 text-gray-800 dark:text-gray-100 focus:outline-none focus:border-emerald-500" placeholder="••••••••">
+            <button type="button" class="password-toggle-btn absolute right-2.5 p-1 text-gray-400 hover:text-emerald-500 transition-colors border-0 bg-transparent cursor-pointer flex items-center justify-center" aria-label="Toggle password visibility" title="Show/Hide Password">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Confirm New Password</label>
+          <div class="relative flex items-center">
+            <input type="password" id="confirm-password" class="w-full border border-gray-300 dark:border-white/10 rounded-lg px-3 pr-10 py-2 text-sm bg-white dark:bg-slate-950/40 text-gray-800 dark:text-gray-100 focus:outline-none focus:border-emerald-500" placeholder="••••••••">
+            <button type="button" class="password-toggle-btn absolute right-2.5 p-1 text-gray-400 hover:text-emerald-500 transition-colors border-0 bg-transparent cursor-pointer flex items-center justify-center" aria-label="Toggle password visibility" title="Show/Hide Password">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <button id="update-password-btn" class="w-full bg-[#10b981] hover:bg-emerald-600 text-white font-bold py-2 rounded-lg mt-4 transition-colors border-0">Update Password</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- View History Modal -->
+  <div id="viewHistoryModal" class="hidden fixed inset-0 bg-slate-950/60 dark:bg-slate-950/80 z-50 flex items-center justify-center">
+    <div class="bg-white dark:bg-[#0c1328] rounded-2xl w-[500px] shadow-xl border-2 border-transparent dark:border-[#10b981]/20 overflow-hidden p-6 relative">
+      <button class="close-modal-btn absolute top-4 right-4 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 border-0 bg-transparent">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+      <h3 class="text-xl font-bold text-[#18392B] dark:text-cyan-400 mb-4">Login History</h3>
+      <div class="max-h-[300px] overflow-auto eco-slim-scrollbar pr-2">
+        <ul id="login-history-list" class="space-y-3">
+          <!-- Populated via JS -->
+        </ul>
+      </div>
+      <button id="clear-history-btn" class="w-full mt-4 bg-red-50 dark:bg-red-950/20 border border-red-500/10 hover:bg-red-100 dark:hover:bg-red-950/40 text-red-600 dark:text-red-400 font-bold py-2 rounded-lg transition-colors">Clear History</button>
+    </div>
+  </div>
+
+  <!-- View Aircon Types Modal -->
+  <div id="viewAirconTypesModal" class="hidden fixed inset-0 bg-slate-950/60 dark:bg-slate-950/80 z-50 flex items-center justify-center">
+    <div class="bg-white dark:bg-[#0c1328] rounded-2xl w-[500px] shadow-xl border-2 border-transparent dark:border-[#10b981]/20 overflow-hidden p-6 relative">
+      <button class="close-modal-btn absolute top-4 right-4 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 border-0 bg-transparent">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+      <h3 class="text-xl font-bold text-[#18392B] dark:text-cyan-400 mb-4">Available Aircon Types</h3>
+      <div class="max-h-[300px] overflow-auto eco-slim-scrollbar pr-2">
+        <ul id="aircon-types-list" class="space-y-3">
+          <!-- Populated via JS -->
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Aircon Type Modal -->
+  <div id="addAirconTypeModal" class="hidden fixed inset-0 bg-slate-950/60 dark:bg-slate-950/80 z-50 flex items-center justify-center">
+    <div class="bg-white dark:bg-[#0c1328] rounded-2xl w-[400px] shadow-xl border-2 border-transparent dark:border-[#10b981]/20 overflow-hidden p-6 relative">
+      <button class="close-modal-btn absolute top-4 right-4 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 border-0 bg-transparent">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+      <h3 class="text-xl font-bold text-[#18392B] dark:text-cyan-400 mb-4">Add Aircon Type</h3>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Type Name</label>
+          <input type="text" id="new-aircon-name" class="w-full border border-gray-300 dark:border-white/10 rounded-lg px-3 py-2 text-sm bg-white dark:bg-slate-950/40 text-gray-800 dark:text-gray-100 focus:outline-none focus:border-emerald-500" placeholder="e.g. Split Type">
+        </div>
+        <button id="save-aircon-type-btn" class="w-full bg-[#10b981] hover:bg-emerald-600 text-white font-bold py-2 rounded-lg mt-4 transition-colors border-0">Add Type</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- GLOBAL NOTIFICATION POPUP -->
+  <div id="globalNotificationDialog"
+    style="display: none; position: fixed; top: 1.25rem; left: 1.25rem; background: transparent !important; background-color: transparent !important; z-index: 99999; pointer-events: none; max-width: 28rem; width: calc(100% - 2.5rem);"
+    class="flex flex-col">
+    <div class="bg-white dark:bg-[#0c1328] border-2 border-[#10b981] dark:border-[#10b981]/50 rounded-2xl p-5 shadow-2xl backdrop-blur-md pointer-events-auto">
+      <div class="flex items-center gap-3 mb-3">
+        <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2"
+          class="text-rose-500">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+          <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+        </svg>
+        <h3 class="text-xl font-bold text-[#18392B] dark:text-cyan-400">New Notification!</h3>
+      </div>
+      <p id="globalNotificationMessage" class="text-gray-700 dark:text-gray-200 text-sm font-medium mb-5 leading-relaxed">A scheduled message has been triggered.</p>
+      <div class="flex gap-3">
+        <a href="Notification.html"
+          class="flex-1 px-4 py-2 bg-[#10b981] hover:bg-emerald-400 text-white font-bold rounded-xl text-sm transition-colors text-center shadow-md border-0 cursor-pointer">
+          View Notifications
+        </a>
+        <button id="dismissNotificationBtn"
+          class="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-800 dark:text-gray-200 font-bold rounded-xl text-sm transition-colors border-0 cursor-pointer">
+          Dismiss
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="./js/global-notifications.js"></script>
+  <script src="./js/profile.js"></script>
+</body>
+</html>
