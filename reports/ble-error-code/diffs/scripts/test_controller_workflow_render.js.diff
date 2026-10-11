@@ -1,0 +1,29 @@
+--- before/scripts/test_controller_workflow_render.js
++++ scripts/test_controller_workflow_render.js
+@@ -1,6 +1,6 @@
+ // Isolated Chromium production-component checks; no account or network.
+ const {app,BrowserWindow}=require('electron'),fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+-const root=path.resolve(__dirname,'..'),out=path.join(root,'reports/step3-bluetooth');
++const root=path.resolve(__dirname,'..'),out=path.join(root,'reports/ble-error-code');
+ app.setPath('userData',path.join(root,'scratch/controller-workflow-electron'));app.disableHardwareAcceleration();app.on('window-all-closed',()=>{});
+ const read=file=>fs.readFileSync(path.join(root,file),'utf8'),html=read('public/nodes.html'),control=read('public/control.html');
+ const section=(source,start,end)=>{const a=source.indexOf(start),b=source.indexOf(end,a);assert(a>=0&&b>a,start);return source.slice(a,b);};
+@@ -14,6 +14,7 @@
+  const tailwindPath=path.join(root,'scratch/step3-qa-tailwind.js'),cachedCss=path.join(out,'qa-tailwind.css');
+  if(fs.existsSync(tailwindPath))await win.webContents.executeJavaScript(read('scratch/step3-qa-tailwind.js')+"\nwindow.tailwind.config={darkMode:'class'};true;");
+  else if(fs.existsSync(cachedCss))await win.webContents.executeJavaScript("const qaStyle=document.createElement('style');qaStyle.textContent="+JSON.stringify(fs.readFileSync(cachedCss,'utf8'))+";document.head.appendChild(qaStyle);true;");
++ await win.webContents.executeJavaScript("(async()=>{Object.defineProperty(navigator,'bluetooth',{configurable:true,value:{requestDevice:async()=>({gatt:{connect:async()=>{const error=new DOMException('GATT connection failed.','NetworkError');window.__qaNativeCode=error.code;throw error;}}})}});\n"+read('public/js/hardware-cloud.js')+"\nwindow.__qaBluetoothError=await EcoTrackHardwareCloud.connect().then(()=>{throw Error('Unexpected Bluetooth success');},error=>error);return true;})();");
+  const startup=[
+  read('public/js/controller-locations.js'),read('public/js/aircon-state.js'),
+  "let currentModalStep=3,selectedBleDevice={nodeId:'esp32s3-fixture',info:{device_id:'esp32s3-fixture'}},wifiConfirmedFor='Fixture network';",
+@@ -30,6 +31,10 @@
+  await win.webContents.executeJavaScript(startup);
+  const results=await win.webContents.executeJavaScript(`(async()=>{
+  const checks=[];function check(value,message){if(!value)throw Error(message);checks.push(message);}
++ check(typeof window.__qaNativeCode==='number'&&window.__qaBluetoothError.code==='BLE_CONNECTION_FAILED','Actual Chromium DOMException numeric code does not crash the Bluetooth handler');
++ reportRegistrationFailure(window.__qaBluetoothError);
++ check(document.getElementById('registrationCloudStatus').dataset.state==='bluetooth'&&!document.getElementById('registrationCloudMessage').textContent.includes('startsWith'),'Native Bluetooth errors display reconnect guidance instead of an exception or Supabase failure');
++ setRegistrationCloudStatus('pending');
+  const get=id=>document.getElementById(id),change=(id,value)=>{get(id).value=value;get(id).dispatchEvent(new Event('change',{bubbles:true}));};
+  check(get('editNodeBuilding').value==='b2'&&get('editNodeFloor').value==='f2'&&get('editNodeRoom').value==='r2','Edit restores actual ancestors with repeated location names');
+  change('nodeFormBuilding','b1');check([...get('nodeFormFloor').options].some(o=>o.value==='f1')&&![...get('nodeFormFloor').options].some(o=>o.value==='f2'),'Floors are restricted to the selected building');

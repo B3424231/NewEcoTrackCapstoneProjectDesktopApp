@@ -111,7 +111,7 @@ async function connectPort(port, baud = 9600) {
     if (availableList) {
       availableList.innerHTML = `
         <div class="text-center py-4">
-          <p class="text-gray-400 text-sm animate-pulse">Searching for AC sensor nodes...</p>
+          <p class="text-gray-400 text-sm animate-pulse">Searching for AC control nodes...</p>
         </div>
       `;
     }
@@ -184,6 +184,15 @@ function _stopSSE() {
  * Process one telemetry packet from the serial device.
  * Fields expected: id, name?, temp, pressure, rssi, battery, status
  */
+function telemetryNumber(value) {
+  return value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value);
+}
+
+function telemetryDisplay(value, decimals = 1) {
+  const number = telemetryNumber(value);
+  return number === null ? 'Unavailable' : number.toFixed(decimals);
+}
+
 function _ingestPacket(packet) {
   if (!packet || !packet.id) return;
 
@@ -206,16 +215,16 @@ function _ingestPacket(packet) {
     id:          nodeId,
     name:        nodeName,
     pb_id:       packet.pb_id || existing?.pb_id || null,
-    temp:        parseFloat(packet.temp ?? packet.temperature ?? existing?.temp ?? 24.5),
-    pressure:    parseFloat(packet.pressure ?? existing?.pressure ?? 0.45),
-    rssi:        parseFloat(packet.rssi ?? existing?.rssi ?? -60),
-    battery:     parseFloat(packet.battery ?? packet.voltage ?? existing?.battery ?? 3.9),
+    temp:        telemetryNumber(packet.temp ?? packet.temperature),
+    pressure:    telemetryNumber(packet.pressure),
+    rssi:        telemetryNumber(packet.rssi),
+    battery:     telemetryNumber(packet.battery ?? packet.voltage),
     status:      packet.status || existing?.status || 'online',
     wakeTime:    packet.wakeTime || existing?.wakeTime || '06:00',
     sleepTime:   packet.sleepTime || existing?.sleepTime || '22:00',
     intervalVal: parseInt(packet.intervalVal ?? existing?.intervalVal ?? 15),
     intervalUnit: packet.intervalUnit || existing?.intervalUnit || 'Minutes',
-    aircon_type: packet.aircon_type || existing?.aircon_type || 'Split Type (Inverter)',
+    aircon_type: packet.aircon_type || existing?.aircon_type || null,
     created:     existing?.created || new Date().toISOString()
   };
 
@@ -295,15 +304,15 @@ function _ingestPacket(packet) {
   // Update the live-reading badge if one exists
   _updateLiveBadge(node);
 
-  // Save incoming sensor reading into PocketBase sensor logs (throttled)
+  // Save incoming control reading into PocketBase control logs (throttled)
   // Skip if the caller explicitly set _skipDBSave (handled by separate DB cadence loop)
-  if (!packet._skipDBSave && typeof saveNodeTelemetryToPocketBase === 'function') {
-    saveNodeTelemetryToPocketBase(node).catch(() => {});
+  if (!packet._skipDBSave && typeof saveNodeTelemetryToSqlite === 'function') {
+    saveNodeTelemetryToSqlite({ ...packet, name: node.name, pb_id: node.pb_id, battery: packet.battery ?? packet.voltage }).catch(() => {});
   }
 
   // Real-time rule evaluation across active nodes
-  // STRICT RULE: Only evaluate if the sensor is assigned to a room in the AC Sensor Interface!
-  // Unassigned nodes in "Available AC Sensors" (the lobby) must never trigger notifications.
+  // STRICT RULE: Only evaluate if the control is assigned to a room in the AC Control Interface!
+  // Unassigned nodes in "Available AC Controls" (the lobby) must never trigger notifications.
   if (!packet._skipDBSave && typeof window.evaluateRulesForTelemetry === 'function') {
     const isAssigned = (node && node.room_id && String(node.room_id).trim() !== '') ||
                        (packet && packet.room_id && String(packet.room_id).trim() !== '');
@@ -334,7 +343,7 @@ function _appendAvailableNode(nodeData) {
 function _updateLiveBadge(node) {
   const badge = document.getElementById('liveBadge');
   if (!badge) return;
-  badge.textContent = `📡 ${node.id} — ${Math.round(node.temp)}°C | ${node.pressure.toFixed(1)} kPa`;
+  badge.textContent = `📡 ${node.id} — ${telemetryDisplay(node.temp, 0)}°C | ${telemetryDisplay(node.pressure)} kPa`;
   badge.style.display = 'block';
 }
 
@@ -389,84 +398,47 @@ function _updatePortConnectButtons(connected, activePort = '') {
 
 document.addEventListener('DOMContentLoaded', () => {
   initializeTelemetry();
-  
-  // Map to track when each node last received a UI card update (fast cadence for visual demo)
-  const lastUIUpdateMap = {};
-
-  // Live telemetry UI scheduler loop (operates when hardware serial is not connected)
-  // NOTE: PocketBase sensor log saves are handled globally by node-sync.js background cadence
-  //       on ALL pages (including this one) at the exact configured sending interval.
-  //       This loop ONLY handles fast UI card updates for visual demonstration.
-  setInterval(() => {
-    // Only pause simulator if actively receiving real serial packets from live SSE stream
-    if (_connectedPort && _sseSource && _sseSource.readyState === EventSource.OPEN) return;
-    
-    const now = Date.now();
-    
-    // Loop through all nodes that are assigned to a room
-    activeNodesData.forEach(node => {
-      // === UI UPDATE CADENCE (fast, every 3 seconds for visual demonstration) ===
-      const UI_CADENCE_MS = 3000;
-      const lastUI = lastUIUpdateMap[node.id] || 0;
-      
-      if (now - lastUI >= UI_CADENCE_MS) {
-        lastUIUpdateMap[node.id] = now;
-        
-        // Fluctuate temp slightly between 21.5 and 26.5
-        let currentTemp = node.temp || 24.2;
-        currentTemp += (Math.random() - 0.5) * 0.6;
-        if (currentTemp > 26.5) currentTemp = 26.5;
-        if (currentTemp < 21.5) currentTemp = 21.5;
-        
-        // Fluctuate Airflow Pressure slightly between 0.20 and 0.85 kPa
-        let currentPressure = node.pressure || 0.45;
-        currentPressure += (Math.random() - 0.5) * 0.08;
-        if (currentPressure > 0.85) currentPressure = 0.85;
-        if (currentPressure < 0.20) currentPressure = 0.20;
-        
-        // Fluctuate RSSI slightly
-        let currentRssi = node.rssi || -60;
-        currentRssi += Math.floor((Math.random() - 0.5) * 4);
-        if (currentRssi > -45) currentRssi = -45;
-        if (currentRssi < -85) currentRssi = -85;
-
-        const packet = {
-          id: node.id,
-          name: node.name,
-          temp: Math.round(currentTemp),
-          pressure: parseFloat(currentPressure.toFixed(2)),
-          battery: node.battery || 3.9,
-          rssi: currentRssi,
-          status: 'online',
-          // Explicitly pass node's configured schedule so interval never reverts to defaults!
-          intervalVal: node.intervalVal,
-          intervalUnit: node.intervalUnit,
-          wakeTime: node.wakeTime,
-          sleepTime: node.sleepTime
-        };
-        
-        // Feed the packet into the system (updates UI cards and syncs to DB)
-        _ingestPacket(packet);
-      }
-    });
-  }, 1000);
 });
 
 /**
  * Load all nodes from Supabase into activeNodesData.
  * Also fetch latest telemetry for each node to display real values.
  */
-async function loadAvailableNodesFromDB() {
+function readStartupNodes(reads) {
+  if (!reads.has('nodes')) {
+    const pending = Promise.resolve(sb.from('nodes').select('*')).then(result => {
+      if (result.error && reads.get('nodes') === pending) reads.delete('nodes');
+      return result;
+    }, error => {
+      if (reads.get('nodes') === pending) reads.delete('nodes');
+      throw error;
+    });
+    reads.set('nodes', pending);
+  }
+  return reads.get('nodes');
+}
+async function loadAvailableNodesFromDB(reads = new Map()) {
   console.log('[EcoTrack] loadAvailableNodesFromDB called');
   try {
     let nodeRecords = [];
-    if (sb) {
-      const { data, error } = await sb.from('nodes').select('*');
-      if (!error && data) nodeRecords = data;
+    if (!sb) return;
+    await window.ecotrackAuthReady;
+    if (sb.auth?.getSession) {
+      const { data, error } = await sb.auth.getSession();
+      if (error) throw error;
+      if (!data?.session) return;
     }
+    const { data, error } = await readStartupNodes(reads);
+    if (error) throw error;
+    if (!Array.isArray(data)) throw new Error('Unexpected controller registry response');
+    nodeRecords = data;
     console.log('[EcoTrack] Loaded', nodeRecords.length, 'nodes from Supabase');
     
-    if (!nodeRecords.length) return;
+    if (!nodeRecords.length) {
+      activeNodesData = [];
+      populateAvailableNodes();
+      return;
+    }
 
     let telemetryRecords = [];
     const telemetryMap = {};
@@ -514,17 +486,17 @@ async function loadAvailableNodesFromDB() {
         id: n.name,
         name: n.name,
         pb_id: n.id,
-        temp: parseFloat(latestTelemetry.temperature ?? n.temp ?? 24.5),
-        pressure: parseFloat(latestTelemetry.pressure ?? n.pressure ?? 0.45),
-        rssi: parseFloat(latestTelemetry.rssi ?? n.rssi ?? -60),
-        battery: parseFloat(latestTelemetry.battery ?? n.battery ?? 3.9),
+        temp: telemetryNumber(latestTelemetry.temperature ?? n.temp),
+        pressure: telemetryNumber(latestTelemetry.pressure ?? n.pressure),
+        rssi: telemetryNumber(latestTelemetry.rssi ?? n.rssi),
+        battery: telemetryNumber(latestTelemetry.battery ?? n.battery),
         status: latestTelemetry.status ?? n.status ?? 'online',
         wakeTime: n.wake_time && n.wake_time !== '00:00' ? n.wake_time : '06:00',
         sleepTime: n.sleep_time && n.sleep_time !== '00:00' ? n.sleep_time : '22:00',
         intervalVal: parseInt(n.interval_val) || 15,
         intervalUnit: n.interval_unit || 'Minutes',
         created: n.created,
-        aircon_type: n.aircon_type || 'Split Type (Inverter)'
+        aircon_type: n.aircon_type || null
       });
     });
     console.log('[EcoTrack] activeNodesData now has', activeNodesData.length, 'items');
@@ -534,7 +506,7 @@ async function loadAvailableNodesFromDB() {
 }
 
 /**
- * Populate the Available AC Sensors sidebar with nodes that are not assigned to any room.
+ * Populate the Available AC Controls sidebar with nodes that are not assigned to any room.
  */
 function populateAvailableNodes() {
   const availableList = document.getElementById('availableNodesList');
@@ -557,8 +529,8 @@ function populateAvailableNodes() {
   if (unassigned.length === 0) {
     availableList.innerHTML = `
       <div class="text-center py-8">
-        <p class="text-gray-500 dark:text-gray-400 text-sm font-medium">No available sensors</p>
-        <p class="text-gray-400 dark:text-gray-500 text-xs mt-1">All registered sensors are currently assigned</p>
+        <p class="text-gray-500 dark:text-gray-400 text-sm font-medium">No available controls</p>
+        <p class="text-gray-400 dark:text-gray-500 text-xs mt-1">All registered controls are currently assigned</p>
       </div>
     `;
     return;
@@ -625,10 +597,10 @@ function setupSupabaseRealtime() {
             id: t.node_id || t.sensor_name,
             name: t.sensor_name || t.node_id,
             pb_id: t.node_id,
-            temp: parseFloat(t.temperature ?? 24.5),
-            pressure: parseFloat(t.pressure ?? 0.45),
-            battery: parseFloat(t.battery ?? 3.9),
-            rssi: parseFloat(t.rssi ?? -60),
+            temp: telemetryNumber(t.temperature),
+            pressure: telemetryNumber(t.pressure),
+            battery: telemetryNumber(t.battery),
+            rssi: telemetryNumber(t.rssi),
             status: t.status || 'online',
             aircon_type: t.aircon_type,
             _skipDBSave: true
@@ -648,16 +620,16 @@ function setupSupabaseRealtime() {
             id: n.name || n.id,
             name: n.name,
             pb_id: n.id,
-            temp: parseFloat(n.temp ?? 24.5),
-            pressure: parseFloat(n.pressure ?? 0.45),
-            battery: parseFloat(n.battery ?? 3.9),
-            rssi: parseFloat(n.rssi ?? -60),
+            temp: telemetryNumber(n.temp),
+            pressure: telemetryNumber(n.pressure),
+            battery: telemetryNumber(n.battery),
+            rssi: telemetryNumber(n.rssi),
             status: n.status || 'online',
             wakeTime: n.wake_time && n.wake_time !== '00:00' ? n.wake_time : '06:00',
             sleepTime: n.sleep_time && n.sleep_time !== '00:00' ? n.sleep_time : '22:00',
             intervalVal: parseInt(n.interval_val) || 15,
             intervalUnit: n.interval_unit || 'Minutes',
-            aircon_type: n.aircon_type || 'Split Type (Inverter)',
+            aircon_type: n.aircon_type || null,
             _skipDBSave: true
           };
           _ingestPacket(packet);
@@ -677,8 +649,9 @@ function initializeTelemetry() {
   }
 
   // Initialize available nodes from Supabase DB
-  loadAvailableNodesFromDB().then(() => {
-    loadRoomsFromDB().then(() => {
+  const startupReads = new Map();
+  loadAvailableNodesFromDB(startupReads).then(() => {
+    loadRoomsFromDB(startupReads).then(() => {
       populateAvailableNodes();
     });
   });
@@ -920,9 +893,9 @@ function initializeTelemetry() {
       return;
     }
     
-    // Get the AC Sensor ID from dataTransfer
+    // Get the AC Control ID from dataTransfer
     const nodeId = e.dataTransfer.getData('text/plain');
-    console.log('Dropped AC Sensor ID:', nodeId);
+    console.log('Dropped AC Control ID:', nodeId);
     
     if (!nodeId) {
       showNotification('Error: No node data');
@@ -942,7 +915,7 @@ function initializeTelemetry() {
     
     const maxLimit = Math.max(room.nodeLimit || 0, 50);
     if (room.nodes.length >= maxLimit) {
-      showNotification(`Room limit reached (${maxLimit} AC sensor nodes max)`);
+      showNotification(`Room limit reached (${maxLimit} AC control nodes max)`);
       return;
     }
     
@@ -982,7 +955,7 @@ function initializeTelemetry() {
     const nodeCard = createPlacedNodeCard(nodeId);
     nodeInterface.appendChild(nodeCard);
     
-    // Refresh the sidebar so the node disappears from Available AC Sensors
+    // Refresh the sidebar so the node disappears from Available AC Controls
     populateAvailableNodes();
     
     showNotification(`✓ Added ${nodeData.name}`);
@@ -1070,7 +1043,7 @@ function confirmClearNodes() {
     updateRoomNodeCount(selectedRoomId);
     loadRoomNodes(selectedRoomId);
     
-    // Repopulate the available nodes list to show All AC Sensors again
+    // Repopulate the available nodes list to show All AC Controls again
     populateAvailableNodes();
     
     // Save to PocketBase
@@ -1089,17 +1062,17 @@ function openClearRoomsModal(type) {
   if (clearType === 'buildings') {
     if (!Object.keys(buildings).length) return showNotification('No buildings to clear');
     title.textContent = 'Clear All Buildings';
-    text.textContent = 'Are you sure you want to clear all buildings? This removes every building, floor, room and its AC sensors.';
+    text.textContent = 'Are you sure you want to clear all buildings? This removes every building, floor, room and its AC controls.';
     btn.textContent = 'Clear Buildings';
   } else if (clearType === 'floors') {
     if (!Object.keys(floors).length) return showNotification('No floors to clear');
     title.textContent = 'Clear All Floors';
-    text.textContent = 'Are you sure you want to clear all floors? This removes every floor, room and its AC sensors.';
+    text.textContent = 'Are you sure you want to clear all floors? This removes every floor, room and its AC controls.';
     btn.textContent = 'Clear Floors';
   } else if (clearType === 'rooms') {
     if (!Object.keys(rooms).length) return showNotification('No rooms to clear');
     title.textContent = 'Clear All Rooms';
-    text.textContent = 'Are you sure you want to clear all rooms? This removes every room and its AC sensors.';
+    text.textContent = 'Are you sure you want to clear all rooms? This removes every room and its AC controls.';
     btn.textContent = 'Clear Rooms';
   }
 
@@ -1114,49 +1087,63 @@ async function confirmClearRooms() {
   const roomIds = Object.keys(rooms);
   const floorIds = Object.keys(floors);
   const buildingIds = Object.keys(buildings);
+
+  // 1. Close modal immediately for zero delay
+  closeClearRoomsModal();
   
-  if (sb) {
-    // Delete rooms
-    const validRoomIds = roomIds.filter(id => !id.startsWith('room-'));
-    if (validRoomIds.length) {
-      await sb.from('rooms').delete().in('id', validRoomIds).catch(e => console.error(e));
-    }
-
-    if (clearType === 'floors' || clearType === 'buildings') {
-      const validFloorIds = floorIds.filter(id => !id.startsWith('floor-'));
-      if (validFloorIds.length) {
-        await sb.from('floors').delete().in('id', validFloorIds).catch(e => console.error(e));
-      }
-    }
-    
-    if (clearType === 'buildings') {
-      const validBuildingIds = buildingIds.filter(id => !id.startsWith('building-'));
-      if (validBuildingIds.length) {
-        await sb.from('buildings').delete().in('id', validBuildingIds).catch(e => console.error(e));
-      }
-    }
-  }
-
+  // 2. In-memory and UI cleanup
   rooms = {};
   if (clearType === 'floors' || clearType === 'buildings') floors = {};
   if (clearType === 'buildings') buildings = {};
 
   renderHierarchy();
+  populateAvailableNodes();
 
   selectedRoomId = null;
   const nodeInterface = document.getElementById('nodeInterface');
-  nodeInterface.innerHTML = `
-    <div class="text-center col-span-2 flex items-center justify-center py-12 pointer-events-none">
-      <div>
-        <p class="text-gray-500 text-sm mb-2">Drag AC sensor nodes here</p>
-        <p class="text-gray-600 text-xs">AC sensor nodes will appear in 2x2 grid</p>
+  if (nodeInterface) {
+    nodeInterface.innerHTML = `
+      <div class="text-center col-span-2 flex items-center justify-center py-12 pointer-events-none">
+        <div>
+          <p class="text-gray-500 text-sm mb-2">Drag AC control nodes here</p>
+          <p class="text-gray-600 text-xs">AC control nodes will appear in 2x2 grid</p>
+        </div>
       </div>
-    </div>
-  `;
-  document.getElementById('nodeInterfaceTitle').textContent = 'Node Interface';
+    `;
+  }
+  const titleEl = document.getElementById('nodeInterfaceTitle');
+  if (titleEl) titleEl.textContent = 'Node Interface';
 
-  closeClearRoomsModal();
   showNotification('Cleared successfully');
+
+  // 3. Asynchronous database cleanup
+  if (sb) {
+    try {
+      const validRoomIds = roomIds.filter(id => !id.startsWith('room-'));
+      if (validRoomIds.length) {
+        await Promise.all([
+          sb.from('nodes').update({ room_id: null }).in('room_id', validRoomIds),
+          sb.from('rooms').delete().in('id', validRoomIds)
+        ]);
+      }
+
+      if (clearType === 'floors' || clearType === 'buildings') {
+        const validFloorIds = floorIds.filter(id => !id.startsWith('floor-'));
+        if (validFloorIds.length) {
+          await sb.from('floors').delete().in('id', validFloorIds);
+        }
+      }
+      
+      if (clearType === 'buildings') {
+        const validBuildingIds = buildingIds.filter(id => !id.startsWith('building-'));
+        if (validBuildingIds.length) {
+          await sb.from('buildings').delete().in('id', validBuildingIds);
+        }
+      }
+    } catch (e) {
+      console.error('Clear failed in database:', e);
+    }
+  }
 }
 
 // ===== ROOM MANAGEMENT =====
@@ -1179,11 +1166,11 @@ function openAddRoomModal(floorId) {
   const nodeLimitInput = document.getElementById('nodeLimitInput');
   if (nodeLimitInput) nodeLimitInput.value = '10';
 
-  // Set AC Sensor Count Output display to 0 for new room
-  const sensorCountVal = document.getElementById('roomSensorCountValue');
-  const sensorCountLabel = document.getElementById('roomSensorCountLabel');
-  if (sensorCountVal) sensorCountVal.textContent = '0';
-  if (sensorCountLabel) sensorCountLabel.textContent = 'sensors assigned';
+  // Set AC Control Count Output display to 0 for new room
+  const controlCountVal = document.getElementById('roomControlCountValue') || document.getElementById('roomSensorCountValue');
+  const controlCountLabel = document.getElementById('roomControlCountLabel') || document.getElementById('roomSensorCountLabel');
+  if (controlCountVal) controlCountVal.textContent = '0';
+  if (controlCountLabel) controlCountLabel.textContent = 'controls assigned';
   
   // Immediate focus
   if (roomNameInput) {
@@ -1248,12 +1235,12 @@ function openEditRoomModal(roomId) {
   const nodeLimitInput = document.getElementById('nodeLimitInput');
   if (nodeLimitInput) nodeLimitInput.value = room.nodeLimit || 10;
 
-  // Set AC Sensor Count Output display to current assigned sensors
-  const sensorCountVal = document.getElementById('roomSensorCountValue');
-  const sensorCountLabel = document.getElementById('roomSensorCountLabel');
+  // Set AC Control Count Output display to current assigned controls
+  const controlCountVal = document.getElementById('roomControlCountValue') || document.getElementById('roomSensorCountValue');
+  const controlCountLabel = document.getElementById('roomControlCountLabel') || document.getElementById('roomSensorCountLabel');
   const count = (room.nodes && Array.isArray(room.nodes)) ? room.nodes.length : 0;
-  if (sensorCountVal) sensorCountVal.textContent = count;
-  if (sensorCountLabel) sensorCountLabel.textContent = count === 1 ? 'sensor assigned' : 'sensors assigned';
+  if (controlCountVal) controlCountVal.textContent = count;
+  if (controlCountLabel) controlCountLabel.textContent = count === 1 ? 'control assigned' : 'controls assigned';
 
   if (roomNameInput) {
     roomNameInput.focus();
@@ -1262,7 +1249,7 @@ function openEditRoomModal(roomId) {
 }
 
 // ===== SUPABASE INTEGRATION =====
-async function loadRoomsFromDB() {
+async function loadRoomsFromDB(reads = new Map()) {
   try {
     let buildingRecords = [];
     let floorRecords = [];
@@ -1274,7 +1261,7 @@ async function loadRoomsFromDB() {
         sb.from('buildings').select('*'),
         sb.from('floors').select('*'),
         sb.from('rooms').select('*').order('created', { ascending: false }),
-        sb.from('nodes').select('*')
+        readStartupNodes(reads)
       ]);
       buildingRecords = bRes.data || [];
       floorRecords = fRes.data || [];
@@ -1282,18 +1269,19 @@ async function loadRoomsFromDB() {
       nodeRecords = nRes.data || [];
     }
     
-    // Fetch latest telemetry for room nodes
+    // Fetch latest telemetry for room nodes (recent 200 items instead of downloading entire database)
     let telemetryMap = {};
     let roomTelemetryRecords = [];
     if (sb) {
       try {
-        const { data } = await sb.from('telemetry').select('*').order('created', { ascending: false });
+        const { data } = await sb.from('telemetry').select('*').order('created', { ascending: false }).limit(200);
         if (data && data.length) roomTelemetryRecords = data;
       } catch (_) {}
     }
     if (!roomTelemetryRecords.length && pb && typeof pb.collection === 'function') {
       try {
-        roomTelemetryRecords = await pb.collection('telemetry').getFullList({ sort: '-created' });
+        const result = await pb.collection('telemetry').getList(1, 200, { sort: '-created' });
+        roomTelemetryRecords = result.items || [];
       } catch (_) {}
     }
 
@@ -1324,16 +1312,16 @@ async function loadRoomsFromDB() {
             pb_id: n.id, // Keep pb_id for updates
             name: n.name,
             status: latestTelemetry.status || n.status || 'online',
-            temp: parseFloat(latestTelemetry.temperature ?? n.temp ?? 24.5),
-            pressure: parseFloat(latestTelemetry.pressure ?? n.pressure ?? 0.45),
-            rssi: parseFloat(latestTelemetry.rssi ?? n.rssi ?? -60),
-            battery: parseFloat(latestTelemetry.battery ?? n.battery ?? 3.9),
+            temp: telemetryNumber(latestTelemetry.temperature ?? n.temp),
+            pressure: telemetryNumber(latestTelemetry.pressure ?? n.pressure),
+            rssi: telemetryNumber(latestTelemetry.rssi ?? n.rssi),
+            battery: telemetryNumber(latestTelemetry.battery ?? n.battery),
             wakeTime: n.wake_time && n.wake_time !== '00:00' ? n.wake_time : '06:00',
             sleepTime: n.sleep_time && n.sleep_time !== '00:00' ? n.sleep_time : '22:00',
             intervalVal: parseInt(n.interval_val) || 15,
             intervalUnit: n.interval_unit || 'Minutes',
             created: n.created,
-            aircon_type: n.aircon_type || 'Split Type (Inverter)'
+            aircon_type: n.aircon_type || null
           };
         });
 
@@ -1662,10 +1650,6 @@ async function saveRoomToDB(roomId) {
       }
     }
 
-    // Automatically sync updated room assignments to PocketBase nodes and sensor logs
-    if (typeof syncSupabaseNodesToPocketBase === 'function') {
-      syncSupabaseNodesToPocketBase().catch(() => {});
-    }
   } catch (error) {
     console.error('Failed to sync room nodes in Supabase:', error);
   }
@@ -1731,11 +1715,11 @@ function requestDeleteLocation(id, type = 'room', name = '') {
   const deleteMsg = document.getElementById('deleteLocationMessage');
   if (deleteMsg) {
     if (type === 'building') {
-      deleteMsg.innerHTML = `Are you sure you want to delete <span id="deleteLocationName" class="text-rose-500 font-bold">"${displayName}"</span>? This will permanently remove the building, its floors, rooms, and unassign any sensor hardware.`;
+      deleteMsg.innerHTML = `Are you sure you want to delete <span id="deleteLocationName" class="text-rose-500 font-bold">"${displayName}"</span>? This will permanently remove the building, its floors, rooms, and unassign any control hardware.`;
     } else if (type === 'floor') {
-      deleteMsg.innerHTML = `Are you sure you want to delete <span id="deleteLocationName" class="text-rose-500 font-bold">"${displayName}"</span>? This will permanently remove the floor, its rooms, and unassign any sensor hardware.`;
+      deleteMsg.innerHTML = `Are you sure you want to delete <span id="deleteLocationName" class="text-rose-500 font-bold">"${displayName}"</span>? This will permanently remove the floor, its rooms, and unassign any control hardware.`;
     } else {
-      deleteMsg.innerHTML = `Are you sure you want to delete <span id="deleteLocationName" class="text-rose-500 font-bold">"${displayName}"</span>? This removes the room and unassigns its sensor hardware.`;
+      deleteMsg.innerHTML = `Are you sure you want to delete <span id="deleteLocationName" class="text-rose-500 font-bold">"${displayName}"</span>? This removes the room and unassigns its control hardware.`;
     }
   }
 
@@ -1762,75 +1746,35 @@ async function confirmDeleteLocation() {
   const id = pendingDeleteLocationId;
   const type = pendingDeleteLocationType || 'room';
 
-  try {
-    if (sb) {
-      if (type === 'room') {
-        // 1. Unassign all nodes in this room
-        await sb.from('nodes').update({ room_id: null }).eq('room_id', id);
-        // 2. Delete room
-        const { error } = await sb.from('rooms').delete().eq('id', id);
-        if (error) console.error('[Delete Room Error]:', error.message);
-      } else if (type === 'floor') {
-        // 1. Find all rooms on this floor
-        const { data: fRooms } = await sb.from('rooms').select('id').eq('floor_id', id);
-        if (fRooms && fRooms.length > 0) {
-          for (const rm of fRooms) {
-            await sb.from('nodes').update({ room_id: null }).eq('room_id', rm.id);
-            await sb.from('rooms').delete().eq('id', rm.id);
-          }
-        }
-        // 2. Delete floor
-        const { error } = await sb.from('floors').delete().eq('id', id);
-        if (error) console.error('[Delete Floor Error]:', error.message);
-      } else if (type === 'building') {
-        // 1. Find all floors in this building
-        const { data: bFloors } = await sb.from('floors').select('id').eq('building_id', id);
-        if (bFloors && bFloors.length > 0) {
-          for (const fl of bFloors) {
-            const { data: fRooms } = await sb.from('rooms').select('id').eq('floor_id', fl.id);
-            if (fRooms && fRooms.length > 0) {
-              for (const rm of fRooms) {
-                await sb.from('nodes').update({ room_id: null }).eq('room_id', rm.id);
-                await sb.from('rooms').delete().eq('id', rm.id);
-              }
-            }
-            await sb.from('floors').delete().eq('id', fl.id);
-          }
-        }
-        // 2. Clear any orphaned rooms directly tied to building
-        await sb.from('rooms').delete().eq('building_id', id);
-        // 3. Delete building
-        const { error } = await sb.from('buildings').delete().eq('id', id);
-        if (error) console.error('[Delete Building Error]:', error.message);
+  // 1. Instantly close modal for zero UI delay
+  closedeleteLocationModal();
+
+  // 2. Snapshot state for rollback if needed
+  const prevRooms = JSON.parse(JSON.stringify(rooms));
+  const prevFloors = JSON.parse(JSON.stringify(floors));
+  const prevBuildings = JSON.parse(JSON.stringify(buildings));
+
+  // 3. Immediate In-Memory Cleanup (Optimistic)
+  if (type === 'building') {
+    delete buildings[id];
+    Object.keys(floors).forEach(fId => {
+      if (floors[fId].building_id === id) {
+        Object.keys(rooms).forEach(rId => {
+          if (rooms[rId].floor_id === fId) delete rooms[rId];
+        });
+        delete floors[fId];
       }
-    }
-
-    // In-memory cleanup
-    if (type === 'building') {
-      delete buildings[id];
-      Object.keys(floors).forEach(fId => {
-        if (floors[fId].building_id === id) {
-          Object.keys(rooms).forEach(rId => {
-            if (rooms[rId].floor_id === fId) delete rooms[rId];
-          });
-          delete floors[fId];
-        }
-      });
-    } else if (type === 'floor') {
-      delete floors[id];
-      Object.keys(rooms).forEach(rId => {
-        if (rooms[rId].floor_id === id) delete rooms[rId];
-      });
-    } else if (type === 'room') {
-      delete rooms[id];
-    }
-
-    showNotification(`${type.charAt(0).toUpperCase() + type.slice(1)} deleted successfully`);
-  } catch (error) {
-    console.error('Failed to delete location in Supabase:', error);
-    showNotification(`Failed to delete ${type}`);
+    });
+  } else if (type === 'floor') {
+    delete floors[id];
+    Object.keys(rooms).forEach(rId => {
+      if (rooms[rId].floor_id === id) delete rooms[rId];
+    });
+  } else if (type === 'room') {
+    delete rooms[id];
   }
 
+  // 4. Immediate Interface Reset if deleted room was active
   if (selectedRoomId === id || !rooms[selectedRoomId]) {
     selectedRoomId = null;
     const nodeInterface = document.getElementById('nodeInterface');
@@ -1838,21 +1782,69 @@ async function confirmDeleteLocation() {
       nodeInterface.innerHTML = `
         <div class="text-center col-span-2 flex items-center justify-center py-12 pointer-events-none">
           <div>
-            <p class="text-gray-500 text-sm mb-2">Select a room to view AC Sensors</p>
+            <p class="text-gray-500 text-sm mb-2">Select a room to view AC Controls</p>
           </div>
         </div>
       `;
     }
     const nodeInterfaceTitle = document.getElementById('nodeInterfaceTitle');
     if (nodeInterfaceTitle) {
-      nodeInterfaceTitle.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" class="text-cyan-400"><rect x="4" y="2" width="16" height="20" rx="2" ry="2" /><path d="M12 2V6" stroke-width="2" /><line x1="2" y1="12" x2="22" y2="12" stroke-width="1" /></svg>AC Sensor Interface';
+      nodeInterfaceTitle.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" class="text-cyan-400"><rect x="4" y="2" width="16" height="20" rx="2" ry="2" /><path d="M12 2V6" stroke-width="2" /><line x1="2" y1="12" x2="22" y2="12" stroke-width="1" /></svg>AC Control Interface';
     }
     const clearNodesBtn = document.getElementById('clearNodesBtn');
     if (clearNodesBtn) clearNodesBtn.style.display = 'none';
   }
 
-  await loadRoomsFromDB();
-  closedeleteLocationModal();
+  // 5. Render instantly on screen
+  renderHierarchy();
+  populateAvailableNodes();
+  showNotification(`${type.charAt(0).toUpperCase() + type.slice(1)} deleted successfully`);
+
+  // 6. Asynchronous Batched Cloud Sync in Background
+  try {
+    if (sb) {
+      if (type === 'room') {
+        await Promise.all([
+          sb.from('nodes').update({ room_id: null }).eq('room_id', id),
+          sb.from('rooms').delete().eq('id', id)
+        ]);
+      } else if (type === 'floor') {
+        const { data: fRooms } = await sb.from('rooms').select('id').eq('floor_id', id);
+        const rIds = (fRooms || []).map(r => r.id);
+        if (rIds.length > 0) {
+          await Promise.all([
+            sb.from('nodes').update({ room_id: null }).in('room_id', rIds),
+            sb.from('rooms').delete().in('id', rIds)
+          ]);
+        }
+        await sb.from('floors').delete().eq('id', id);
+      } else if (type === 'building') {
+        const { data: bFloors } = await sb.from('floors').select('id').eq('building_id', id);
+        const fIds = (bFloors || []).map(f => f.id);
+        if (fIds.length > 0) {
+          const { data: fRooms } = await sb.from('rooms').select('id').in('floor_id', fIds);
+          const rIds = (fRooms || []).map(r => r.id);
+          if (rIds.length > 0) {
+            await Promise.all([
+              sb.from('nodes').update({ room_id: null }).in('room_id', rIds),
+              sb.from('rooms').delete().in('id', rIds)
+            ]);
+          }
+          await sb.from('floors').delete().in('id', fIds);
+        }
+        await sb.from('rooms').delete().eq('building_id', id);
+        await sb.from('buildings').delete().eq('id', id);
+      }
+    }
+  } catch (error) {
+    console.error(`Failed to delete ${type} in Supabase:`, error);
+    showNotification(`Failed to persist ${type} deletion. Restoring...`, 4000);
+    rooms = prevRooms;
+    floors = prevFloors;
+    buildings = prevBuildings;
+    renderHierarchy();
+    populateAvailableNodes();
+  }
 }
 
 function _createRoomDOMElement(roomId, roomName, nodeLimit, currentNodes) {
@@ -1866,7 +1858,7 @@ function _createRoomDOMElement(roomId, roomName, nodeLimit, currentNodes) {
     <div class="flex items-center justify-between gap-2">
       <div class="min-w-0 flex-1">
         <p class="room-name text-xs font-bold text-gray-800 dark:text-gray-100 truncate" title="${roomName}">${roomName}</p>
-        <p class="text-[10px] text-gray-500 dark:text-gray-400 font-medium node-count">${currentNodes} ac sensor nodes</p>
+        <p class="text-[10px] text-gray-500 dark:text-gray-400 font-medium node-count">${currentNodes} ac control nodes</p>
       </div>
     </div>
   `;
@@ -1966,8 +1958,8 @@ function loadRoomNodes(roomId) {
     nodeInterface.innerHTML = `
       <div class="text-center col-span-2 flex items-center justify-center py-12 pointer-events-none">
         <div>
-          <p class="text-gray-500 text-sm mb-2">Drag AC sensor nodes here</p>
-          <p class="text-gray-600 text-xs">AC sensor nodes will appear in 2x2 grid</p>
+          <p class="text-gray-500 text-sm mb-2">Drag AC control nodes here</p>
+          <p class="text-gray-600 text-xs">AC control nodes will appear in 2x2 grid</p>
         </div>
       </div>
     `;
@@ -2002,7 +1994,7 @@ function updateRoomNodeCount(roomId) {
     const progressFill = roomElement.querySelector('.room-progress-fill');
     const capacityElement = roomElement.querySelector('.room-capacity');
     if (countElement) {
-      countElement.textContent = `${nodeCount} ac sensor nodes`;
+      countElement.textContent = `${nodeCount} ac control nodes`;
     }
     if (progressFill && room.nodeLimit > 0) {
       const occupancy = Math.min((nodeCount / room.nodeLimit) * 100, 100);
@@ -2023,7 +2015,7 @@ function populateAvailableNodes() {
   availableList.innerHTML = '';
   
   if (activeNodesData.length === 0) {
-    availableList.innerHTML = '<p class="text-gray-500 text-sm text-center py-4">No sensors found</p>';
+    availableList.innerHTML = '<p class="text-gray-500 text-sm text-center py-4">No controls found</p>';
     return;
   }
 
@@ -2041,7 +2033,7 @@ function populateAvailableNodes() {
     try {
       const assignedRoom = getNodeAssignedRoom(nodeData.id);
       
-      // If assigned to a room, skip rendering it in the "Available AC Sensors" list entirely
+      // If assigned to a room, skip rendering it in the "Available AC Controls" list entirely
       if (assignedRoom) {
         return; 
       }
@@ -2091,13 +2083,13 @@ function getBatteryBars(voltage) {
 function createNodeElement(data) {
   const div = document.createElement('div');
   // Ensure all numeric fields are actually numbers (PocketBase may return strings)
-  data.temp = parseFloat(data.temp) || 24.5;
-  data.pressure = parseFloat(data.pressure) || 0.4;
-  data.rssi = parseFloat(data.rssi) || -65;
-  data.battery = parseFloat(data.battery) || 3.9;
-  
-  const signalBars = getSignalBars(data.rssi);
-  const batteryPercent = Math.round((data.battery / 4.2) * 100);
+  data.temp = telemetryNumber(data.temp);
+  data.pressure = telemetryNumber(data.pressure);
+  data.rssi = telemetryNumber(data.rssi);
+  data.battery = telemetryNumber(data.battery);
+
+  const signalBars = data.rssi === null ? null : getSignalBars(data.rssi);
+  const batteryPercent = data.battery === null ? null : Math.round((data.battery / 4.2) * 100);
   const isOnline = data.status === 'online';
   const formatTime12h = (timeStr, defaultTime = '06:00 AM') => {
     if (!timeStr || timeStr === '00:00') return defaultTime;
@@ -2125,7 +2117,7 @@ function createNodeElement(data) {
   }
 
   // Signal strength text
-  let signalText = 'WEAK';
+  let signalText = signalBars === null ? 'Unavailable' : 'WEAK';
   let signalColor = '#fb7185';
   if (signalBars >= 4) { signalText = 'STRONG'; signalColor = '#34d399'; }
   else if (signalBars >= 3) { signalText = 'GOOD'; signalColor = '#34d399'; }
@@ -2136,28 +2128,16 @@ function createNodeElement(data) {
   const fanSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.827 16.379a6.082 6.082 0 0 1-8.618-7.002l5.412 1.45a6.082 6.082 0 0 1 7.002-8.618l-1.45 5.412a6.082 6.082 0 0 1 8.618 7.002l-5.412-1.45a6.082 6.082 0 0 1-7.002 8.618l1.45-5.412Z"/><path d="M12 12v.01"/></svg>`;
   const powerSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>`;
 
-  // Determine aircon state based on temperature
-  let acState = 'ACTIVE COOLING';
-  let activeIconSvg = snowflakeSvg;
-  
-  if (data.temp >= 28) {
-    acState = 'OFF';
-    activeIconSvg = powerSvg;
-  } else if (data.temp >= 26) {
-    acState = 'FAN ONLY';
-    activeIconSvg = fanSvg;
-  } else {
-    acState = 'ACTIVE COOLING';
-    activeIconSvg = snowflakeSvg;
-  }
-
-  if (!isOnline) { 
-    acState = 'OFF'; 
-    activeIconSvg = powerSvg;
-  }
+  // Resolve the exact controller binding and shared commanded/reported state.
+  const aircons = window.EcoTrackAirconSystem?.AirconProfileManager.getAll() || [];
+  const matches = aircons.filter(ac => ac.node_id === data.id || ac.node_id === data.name);
+  const description = window.EcoTrackAirconState.describeAirconState(matches.length === 1 ? matches[0].control_snapshot : null);
+  let acState = description.summary;
+  let activeIconSvg = description.label.includes('FAN') ? fanSvg : description.power === false ? powerSvg : snowflakeSvg;
+  if (!isOnline) acState = 'OFFLINE · ' + acState;
   // Signal bars HTML
   const signalBarsHtml = [1, 2, 3, 4, 5].map((bar) => {
-    const filled = bar <= signalBars + 1;
+    const filled = signalBars !== null && bar <= signalBars + 1;
     const height = 4 + (bar) * 3;
     return `<div class="bar ${filled ? 'filled' : 'empty'}" style="height: ${height}px;"></div>`;
   }).join('');
@@ -2190,7 +2170,7 @@ function createNodeElement(data) {
     <!-- HEADER -->
     <div class="telem-header">
       <div class="telem-header-left">
-        <div class="telem-label">Sensor Node</div>
+        <div class="telem-label">Control Node</div>
         <div class="telem-device-name" title="${data.name}">${data.name}</div>
         <div class="telem-status-badge ${isOnline ? 'online' : 'offline'}">
           <div class="telem-status-dot ${isOnline ? 'online' : 'offline'}"></div>
@@ -2218,7 +2198,7 @@ function createNodeElement(data) {
           </div>
           <div class="telem-metric-data">
             <div class="telem-metric-label">TEMPERATURE</div>
-            <div class="telem-metric-value">${Math.round(data.temp)}<span class="unit">°C</span></div>
+            <div class="telem-metric-value">${telemetryDisplay(data.temp, 0)}<span class="unit">°C</span></div>
           </div>
         </div>
         <div class="telem-wave-chart cyan">
@@ -2240,7 +2220,7 @@ function createNodeElement(data) {
           </div>
           <div class="telem-metric-data">
             <div class="telem-metric-label">PRESSURE</div>
-            <div class="telem-metric-value">${data.pressure.toFixed(1)}<span class="unit">kPa</span></div>
+            <div class="telem-metric-value">${telemetryDisplay(data.pressure)}<span class="unit">kPa</span></div>
           </div>
         </div>
         <div class="telem-wave-chart green">
@@ -2261,7 +2241,7 @@ function createNodeElement(data) {
           <div class="telem-signal-bars">${signalBarsHtml}</div>
           <div class="telem-signal-text">
             <span class="telem-signal-strength" style="color: ${signalColor}">${signalText}</span>
-            <span class="telem-signal-dbm">${data.rssi} dBm</span>
+            <span class="telem-signal-dbm">${data.rssi === null ? 'Unavailable' : data.rssi + ' dBm'}</span>
           </div>
         </div>
       </div>
@@ -2278,7 +2258,7 @@ function createNodeElement(data) {
             </svg>
           </div>
           <div class="telem-battery-info">
-            <div class="telem-battery-percent">${batteryPercent}%</div>
+            <div class="telem-battery-percent">${batteryPercent === null ? 'Unavailable' : batteryPercent + '%'}</div>
           </div>
         </div>
       </div>
@@ -2395,9 +2375,6 @@ async function saveNodeRegistrationDateTime(nodeData, dateVal, timeVal) {
       }
     });
 
-    if (typeof syncSupabaseNodesToPocketBase === 'function') {
-      syncSupabaseNodesToPocketBase().catch(() => {});
-    }
 
     showNotification('Registration date/time updated');
   } catch (err) {
@@ -2514,12 +2491,16 @@ function openNodeDetailModal(nodeData) {
           attachedTypeNameEl.textContent = selected || 'Not assigned';
         }
 
-        if (typeof syncSupabaseNodesToPocketBase === 'function') {
-          syncSupabaseNodesToPocketBase().catch(() => {});
+        if (window.EcoToast) {
+          window.EcoToast.success('Aircon type updated successfully.');
         }
       } catch (err) {
         console.error('Failed to save aircon type to Supabase', err);
-        alert('Failed to save aircon type.');
+        if (window.EcoToast) {
+          window.EcoToast.error('Failed to save aircon type.');
+        } else {
+          alert('Failed to save aircon type.');
+        }
         // Revert UI
         airconTypeSelect.value = savedType;
       }
@@ -2529,7 +2510,7 @@ function openNodeDetailModal(nodeData) {
   window._currentDetailNodeId = nodeData.id;
 
   title.textContent = nodeData.name || nodeData.id || 'Node Details';
-  subtitle.textContent = `Sensor node ${nodeData.id || ''}`.trim();
+  subtitle.textContent = `Control node ${nodeData.id || ''}`.trim();
   content.innerHTML = '';
   const detailCard = createNodeElement({
     ...nodeData,
@@ -2627,7 +2608,7 @@ function createPlacedNodeCard(nodeOrNodeId, maybeId) {
         loadRoomNodes(selectedRoomId);
       }
       
-      // Refresh the sidebar so the node reappears in Available AC Sensors
+      // Refresh the sidebar so the node reappears in Available AC Controls
       populateAvailableNodes();
     });
     
@@ -2647,3 +2628,10 @@ function createPlacedNodeCard(nodeOrNodeId, maybeId) {
   
   return card;
 }
+
+window.addEventListener('devices:synced', () => {
+  document.querySelectorAll('[data-node-card]').forEach(card => {
+    const node = activeNodesData.find(n => n.id === card.dataset.nodeId || n.name === card.dataset.nodeId);
+    if (node) { const updated = createNodeElement(node); const state = updated.querySelector('.telem-aircon-state'); const current = card.querySelector('.telem-aircon-state'); if (state && current) current.replaceWith(state); }
+  });
+});

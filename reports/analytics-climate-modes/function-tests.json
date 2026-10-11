@@ -1,0 +1,13 @@
+{
+  "passed": 7,
+  "checks": [
+    "Receiver settings remain historical facts even when a newer request asks for different settings.",
+    "Serialized snapshots and newer reported feedback select the saved mode and fan correctly.",
+    "Partial remote frames respect per-field timestamps.",
+    "Requests, configured defaults, missing fields and malformed records cannot fabricate hardware readings.",
+    "Special functions use saved receiver/reported values, separate swing directions, omit FILTER and respect field timestamps.",
+    "Actual history rows render thirteen aligned cells with separate recorded mode and fan values.",
+    "Production Excel rows and PDF reading data use the same historical mode/fan values as the table."
+  ],
+  "live_hardware_tested": false
+}

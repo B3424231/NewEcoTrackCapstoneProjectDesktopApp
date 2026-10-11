@@ -1,0 +1,11 @@
+--- before/public/js/hardware-cloud.js
++++ public/js/hardware-cloud.js
+@@ -58,7 +58,7 @@
+     return /^esp32s3-[a-f0-9]{12}$/.test(info?.device_id || '') && info.cloud_protocol === 1;
+   }
+   function bluetoothFailure(error) {
+-    if (error?.code?.startsWith('BLE_')) return error;
++    if (typeof error?.code === 'string' && error.code.startsWith('BLE_')) return error;
+     if (error?.name === 'NetworkError' || /gatt|bluetooth/i.test(error?.message || '')) {
+       return Object.assign(new Error('Bluetooth connection failed. Reconnect the nearby ESP32 and try again. If Windows keeps reporting a GATT error, remove its old Bluetooth pairing and pair again.'), { code: 'BLE_CONNECTION_FAILED' });
+     }

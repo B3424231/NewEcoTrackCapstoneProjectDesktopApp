@@ -1,0 +1,1558 @@
+{
+  "project": "https://ynopdmfhngooknybyahq.supabase.co",
+  "definitions": {
+    "maintenance_reports": {
+      "required": [
+        "id",
+        "type",
+        "priority",
+        "staff_name",
+        "status",
+        "created",
+        "updated"
+      ],
+      "properties": {
+        "id": {
+          "default": "('mr_'::text || substr(replace((gen_random_uuid())::text, '-'::text, ''::text), 1, 15))",
+          "description": "Note:\nThis is a Primary Key.<pk/>",
+          "format": "text",
+          "type": "string"
+        },
+        "aircon_id": {
+          "description": "Note:\nThis is a Foreign Key to `nodes.id`.<fk table='nodes' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "aircon_name": {
+          "format": "text",
+          "type": "string"
+        },
+        "room_id": {
+          "description": "Note:\nThis is a Foreign Key to `rooms.id`.<fk table='rooms' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "room_name": {
+          "format": "text",
+          "type": "string"
+        },
+        "type": {
+          "default": "Preventive Maintenance",
+          "format": "text",
+          "type": "string"
+        },
+        "priority": {
+          "default": "Medium",
+          "format": "text",
+          "type": "string"
+        },
+        "staff_id": {
+          "description": "Note:\nThis is a Foreign Key to `staff.id`.<fk table='staff' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "staff_name": {
+          "format": "text",
+          "type": "string"
+        },
+        "due_date": {
+          "format": "text",
+          "type": "string"
+        },
+        "created_date": {
+          "format": "text",
+          "type": "string"
+        },
+        "status": {
+          "default": "Pending",
+          "format": "text",
+          "type": "string"
+        },
+        "description": {
+          "format": "text",
+          "type": "string"
+        },
+        "tasks": {
+          "format": "jsonb"
+        },
+        "issue": {
+          "format": "jsonb"
+        },
+        "verification_remarks": {
+          "format": "text",
+          "type": "string"
+        },
+        "timeline": {
+          "format": "jsonb"
+        },
+        "admin_id": {
+          "description": "Note:\nThis is a Foreign Key to `administrators.id`.<fk table='administrators' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "created": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "updated": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "photo_url": {
+          "format": "text",
+          "type": "string"
+        },
+        "attachment_url": {
+          "format": "text",
+          "type": "string"
+        },
+        "photos": {
+          "format": "jsonb"
+        },
+        "aircon_type": {
+          "default": "Split Type (Inverter)",
+          "format": "text",
+          "type": "string"
+        },
+        "parent_report_id": {
+          "format": "text",
+          "type": "string"
+        },
+        "linked_repair_id": {
+          "format": "text",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ecotrack_push_deliveries": {
+      "required": [
+        "id",
+        "notification_id",
+        "token",
+        "status",
+        "attempts",
+        "next_attempt_at"
+      ],
+      "properties": {
+        "id": {
+          "default": "gen_random_uuid()",
+          "description": "Note:\nThis is a Primary Key.<pk/>",
+          "format": "uuid",
+          "type": "string"
+        },
+        "notification_id": {
+          "description": "Note:\nThis is a Foreign Key to `mobile_notifications.id`.<fk table='mobile_notifications' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "token": {
+          "description": "Note:\nThis is a Foreign Key to `staff_push_tokens.token`.<fk table='staff_push_tokens' column='token'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "status": {
+          "default": "pending",
+          "format": "text",
+          "type": "string"
+        },
+        "attempts": {
+          "default": 0,
+          "format": "integer",
+          "type": "integer"
+        },
+        "next_attempt_at": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "lease_until": {
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "ticket_id": {
+          "format": "text",
+          "type": "string"
+        },
+        "last_error": {
+          "format": "text",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ecotrack_maintenance_operations": {
+      "required": [
+        "actor_id",
+        "operation_id",
+        "request",
+        "result",
+        "created_at"
+      ],
+      "properties": {
+        "actor_id": {
+          "description": "Note:\nThis is a Primary Key.<pk/>",
+          "format": "uuid",
+          "type": "string"
+        },
+        "operation_id": {
+          "description": "Note:\nThis is a Primary Key.<pk/>",
+          "format": "text",
+          "type": "string"
+        },
+        "request": {
+          "format": "jsonb"
+        },
+        "result": {
+          "format": "jsonb"
+        },
+        "created_at": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "mobile_notifications": {
+      "required": [
+        "id",
+        "title",
+        "message",
+        "type",
+        "priority",
+        "category",
+        "created_at",
+        "event_key",
+        "is_broadcast"
+      ],
+      "properties": {
+        "id": {
+          "description": "Note:\nThis is a Primary Key.<pk/>",
+          "format": "text",
+          "type": "string"
+        },
+        "staff_id": {
+          "description": "Note:\nThis is a Foreign Key to `staff.id`.<fk table='staff' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "staff_name": {
+          "default": "All Staff",
+          "format": "text",
+          "type": "string"
+        },
+        "title": {
+          "format": "text",
+          "type": "string"
+        },
+        "message": {
+          "format": "text",
+          "type": "string"
+        },
+        "type": {
+          "default": "task_reminder",
+          "format": "text",
+          "type": "string"
+        },
+        "priority": {
+          "default": "medium",
+          "format": "text",
+          "type": "string"
+        },
+        "category": {
+          "default": "maintenance",
+          "format": "text",
+          "type": "string"
+        },
+        "related_report_id": {
+          "format": "text",
+          "type": "string"
+        },
+        "aircon_id": {
+          "format": "text",
+          "type": "string"
+        },
+        "aircon_name": {
+          "format": "text",
+          "type": "string"
+        },
+        "location": {
+          "format": "text",
+          "type": "string"
+        },
+        "due_date": {
+          "format": "text",
+          "type": "string"
+        },
+        "is_read": {
+          "default": false,
+          "format": "boolean",
+          "type": "boolean"
+        },
+        "is_snoozed": {
+          "default": false,
+          "format": "boolean",
+          "type": "boolean"
+        },
+        "snooze_until": {
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "created_at": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "updated_at": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "aircon_type": {
+          "format": "text",
+          "type": "string"
+        },
+        "verification_remarks": {
+          "format": "text",
+          "type": "string"
+        },
+        "event_key": {
+          "format": "text",
+          "type": "string"
+        },
+        "event_payload": {
+          "format": "jsonb"
+        },
+        "is_broadcast": {
+          "default": false,
+          "format": "boolean",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "notifications": {
+      "required": [
+        "id",
+        "date",
+        "time",
+        "content",
+        "triggered",
+        "created",
+        "updated",
+        "is_dismissed_from_inbox",
+        "type"
+      ],
+      "properties": {
+        "id": {
+          "default": "('notif_'::text || substr(replace((gen_random_uuid())::text, '-'::text, ''::text), 1, 15))",
+          "description": "Note:\nThis is a Primary Key.<pk/>",
+          "format": "text",
+          "type": "string"
+        },
+        "date": {
+          "format": "text",
+          "type": "string"
+        },
+        "time": {
+          "format": "text",
+          "type": "string"
+        },
+        "content": {
+          "format": "text",
+          "type": "string"
+        },
+        "triggered": {
+          "default": false,
+          "format": "boolean",
+          "type": "boolean"
+        },
+        "room_id": {
+          "description": "Note:\nThis is a Foreign Key to `rooms.id`.<fk table='rooms' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "rule_id": {
+          "description": "Note:\nThis is a Foreign Key to `rules.id`.<fk table='rules' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "admin_id": {
+          "description": "Note:\nThis is a Foreign Key to `administrators.id`.<fk table='administrators' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "created": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "updated": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "is_dismissed_from_inbox": {
+          "default": false,
+          "format": "boolean",
+          "type": "boolean"
+        },
+        "node_id": {
+          "format": "text",
+          "type": "string"
+        },
+        "report_id": {
+          "format": "text",
+          "type": "string"
+        },
+        "type": {
+          "default": "standard",
+          "format": "text",
+          "type": "string"
+        },
+        "event_key": {
+          "format": "text",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "nodes": {
+      "required": [
+        "id",
+        "name",
+        "status",
+        "created",
+        "updated"
+      ],
+      "properties": {
+        "id": {
+          "default": "('node_'::text || substr(replace((gen_random_uuid())::text, '-'::text, ''::text), 1, 15))",
+          "description": "Note:\nThis is a Primary Key.<pk/>",
+          "format": "text",
+          "type": "string"
+        },
+        "name": {
+          "format": "text",
+          "type": "string"
+        },
+        "status": {
+          "default": "offline",
+          "format": "text",
+          "type": "string"
+        },
+        "temp": {
+          "default": 0,
+          "format": "numeric",
+          "type": "number"
+        },
+        "rssi": {
+          "default": 0,
+          "format": "numeric",
+          "type": "number"
+        },
+        "battery": {
+          "default": 0,
+          "format": "numeric",
+          "type": "number"
+        },
+        "wake_time": {
+          "default": "00:00",
+          "format": "text",
+          "type": "string"
+        },
+        "sleep_time": {
+          "default": "00:00",
+          "format": "text",
+          "type": "string"
+        },
+        "interval_val": {
+          "default": 15,
+          "format": "integer",
+          "type": "integer"
+        },
+        "interval_unit": {
+          "default": "Minutes",
+          "format": "text",
+          "type": "string"
+        },
+        "room_id": {
+          "description": "Note:\nThis is a Foreign Key to `rooms.id`.<fk table='rooms' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "aircon_type": {
+          "default": "Split Type (Inverter)",
+          "format": "text",
+          "type": "string"
+        },
+        "install_date": {
+          "default": "2026-01-15",
+          "format": "text",
+          "type": "string"
+        },
+        "created": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "updated": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "photo_url": {
+          "format": "text",
+          "type": "string"
+        },
+        "image_url": {
+          "format": "text",
+          "type": "string"
+        },
+        "aircon_id": {
+          "description": "Note:\nThis is a Foreign Key to `aircons.id`.<fk table='aircons' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "maintainer_id": {
+          "description": "Note:\nThis is a Foreign Key to `staff.id`.<fk table='staff' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "mac_address": {
+          "format": "text",
+          "type": "string"
+        },
+        "ip_address": {
+          "format": "text",
+          "type": "string"
+        },
+        "wifi_ssid": {
+          "format": "text",
+          "type": "string"
+        },
+        "ble_uuid": {
+          "format": "text",
+          "type": "string"
+        },
+        "protocol_name": {
+          "default": "midea_ir",
+          "format": "text",
+          "type": "string"
+        },
+        "brand": {
+          "format": "text",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "administrators": {
+      "required": [
+        "id",
+        "username",
+        "email",
+        "role",
+        "is_active",
+        "created",
+        "updated",
+        "is_archived",
+        "auth_valid_after"
+      ],
+      "properties": {
+        "id": {
+          "default": "('admin_'::text || substr(replace((gen_random_uuid())::text, '-'::text, ''::text), 1, 15))",
+          "description": "Note:\nThis is a Primary Key.<pk/>",
+          "format": "text",
+          "type": "string"
+        },
+        "username": {
+          "format": "text",
+          "type": "string"
+        },
+        "email": {
+          "format": "text",
+          "type": "string"
+        },
+        "password": {
+          "format": "text",
+          "type": "string"
+        },
+        "role": {
+          "default": "admin",
+          "format": "text",
+          "type": "string"
+        },
+        "is_active": {
+          "default": true,
+          "format": "boolean",
+          "type": "boolean"
+        },
+        "last_login": {
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "created": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "updated": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "avatar": {
+          "default": "default",
+          "format": "text",
+          "type": "string"
+        },
+        "photo_url": {
+          "format": "text",
+          "type": "string"
+        },
+        "avatar_url": {
+          "format": "text",
+          "type": "string"
+        },
+        "phone": {
+          "format": "text",
+          "type": "string"
+        },
+        "auth_user_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "is_archived": {
+          "default": false,
+          "format": "boolean",
+          "type": "boolean"
+        },
+        "auth_valid_after": {
+          "default": "-infinity",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "phone_digits": {
+          "format": "text",
+          "type": "string"
+        },
+        "location": {
+          "default": "",
+          "format": "text",
+          "type": "string"
+        },
+        "session_timeout": {
+          "default": 30,
+          "format": "integer",
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "mobile_notification_state": {
+      "required": [
+        "notification_id",
+        "recipient_auth_user_id",
+        "updated_at"
+      ],
+      "properties": {
+        "notification_id": {
+          "description": "Note:\nThis is a Primary Key.<pk/>\nThis is a Foreign Key to `mobile_notifications.id`.<fk table='mobile_notifications' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "recipient_auth_user_id": {
+          "description": "Note:\nThis is a Primary Key.<pk/>",
+          "format": "uuid",
+          "type": "string"
+        },
+        "read_at": {
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "snooze_until": {
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "archived_at": {
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "updated_at": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "rules": {
+      "required": [
+        "id",
+        "type",
+        "condition",
+        "value",
+        "unit",
+        "enabled",
+        "created",
+        "updated"
+      ],
+      "properties": {
+        "id": {
+          "default": "('rule_'::text || substr(replace((gen_random_uuid())::text, '-'::text, ''::text), 1, 15))",
+          "description": "Note:\nThis is a Primary Key.<pk/>",
+          "format": "text",
+          "type": "string"
+        },
+        "type": {
+          "format": "text",
+          "type": "string"
+        },
+        "condition": {
+          "format": "text",
+          "type": "string"
+        },
+        "value": {
+          "format": "numeric",
+          "type": "number"
+        },
+        "unit": {
+          "format": "text",
+          "type": "string"
+        },
+        "enabled": {
+          "default": true,
+          "format": "boolean",
+          "type": "boolean"
+        },
+        "message": {
+          "format": "text",
+          "type": "string"
+        },
+        "duration": {
+          "default": 5,
+          "format": "integer",
+          "type": "integer"
+        },
+        "start_date": {
+          "format": "text",
+          "type": "string"
+        },
+        "start_time": {
+          "format": "text",
+          "type": "string"
+        },
+        "end_date": {
+          "format": "text",
+          "type": "string"
+        },
+        "end_time": {
+          "format": "text",
+          "type": "string"
+        },
+        "room_id": {
+          "description": "Note:\nThis is a Foreign Key to `rooms.id`.<fk table='rooms' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "building_id": {
+          "description": "Note:\nThis is a Foreign Key to `buildings.id`.<fk table='buildings' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "floor_id": {
+          "description": "Note:\nThis is a Foreign Key to `floors.id`.<fk table='floors' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "admin_id": {
+          "description": "Note:\nThis is a Foreign Key to `administrators.id`.<fk table='administrators' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "created": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "updated": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "staff": {
+      "required": [
+        "id",
+        "name",
+        "status",
+        "created",
+        "updated",
+        "force_logout",
+        "auth_valid_after",
+        "assignment_scope"
+      ],
+      "properties": {
+        "id": {
+          "default": "('stf_'::text || substr(replace((gen_random_uuid())::text, '-'::text, ''::text), 1, 15))",
+          "description": "Note:\nThis is a Primary Key.<pk/>",
+          "format": "text",
+          "type": "string"
+        },
+        "name": {
+          "format": "text",
+          "type": "string"
+        },
+        "email": {
+          "format": "text",
+          "type": "string"
+        },
+        "phone": {
+          "format": "text",
+          "type": "string"
+        },
+        "status": {
+          "default": "Offline",
+          "format": "text",
+          "type": "string"
+        },
+        "last_active": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "created": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "updated": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "avatar": {
+          "default": "default",
+          "format": "text",
+          "type": "string"
+        },
+        "photo_url": {
+          "format": "text",
+          "type": "string"
+        },
+        "avatar_url": {
+          "format": "text",
+          "type": "string"
+        },
+        "role": {
+          "default": "HVAC / Aircon Technician",
+          "format": "text",
+          "type": "string"
+        },
+        "building_name": {
+          "default": "Main Campus Building",
+          "format": "text",
+          "type": "string"
+        },
+        "floor_name": {
+          "default": "2nd Floor - IT Wing",
+          "format": "text",
+          "type": "string"
+        },
+        "room_name": {
+          "default": "Server Room A",
+          "format": "text",
+          "type": "string"
+        },
+        "assignment": {
+          "default": "Main Campus Building \u2022 2nd Floor - IT Wing \u2022 Server Room A",
+          "format": "text",
+          "type": "string"
+        },
+        "room_id": {
+          "format": "text",
+          "type": "string"
+        },
+        "is_archived": {
+          "default": false,
+          "format": "boolean",
+          "type": "boolean"
+        },
+        "archive_reason": {
+          "format": "text",
+          "type": "string"
+        },
+        "archive_notes": {
+          "format": "text",
+          "type": "string"
+        },
+        "archived_at": {
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "is_online": {
+          "default": false,
+          "format": "boolean",
+          "type": "boolean"
+        },
+        "is_active": {
+          "default": true,
+          "format": "boolean",
+          "type": "boolean"
+        },
+        "online_status": {
+          "default": "offline",
+          "format": "text",
+          "type": "string"
+        },
+        "password": {
+          "format": "text",
+          "type": "string"
+        },
+        "auth_user_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "force_logout": {
+          "default": false,
+          "format": "boolean",
+          "type": "boolean"
+        },
+        "auth_valid_after": {
+          "default": "-infinity",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "phone_digits": {
+          "format": "text",
+          "type": "string"
+        },
+        "assignment_scope": {
+          "default": "room",
+          "format": "text",
+          "type": "string"
+        },
+        "assigned_floor_id": {
+          "description": "Note:\nThis is a Foreign Key to `floors.id`.<fk table='floors' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "assigned_building_id": {
+          "description": "Note:\nThis is a Foreign Key to `buildings.id`.<fk table='buildings' column='id'/>",
+          "format": "text",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "buildings": {
+      "required": [
+        "id",
+        "name",
+        "created",
+        "updated"
+      ],
+      "properties": {
+        "id": {
+          "default": "('bld_'::text || substr(replace((gen_random_uuid())::text, '-'::text, ''::text), 1, 15))",
+          "description": "Note:\nThis is a Primary Key.<pk/>",
+          "format": "text",
+          "type": "string"
+        },
+        "name": {
+          "format": "text",
+          "type": "string"
+        },
+        "admin_id": {
+          "description": "Note:\nThis is a Foreign Key to `administrators.id`.<fk table='administrators' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "created": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "updated": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ecotrack_push_wake_tokens": {
+      "required": [
+        "nonce",
+        "expires_at"
+      ],
+      "properties": {
+        "nonce": {
+          "default": "gen_random_uuid()",
+          "description": "Note:\nThis is a Primary Key.<pk/>",
+          "format": "uuid",
+          "type": "string"
+        },
+        "expires_at": {
+          "default": "(now() + '00:10:00'::interval)",
+          "format": "timestamp with time zone",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "registration_tasks": {
+      "required": [
+        "id",
+        "aircon_id",
+        "target_room_id",
+        "status",
+        "created_at"
+      ],
+      "properties": {
+        "id": {
+          "default": "('rt_'::text || substr(replace((gen_random_uuid())::text, '-'::text, ''::text), 1, 15))",
+          "description": "Note:\nThis is a Primary Key.<pk/>",
+          "format": "text",
+          "type": "string"
+        },
+        "aircon_id": {
+          "description": "Note:\nThis is a Foreign Key to `aircons.id`.<fk table='aircons' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "assigned_staff_id": {
+          "description": "Note:\nThis is a Foreign Key to `staff.id`.<fk table='staff' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "target_room_id": {
+          "description": "Note:\nThis is a Foreign Key to `rooms.id`.<fk table='rooms' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "status": {
+          "default": "pending",
+          "format": "text",
+          "type": "string"
+        },
+        "notes": {
+          "format": "text",
+          "type": "string"
+        },
+        "created_at": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "completed_at": {
+          "format": "timestamp with time zone",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "floors": {
+      "required": [
+        "id",
+        "name",
+        "created",
+        "updated"
+      ],
+      "properties": {
+        "id": {
+          "default": "('flr_'::text || substr(replace((gen_random_uuid())::text, '-'::text, ''::text), 1, 15))",
+          "description": "Note:\nThis is a Primary Key.<pk/>",
+          "format": "text",
+          "type": "string"
+        },
+        "name": {
+          "format": "text",
+          "type": "string"
+        },
+        "building_id": {
+          "description": "Note:\nThis is a Foreign Key to `buildings.id`.<fk table='buildings' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "created": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "updated": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "rooms": {
+      "required": [
+        "id",
+        "name",
+        "node_limit",
+        "created",
+        "updated"
+      ],
+      "properties": {
+        "id": {
+          "default": "('rm_'::text || substr(replace((gen_random_uuid())::text, '-'::text, ''::text), 1, 15))",
+          "description": "Note:\nThis is a Primary Key.<pk/>",
+          "format": "text",
+          "type": "string"
+        },
+        "name": {
+          "format": "text",
+          "type": "string"
+        },
+        "node_limit": {
+          "default": 5,
+          "format": "integer",
+          "type": "integer"
+        },
+        "floor_id": {
+          "description": "Note:\nThis is a Foreign Key to `floors.id`.<fk table='floors' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "admin_id": {
+          "description": "Note:\nThis is a Foreign Key to `administrators.id`.<fk table='administrators' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "created": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "updated": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "rule_nodes": {
+      "required": [
+        "id",
+        "rule_id",
+        "node_id",
+        "created",
+        "updated"
+      ],
+      "properties": {
+        "id": {
+          "default": "('rn_'::text || substr(replace((gen_random_uuid())::text, '-'::text, ''::text), 1, 15))",
+          "description": "Note:\nThis is a Primary Key.<pk/>",
+          "format": "text",
+          "type": "string"
+        },
+        "rule_id": {
+          "description": "Note:\nThis is a Foreign Key to `rules.id`.<fk table='rules' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "node_id": {
+          "description": "Note:\nThis is a Foreign Key to `nodes.id`.<fk table='nodes' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "created": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "updated": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "staff_locations": {
+      "required": [
+        "id",
+        "staff_id",
+        "level",
+        "created_at"
+      ],
+      "properties": {
+        "id": {
+          "default": "('sl_'::text || substr(replace((gen_random_uuid())::text, '-'::text, ''::text), 1, 15))",
+          "description": "Note:\nThis is a Primary Key.<pk/>",
+          "format": "text",
+          "type": "string"
+        },
+        "staff_id": {
+          "description": "Note:\nThis is a Foreign Key to `staff.id`.<fk table='staff' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "level": {
+          "format": "text",
+          "type": "string"
+        },
+        "room_id": {
+          "description": "Note:\nThis is a Foreign Key to `rooms.id`.<fk table='rooms' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "floor_id": {
+          "description": "Note:\nThis is a Foreign Key to `floors.id`.<fk table='floors' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "building_id": {
+          "description": "Note:\nThis is a Foreign Key to `buildings.id`.<fk table='buildings' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "is_primary": {
+          "default": true,
+          "format": "boolean",
+          "type": "boolean"
+        },
+        "created_at": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "telemetry": {
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "default": "('telem_'::text || substr(md5((random())::text), 1, 12))",
+          "description": "Note:\nThis is a Primary Key.<pk/>",
+          "format": "text",
+          "type": "string"
+        },
+        "node_id": {
+          "format": "text",
+          "type": "string"
+        },
+        "sensor_name": {
+          "format": "text",
+          "type": "string"
+        },
+        "room_name": {
+          "format": "text",
+          "type": "string"
+        },
+        "floor_name": {
+          "format": "text",
+          "type": "string"
+        },
+        "building_name": {
+          "format": "text",
+          "type": "string"
+        },
+        "aircon_type": {
+          "format": "text",
+          "type": "string"
+        },
+        "temperature": {
+          "format": "numeric",
+          "type": "number"
+        },
+        "pressure": {
+          "format": "numeric",
+          "type": "number"
+        },
+        "battery": {
+          "format": "numeric",
+          "type": "number"
+        },
+        "rssi": {
+          "format": "integer",
+          "type": "integer"
+        },
+        "status": {
+          "default": "online",
+          "format": "text",
+          "type": "string"
+        },
+        "created": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "interval_seconds": {
+          "format": "numeric",
+          "type": "number"
+        },
+        "ac_on": {
+          "format": "boolean",
+          "type": "boolean"
+        },
+        "aircon_id": {
+          "format": "text",
+          "type": "string"
+        },
+        "control_snapshot": {
+          "format": "jsonb"
+        }
+      },
+      "type": "object"
+    },
+    "ecotrack_auth_attempts": {
+      "required": [
+        "key",
+        "started_at",
+        "attempts"
+      ],
+      "properties": {
+        "key": {
+          "description": "Note:\nThis is a Primary Key.<pk/>",
+          "format": "text",
+          "type": "string"
+        },
+        "started_at": {
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "attempts": {
+          "format": "integer",
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "staff_push_tokens": {
+      "required": [
+        "token",
+        "auth_user_id",
+        "staff_id",
+        "platform",
+        "critical_enabled",
+        "maintenance_enabled",
+        "updated_at"
+      ],
+      "properties": {
+        "token": {
+          "description": "Note:\nThis is a Primary Key.<pk/>",
+          "format": "text",
+          "type": "string"
+        },
+        "auth_user_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "staff_id": {
+          "description": "Note:\nThis is a Foreign Key to `staff.id`.<fk table='staff' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "platform": {
+          "format": "text",
+          "type": "string"
+        },
+        "critical_enabled": {
+          "default": true,
+          "format": "boolean",
+          "type": "boolean"
+        },
+        "maintenance_enabled": {
+          "default": true,
+          "format": "boolean",
+          "type": "boolean"
+        },
+        "updated_at": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "aircons": {
+      "required": [
+        "id",
+        "asset_tag",
+        "brand",
+        "model",
+        "aircon_type",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "id": {
+          "default": "('ac_'::text || substr(replace((gen_random_uuid())::text, '-'::text, ''::text), 1, 15))",
+          "description": "Note:\nThis is a Primary Key.<pk/>",
+          "format": "text",
+          "type": "string"
+        },
+        "asset_tag": {
+          "format": "text",
+          "type": "string"
+        },
+        "brand": {
+          "format": "text",
+          "type": "string"
+        },
+        "model": {
+          "format": "text",
+          "type": "string"
+        },
+        "cooling_capacity_hp": {
+          "default": 1.5,
+          "format": "numeric",
+          "type": "number"
+        },
+        "aircon_type": {
+          "default": "Split Type (Inverter)",
+          "format": "text",
+          "type": "string"
+        },
+        "room_id": {
+          "description": "Note:\nThis is a Foreign Key to `rooms.id`.<fk table='rooms' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "node_id": {
+          "description": "Note:\nThis is a Foreign Key to `nodes.id`.<fk table='nodes' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "status": {
+          "default": "unlinked",
+          "format": "text",
+          "type": "string"
+        },
+        "protocol": {
+          "default": "DAIKIN216",
+          "format": "text",
+          "type": "string"
+        },
+        "install_date": {
+          "default": "CURRENT_DATE",
+          "format": "date",
+          "type": "string"
+        },
+        "created_at": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "updated_at": {
+          "default": "now()",
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "protocol_name": {
+          "default": "midea_ir",
+          "description": "Dynamic IR protocol identifier (e.g. midea_ir, gree, daikin, carrier, panasonic, koppel_ir, mitsubishi, samsung, generic_ac)",
+          "format": "text",
+          "type": "string"
+        },
+        "controller_node_id": {
+          "description": "Note:\nThis is a Foreign Key to `nodes.id`.<fk table='nodes' column='id'/>",
+          "format": "text",
+          "type": "string"
+        },
+        "desired_state": {
+          "format": "jsonb"
+        },
+        "command_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "command_status": {
+          "format": "text",
+          "type": "string"
+        },
+        "command_status_at": {
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "commanded_at": {
+          "format": "timestamp with time zone",
+          "type": "string"
+        },
+        "reported_state": {
+          "format": "jsonb"
+        },
+        "reported_at": {
+          "format": "timestamp with time zone",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "paths": [
+    "/",
+    "/maintenance_reports",
+    "/ecotrack_push_deliveries",
+    "/ecotrack_maintenance_operations",
+    "/mobile_notifications",
+    "/notifications",
+    "/nodes",
+    "/administrators",
+    "/mobile_notification_state",
+    "/rules",
+    "/staff",
+    "/buildings",
+    "/ecotrack_push_wake_tokens",
+    "/registration_tasks",
+    "/floors",
+    "/rooms",
+    "/rule_nodes",
+    "/staff_locations",
+    "/telemetry",
+    "/ecotrack_auth_attempts",
+    "/staff_push_tokens",
+    "/aircons",
+    "/rpc/ecotrack_create_notification",
+    "/rpc/resolve_room_maintainer",
+    "/rpc/ecotrack_auth_attempt",
+    "/rpc/delete_maintenance_reports",
+    "/rpc/ecotrack_claim_push_deliveries",
+    "/rpc/ecotrack_my_profile",
+    "/rpc/ecotrack_mutate_maintenance",
+    "/rpc/ecotrack_mark_all_notifications_read",
+    "/rpc/ecotrack_wake_push_worker",
+    "/rpc/ecotrack_can_read_image",
+    "/rpc/ecotrack_can_access_room",
+    "/rpc/ecotrack_set_notification_state",
+    "/rpc/ecotrack_set_aircon_intent",
+    "/rpc/ecotrack_device_mutation",
+    "/rpc/ecotrack_update_profile",
+    "/rpc/ecotrack_set_presence",
+    "/rpc/ecotrack_admin_list_staff",
+    "/rpc/ecotrack_desktop_device_batch",
+    "/rpc/ecotrack_admin_delete_reports",
+    "/rpc/ecotrack_report_aircon_state",
+    "/rpc/ecotrack_staff_id",
+    "/rpc/ecotrack_update_maintenance_report",
+    "/rpc/ecotrack_register_push_token",
+    "/rpc/ecotrack_ack_aircon_intent",
+    "/rpc/ecotrack_update_admin_profile",
+    "/rpc/ecotrack_authorize_push_worker",
+    "/rpc/ecotrack_can_manage_device",
+    "/rpc/ecotrack_notification_visible",
+    "/rpc/ecotrack_submit_repair",
+    "/rpc/ecotrack_device_room",
+    "/rpc/ecotrack_verify_maintenance",
+    "/rpc/ecotrack_session_valid",
+    "/rpc/ecotrack_unregister_push_token",
+    "/rpc/ecotrack_admin_save_report",
+    "/rpc/ecotrack_is_admin",
+    "/rpc/ecotrack_list_notifications"
+  ]
+}

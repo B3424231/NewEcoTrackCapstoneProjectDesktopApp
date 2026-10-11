@@ -1,0 +1,14 @@
+{
+  "result": "passed",
+  "board": "esp32:esp32:esp32s3:PartitionScheme=huge_app",
+  "esp32_core": "3.3.12",
+  "ArduinoJson": "7.4.3",
+  "IRremoteESP8266": "2.9.0",
+  "program_bytes": 1403048,
+  "program_limit": 3145728,
+  "global_variable_bytes": 50196,
+  "physical_hardware_tested": false,
+  "hardware_flashed": false,
+  "firmware_directory_edited": false,
+  "source_sha256": "68388d4ed5c7acd01296afef7660f5689642785850fec86223c67193b41c33a1"
+}

@@ -1,0 +1,71 @@
+{
+  "passed": 54,
+  "isolated_production_components": true,
+  "live_hardware_tested": false,
+  "results": [
+    {
+      "theme": "light",
+      "checks": [
+        "Actual Chromium DOMException numeric code does not crash the Bluetooth handler",
+        "Native Bluetooth errors display reconnect guidance instead of an exception or Supabase failure",
+        "Edit restores actual ancestors with repeated location names",
+        "Floors are restricted to the selected building",
+        "Changing buildings clears incompatible descendants",
+        "Complete location validates",
+        "Blank custom room fails before writes",
+        "Custom room uses its server ID and correct parent",
+        "Step 3 native validation accepts recovery password and optional brand",
+        "Edit native validation accepts optional brand",
+        "Status absent; hardware IP read-only",
+        "Password Enter cannot submit registration",
+        "Bluetooth detection enabled before registration",
+        "Detection result updates brand and releases buttons",
+        "Live disconnect uses Bluetooth status instead of a Supabase failure",
+        "Disconnected setup identifies Wi-Fi as previously confirmed",
+        "Reconnect provides immediate busy feedback and guards Save",
+        "Reconnect reuses the selected ESP32 and refreshes the reported IP",
+        "Reconnect preserves name, location, brand, and the recovery password",
+        "Reconnect releases controls and retains native form validity",
+        "Another controller disconnect cannot change this wizard",
+        "A fresh Bluetooth reply clears a stale disconnect warning without claiming Supabase verification",
+        "Firmware and receiver/transmitter role come from the live ESP32",
+        "A connected request failure is distinguished from a physical disconnection",
+        "The next successful read clears request failures and hides the alternate picker",
+        "Every AC command button including simulated remote requires a transmitter",
+        "Transmitter capability restores power control"
+      ]
+    },
+    {
+      "theme": "dark",
+      "checks": [
+        "Actual Chromium DOMException numeric code does not crash the Bluetooth handler",
+        "Native Bluetooth errors display reconnect guidance instead of an exception or Supabase failure",
+        "Edit restores actual ancestors with repeated location names",
+        "Floors are restricted to the selected building",
+        "Changing buildings clears incompatible descendants",
+        "Complete location validates",
+        "Blank custom room fails before writes",
+        "Custom room uses its server ID and correct parent",
+        "Step 3 native validation accepts recovery password and optional brand",
+        "Edit native validation accepts optional brand",
+        "Status absent; hardware IP read-only",
+        "Password Enter cannot submit registration",
+        "Bluetooth detection enabled before registration",
+        "Detection result updates brand and releases buttons",
+        "Live disconnect uses Bluetooth status instead of a Supabase failure",
+        "Disconnected setup identifies Wi-Fi as previously confirmed",
+        "Reconnect provides immediate busy feedback and guards Save",
+        "Reconnect reuses the selected ESP32 and refreshes the reported IP",
+        "Reconnect preserves name, location, brand, and the recovery password",
+        "Reconnect releases controls and retains native form validity",
+        "Another controller disconnect cannot change this wizard",
+        "A fresh Bluetooth reply clears a stale disconnect warning without claiming Supabase verification",
+        "Firmware and receiver/transmitter role come from the live ESP32",
+        "A connected request failure is distinguished from a physical disconnection",
+        "The next successful read clears request failures and hides the alternate picker",
+        "Every AC command button including simulated remote requires a transmitter",
+        "Transmitter capability restores power control"
+      ]
+    }
+  ]
+}

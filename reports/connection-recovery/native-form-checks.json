@@ -1,0 +1,47 @@
+{
+  "passed": 2,
+  "isolated_production_component": true,
+  "live_hardware_tested": false,
+  "results": [
+    {
+      "theme": "light",
+      "before": {
+        "valid": false,
+        "invalid": [
+          "registrationWifiPassword"
+        ],
+        "hiddenPasswordRequired": false,
+        "recoveryRequired": true,
+        "recoveryVisible": true,
+        "pendingColor": "rgb(226, 232, 240)"
+      },
+      "after": {
+        "valid": true,
+        "invalid": [],
+        "passwordCopied": true,
+        "successColor": "rgb(16, 185, 129)",
+        "statusText": "ESP32 confirmed its existing Wi-Fi connection"
+      }
+    },
+    {
+      "theme": "dark",
+      "before": {
+        "valid": false,
+        "invalid": [
+          "registrationWifiPassword"
+        ],
+        "hiddenPasswordRequired": false,
+        "recoveryRequired": true,
+        "recoveryVisible": true,
+        "pendingColor": "rgb(51, 65, 85)"
+      },
+      "after": {
+        "valid": true,
+        "invalid": [],
+        "passwordCopied": true,
+        "successColor": "rgb(16, 185, 129)",
+        "statusText": "ESP32 confirmed its existing Wi-Fi connection"
+      }
+    }
+  ]
+}

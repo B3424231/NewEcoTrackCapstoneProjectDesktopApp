@@ -1,0 +1,3126 @@
+--- before/public/js/supabase-client.js
++++ after/public/js/supabase-client.js
+@@ -1,7 +1,7 @@
+ // ===================================================================
+-// ECOTRACK SUPABASE CLIENT & DUAL-DATABASE ROUTER
++// ECOTRACK SUPABASE CLIENT & SQLITE TELEMETRY ADAPTER
+ // - Routes control logs ('telemetry') -> Native SQLite3 Database (backend/telemetry.db)
+-// - Routes all other entities -> Supabase Cloud Database
++// - Cloud entities use the Supabase client directly
+ // ===================================================================
+ 
+ (function() {
+@@ -184,41 +184,6 @@
+     } catch (_) {}
+   }
+ 
+-  // Helper to parse simple PocketBase string filter (e.g., "room_id = 'rm_123'", "date = '2026-08-29'")
+-  function applyPbFilterToSupabaseQuery(query, filterStr) {
+-    if (!filterStr || typeof filterStr !== 'string') return query;
+-
+-    const conditions = filterStr.split(/&&|AND/i).map(c => c.trim()).filter(Boolean);
+-    for (const cond of conditions) {
+-      const eqMatch = cond.match(/^([\w\.]+)\s*=\s*['"]?([^'"]+)['"]?$/);
+-      if (eqMatch) {
+-        query = query.eq(eqMatch[1], eqMatch[2]);
+-        continue;
+-      }
+-      const gteMatch = cond.match(/^([\w\.]+)\s*>=\s*['"]?([^'"]+)['"]?$/);
+-      if (gteMatch) {
+-        query = query.gte(gteMatch[1], gteMatch[2]);
+-        continue;
+-      }
+-      const lteMatch = cond.match(/^([\w\.]+)\s*<=\s*['"]?([^'"]+)['"]?$/);
+-      if (lteMatch) {
+-        query = query.lte(lteMatch[1], lteMatch[2]);
+-        continue;
+-      }
+-      const gtMatch = cond.match(/^([\w\.]+)\s*>\s*['"]?([^'"]+)['"]?$/);
+-      if (gtMatch) {
+-        query = query.gt(gtMatch[1], gtMatch[2]);
+-        continue;
+-      }
+-      const ltMatch = cond.match(/^([\w\.]+)\s*<\s*['"]?([^'"]+)['"]?$/);
+-      if (ltMatch) {
+-        query = query.lt(ltMatch[1], ltMatch[2]);
+-        continue;
+-      }
+-    }
+-    return query;
+-  }
+-
+   // ===================================================================
+   // 3. NATIVE SQLITE3 TELEMETRY CONTROL LOGS CLIENT
+   // Dedicated strictly to Control Logs (telemetry) via SQLite3 API
+@@ -228,368 +193,63 @@
+       this.table = 'telemetry';
+       this.baseUrl = window.ECOTRACK_CONFIG.backendUrl || DEFAULT_BACKEND_URL;
+     }
+-
+-    async getFullList(options = {}) {
+-      try {
+-        const params = new URLSearchParams();
+-        params.append('perPage', '0'); // 0 = all records
+-        if (options.sort) params.append('sort', options.sort);
+-        if (options.filter) params.append('filter', options.filter);
+-        if (options.date) params.append('date', options.date);
+-        if (options.node_id) params.append('node_id', options.node_id);
+-
+-        const res = await fetch(`${this.baseUrl}/api/telemetry?${params.toString()}`);
+-        if (res.ok) {
+-          const data = await res.json();
+-          return data.items || [];
+-        }
+-      } catch (err) {
+-        console.warn('[SQLite3 Telemetry] getFullList failed:', err.message);
+-      }
+-      return [];
+-    }
+-
++    async request(path, options) {
++      const response = await fetch(`${this.baseUrl}/api/telemetry${path}`, options);
++      const data = await response.json();
++      if (!response.ok) throw new Error(data.error || `Telemetry request failed (HTTP ${response.status})`);
++      return data;
++    }
++    async getFullList(options = {}) { return (await this.getList(1, 0, options)).items; }
+     async getList(page = 1, perPage = 50, options = {}) {
+-      try {
+-        const params = new URLSearchParams();
+-        params.append('page', String(page));
+-        params.append('perPage', String(perPage));
+-        if (options.sort) params.append('sort', options.sort);
+-        if (options.filter) params.append('filter', options.filter);
+-        if (options.date) params.append('date', options.date);
+-        if (options.node_id) params.append('node_id', options.node_id);
+-
+-        const res = await fetch(`${this.baseUrl}/api/telemetry?${params.toString()}`);
+-        if (res.ok) {
+-          const data = await res.json();
+-          return {
+-            items: data.items || [],
+-            page: data.page || page,
+-            perPage: data.perPage || perPage,
+-            totalItems: data.totalItems || 0,
+-            totalPages: data.totalPages || 1
+-          };
+-        }
+-      } catch (err) {
+-        console.warn('[SQLite3 Telemetry] getList failed:', err.message);
+-      }
+-      return { items: [], page, perPage, totalItems: 0, totalPages: 1 };
+-    }
+-
++      const params = new URLSearchParams({ page: String(page), perPage: String(perPage) });
++      for (const field of ['sort', 'filter', 'date', 'node_id', 'sensor_name', 'start_time', 'end_time']) {
++        if (options[field] != null && options[field] !== '') params.set(field, options[field]);
++      }
++      return this.request(`?${params}`);
++    }
+     async getFirstListItem(filter, options = {}) {
+-      const list = await this.getList(1, 1, { ...options, filter });
+-      if (list.items && list.items.length > 0) {
+-        return list.items[0];
+-      }
+-      throw new Error(`Item not found in SQLite3 telemetry`);
+-    }
+-
+-    async getOne(id) {
+-      try {
+-        const res = await fetch(`${this.baseUrl}/api/telemetry/${id}`);
+-        if (res.ok) return await res.json();
+-      } catch (err) {
+-        console.warn(`[SQLite3 Telemetry] getOne(${id}) failed:`, err.message);
+-      }
+-      throw new Error(`Item ${id} not found in SQLite3 telemetry`);
+-    }
+-
++      const result = await this.getList(1, 1, { ...options, filter });
++      if (result.items?.length) return result.items[0];
++      throw new Error('Telemetry item not found');
++    }
++    async getOne(id) { return this.request(`/${encodeURIComponent(id)}`); }
+     async create(data) {
+-      try {
+-        const res = await fetch(`${this.baseUrl}/api/telemetry`, {
+-          method: 'POST',
+-          headers: { 'Content-Type': 'application/json' },
+-          body: JSON.stringify(data)
+-        });
+-        if (res.ok) return await res.json();
+-      } catch (err) {
+-        console.warn('[SQLite3 Telemetry] create failed:', err.message);
+-        throw err;
+-      }
+-      throw new Error('[SQLite3 Telemetry] create failed');
+-    }
+-
++      return this.request('', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
++    }
+     async update(id, data) {
+-      try {
+-        const res = await fetch(`${this.baseUrl}/api/telemetry`, {
+-          method: 'POST',
+-          headers: { 'Content-Type': 'application/json' },
+-          body: JSON.stringify({ id, ...data })
+-        });
+-        if (res.ok) return await res.json();
+-      } catch (err) {
+-        console.warn(`[SQLite3 Telemetry] update(${id}) failed:`, err.message);
+-        throw err;
+-      }
+-      throw new Error(`[SQLite3 Telemetry] update(${id}) failed`);
+-    }
+-
+-    async delete(id) {
+-      try {
+-        const res = await fetch(`${this.baseUrl}/api/telemetry/${id}`, { method: 'DELETE' });
+-        return res.ok;
+-      } catch (err) {
+-        return true;
+-      }
+-    }
+-
++      return this.request(`/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
++    }
++    async delete(id) { await this.request(`/${encodeURIComponent(id)}`, { method: 'DELETE' }); return true; }
+     subscribe(topic, callback) {
+-      // Lightweight polling interval for SQLite3 live telemetry updates
+-      let isSubscribed = true;
+-      let lastCount = -1;
++      let subscribed = true, signature = null, previousCount = null;
+       const poll = async () => {
+-        if (!isSubscribed) return;
+         try {
+-          const res = await fetch(`${this.baseUrl}/api/telemetry?page=1&perPage=1&sort=-created`);
+-          if (res.ok) {
+-            const data = await res.json();
+-            if (data.items && data.items.length > 0 && data.totalItems !== lastCount) {
+-              lastCount = data.totalItems;
+-              if (typeof callback === 'function') {
+-                callback({ action: 'create', record: data.items[0] });
+-              }
+-            }
++          const data = await this.getList(1, 1, { sort: '-updated' });
++          if (!subscribed) return;
++          const record = data.items[0] || null;
++          const next = JSON.stringify([data.totalItems, record]);
++          if (next !== signature) {
++            const action = previousCount !== null && data.totalItems < previousCount ? 'delete' : signature === null ? 'create' : 'update';
++            signature = next; previousCount = data.totalItems;
++            if (typeof callback === 'function') callback({ action, record });
+           }
+-        } catch (_) {}
++        } catch (_) { /* Failed reads must not masquerade as empty results. */ }
+       };
+-      const intervalId = setInterval(poll, 2000);
+-      return Promise.resolve(() => {
+-        isSubscribed = false;
+-        clearInterval(intervalId);
+-      });
+-    }
+-  }
+-
+-  // ===================================================================
+-  // 4. SUPABASE TABLE SERVICE FOR ALL OTHER PAGES & ENTITIES
+-  // ===================================================================
+-  class SupabaseTableCollection {
+-    constructor(tableName) {
+-      this.table = tableName;
+-    }
+-
+-    async getFullList(options = {}) {
+-      if (sbClient && window.ECOTRACK_CONFIG.isSupabaseConfigured()) {
+-        try {
+-          let q = sbClient.from(this.table).select('*');
+-          if (options.filter) q = applyPbFilterToSupabaseQuery(q, options.filter);
+-          if (options.sort) {
+-            const isDesc = options.sort.startsWith('-');
+-            const col = isDesc ? options.sort.substring(1) : options.sort;
+-            q = q.order(col, { ascending: !isDesc });
+-          }
+-          const { data, error } = await q;
+-          if (!error && data) return data;
+-          if (error) console.warn(`[Supabase GET ${this.table}] error:`, error.message);
+-        } catch (e) {
+-          console.warn(`[Supabase GET ${this.table}] exception:`, e.message);
+-        }
+-      }
+-
+-      return [];
+-    }
+-
+-    async getList(page = 1, perPage = 50, options = {}) {
+-      if (sbClient && window.ECOTRACK_CONFIG.isSupabaseConfigured()) {
+-        try {
+-          const from = (page - 1) * perPage;
+-          const to = from + perPage - 1;
+-          let q = sbClient.from(this.table).select('*', { count: 'exact' }).range(from, to);
+-          if (options.filter) q = applyPbFilterToSupabaseQuery(q, options.filter);
+-          if (options.sort) {
+-            const isDesc = options.sort.startsWith('-');
+-            const col = isDesc ? options.sort.substring(1) : options.sort;
+-            q = q.order(col, { ascending: !isDesc });
+-          }
+-          const { data, count, error } = await q;
+-          if (!error && data) {
+-            return {
+-              items: data,
+-              page,
+-              perPage,
+-              totalItems: count || data.length,
+-              totalPages: Math.ceil((count || data.length) / perPage)
+-            };
+-          }
+-          if (error) console.warn(`[Supabase getList ${this.table}] error:`, error.message);
+-        } catch (e) {
+-          console.warn(`[Supabase getList ${this.table}] exception:`, e.message);
+-        }
+-      }
+-
+-      const full = await this.getFullList(options);
+-      const start = (page - 1) * perPage;
+-      const items = full.slice(start, start + perPage);
+-      return { items, page, perPage, totalItems: full.length, totalPages: Math.ceil(full.length / perPage) };
+-    }
+-
+-    async getFirstListItem(filter, options = {}) {
+-      if (sbClient && window.ECOTRACK_CONFIG.isSupabaseConfigured()) {
+-        try {
+-          let q = sbClient.from(this.table).select('*');
+-          q = applyPbFilterToSupabaseQuery(q, filter);
+-          const { data, error } = await q.limit(1).single();
+-          if (!error && data) return data;
+-          if (error && error.code !== 'PGRST116') console.warn(`[Supabase getFirstListItem ${this.table}] error:`, error.message);
+-        } catch (e) {
+-          console.warn(`[Supabase getFirstListItem ${this.table}] exception:`, e.message);
+-        }
+-      }
+-      throw new Error(`Item not found in ${this.table}`);
+-    }
+-
+-    async getOne(id) {
+-      if (sbClient && window.ECOTRACK_CONFIG.isSupabaseConfigured()) {
+-        try {
+-          const { data, error } = await sbClient.from(this.table).select('*').eq('id', id).single();
+-          if (!error && data) return data;
+-        } catch (e) {}
+-      }
+-      throw new Error(`Item ${id} not found in ${this.table}`);
+-    }
+-
+-    async create(data) {
+-      if (sbClient && window.ECOTRACK_CONFIG.isSupabaseConfigured()) {
+-        try {
+-          const { data: record, error } = await sbClient.from(this.table).insert([data]).select().single();
+-          if (!error && record) return record;
+-          if (error) {
+-            console.warn(`[Supabase create ${this.table}] error:`, error.message);
+-            throw new Error(`Supabase create in ${this.table} failed: ${error.message}`);
+-          }
+-        } catch (e) {
+-          console.warn(`[Supabase create ${this.table}] exception:`, e.message);
+-          throw e;
+-        }
+-      }
+-      throw new Error(`Supabase create in ${this.table} failed: Database client unavailable.`);
+-    }
+-
+-    async update(id, data) {
+-      if (sbClient && window.ECOTRACK_CONFIG.isSupabaseConfigured()) {
+-        try {
+-          const { data: record, error } = await sbClient.from(this.table).update(data).eq('id', id).select().single();
+-          if (!error && record) return record;
+-          if (error) {
+-            console.warn(`[Supabase update ${this.table}] error:`, error.message);
+-            throw new Error(`Supabase update in ${this.table} failed: ${error.message}`);
+-          }
+-        } catch (e) {
+-          console.warn(`[Supabase update ${this.table}] exception:`, e.message);
+-          throw e;
+-        }
+-      }
+-      throw new Error(`Supabase update in ${this.table} failed: Database client unavailable.`);
+-    }
+-
+-    async delete(id) {
+-      if (sbClient && window.ECOTRACK_CONFIG.isSupabaseConfigured()) {
+-        try {
+-          const { error } = await sbClient.from(this.table).delete().eq('id', id);
+-          if (!error) return true;
+-        } catch (e) {}
+-      }
+-      return true;
+-    }
+-
+-    async authWithPassword(usernameOrEmail, password) {
+-      if (sbClient && window.ECOTRACK_CONFIG.isSupabaseConfigured()) {
+-        try {
+-          const { data, error } = await sbClient
+-            .from('administrators')
+-            .select('*')
+-            .or(`username.eq.${usernameOrEmail},email.eq.${usernameOrEmail}`)
+-            .eq('password', password)
+-            .limit(1)
+-            .single();
+-
+-          if (!error && data) {
+-            const token = 'sb_token_' + data.id;
+-            return {
+-              token,
+-              record: data
+-            };
+-          }
+-        } catch (e) {
+-          console.warn('[Supabase Auth] Login check error:', e.message);
+-        }
+-      }
+-
+-      if (usernameOrEmail === 'admin' && (password === 'adminpassword123' || password === 'admin')) {
+-        return {
+-          token: 'offline_admin_token',
+-          record: {
+-            id: 'admin_default_01',
+-            username: 'admin',
+-            email: 'admin@ecotrack.local',
+-            role: 'admin',
+-            is_active: true,
+-            created: '2026-07-03T00:00:00Z'
+-          }
+-        };
+-      }
+-      throw new Error('Invalid username or password.');
+-    }
+-
+-    subscribe(topic, callback) {
+-      if (sbClient) {
+-        try {
+-          const channelName = `realtime_${this.table}_${Math.random().toString(36).substring(2, 8)}`;
+-          const channel = sbClient.channel(channelName)
+-            .on('postgres_changes', { event: '*', schema: 'public', table: this.table }, (payload) => {
+-              if (typeof callback === 'function') {
+-                callback({ action: payload.eventType.toLowerCase(), record: payload.new });
+-              }
+-            })
+-            .subscribe();
+-          return Promise.resolve(() => { sbClient.removeChannel(channel); });
+-        } catch (err) {
+-          console.warn(`[Supabase Realtime ${this.table}] Subscribe failed:`, err);
+-        }
+-      }
+-      return Promise.resolve(() => {});
+-    }
+-  }
+-
+-  // ===================================================================
+-  // 5. DUAL-DATABASE ROUTER (SQLite3 for Telemetry, Supabase for Others)
+-  // ===================================================================
+-  class DualDatabaseClient {
+-    constructor(url) {
+-      this.url = url;
+-      this.authStore = {
+-        isValid: true,
+-        token: localStorage.getItem('ecoTrack_auth_token') || 'valid-session',
+-        model: JSON.parse(localStorage.getItem('ecoTrack_profile_user') || 'null') || {
+-          id: 'admin_default_01',
+-          username: 'admin',
+-          email: 'admin@ecotrack.local',
+-          role: 'admin'
+-        },
+-        clear: () => {
+-          localStorage.removeItem('ecoTrack_auth_token');
+-          localStorage.removeItem('ecoTrack_profile_user');
+-        }
+-      };
+-    }
+-
+-    autoCancellation(enable) {}
+-
++      const interval = setInterval(poll, 2000);
++      return Promise.resolve(() => { subscribed = false; clearInterval(interval); });
++    }
++  }
++
++  // Cloud metadata uses window.supabaseClient.from(table) directly.
++  class TelemetryClient {
+     collection(name) {
+-      // 1. CONTROL LOGS ROUTE TO NATIVE SQLITE3 DATABASE (backend/telemetry.db)
+-      if (name === 'telemetry') {
+-        return new Sqlite3TelemetryCollection();
+-      }
+-
+-      // 2. ALL OTHER ENTITIES ROUTE TO SUPABASE CLOUD DATABASE
+-      return new SupabaseTableCollection(name);
+-    }
+-  }
+-
+-  // Expose router database client
+-  window.PocketBase = DualDatabaseClient;
+-  window.pb = new DualDatabaseClient();
+-
+-  console.log('[EcoTrack] Dual-Database Router Active: Control Logs (telemetry) route strictly to SQLite3; all other tables route to Supabase.');
++      if (name === 'telemetry') return new Sqlite3TelemetryCollection();
++      throw new Error('Use supabaseClient.from(table) for Supabase metadata');
++    }
++  }
++
++  window.telemetryClient = new TelemetryClient();
++  // Compatibility names for existing telemetry pages; these do not open PocketBase.
++  window.pb = window.telemetryClient;
++  window.PocketBase = TelemetryClient;
+ })();
+-
+--- before/public/js/node-sync.js
++++ after/public/js/node-sync.js
+@@ -1,16 +1,6 @@
+-/**
+- * EcoTrack Node & Control Logs Sync Service
+- * Bridges Supabase (master source for relational nodes, rooms, floors, buildings, aircon types)
+- * and PocketBase (dedicated control logs engine).
+- * 
+- * Ensures all Supabase nodes and their metadata are automatically saved into:
+- * 1. PocketBase `nodes` collection
+- * 2. PocketBase `telemetry` collection (Control Logs)
+- */
++/** Saves controller telemetry to SQLite and live readings to Supabase. */
+ 
+ (function(global) {
+-  const DEFAULT_PB_URL = 'http://127.0.0.1:8090';
+-
+   function getSupabase() {
+     if (typeof window !== 'undefined' && (window.supabaseClient || window.sb)) {
+       return window.supabaseClient || window.sb;
+@@ -27,220 +17,7 @@
+     return null;
+   }
+ 
+-  function getPocketBase() {
+-    if (typeof window !== 'undefined') {
+-      if (window.realPocketBase) return window.realPocketBase;
+-      if (window.pb && typeof window.pb.collection === 'function') return window.pb;
+-      if (typeof PocketBase === 'function') return new PocketBase(DEFAULT_PB_URL);
+-    }
+-    if (typeof require !== 'undefined') {
+-      try {
+-        const PocketBase = require('pocketbase/cjs');
+-        return new PocketBase(DEFAULT_PB_URL);
+-      } catch (_) {}
+-    }
+-    return null;
+-  }
+-
+-  /**
+-   * Synchronize all Supabase nodes, rooms, floors, and buildings into PocketBase
+-   * and ensure PocketBase control logs (telemetry collection) have complete records.
+-   */
+-  async function syncSupabaseNodesToPocketBase(options = {}) {
+-    const sb = getSupabase();
+-    const pb = getPocketBase();
+-
+-    if (!sb || !pb) {
+-      console.warn('[EcoTrack Sync] Missing Supabase or PocketBase client; skipping sync.');
+-      return { success: false, reason: 'client_unavailable' };
+-    }
+-
+-    try {
+-      console.log('[EcoTrack Sync] Fetching nodes and metadata from Supabase...');
+-      const [nodesRes, roomsRes, floorsRes, buildingsRes] = await Promise.all([
+-        sb.from('nodes').select('*'),
+-        sb.from('rooms').select('*'),
+-        sb.from('floors').select('*'),
+-        sb.from('buildings').select('*')
+-      ]);
+-
+-      const sbNodes = nodesRes.data || [];
+-      const sbRooms = roomsRes.data || [];
+-      const sbFloors = floorsRes.data || [];
+-      const sbBuildings = buildingsRes.data || [];
+-
+-      if (!sbNodes.length) {
+-        console.log('[EcoTrack Sync] No nodes found in Supabase to sync.');
+-        return { success: true, count: 0 };
+-      }
+-
+-      // Build hierarchy lookup maps from Supabase
+-      const buildingMap = {};
+-      sbBuildings.forEach(b => { buildingMap[b.id] = b.name; });
+-
+-      const floorMap = {};
+-      sbFloors.forEach(f => {
+-        floorMap[f.id] = {
+-          name: f.name,
+-          buildingName: buildingMap[f.building_id] || 'Main Campus Building'
+-        };
+-      });
+-
+-      const locationLookup = {};
+-      sbRooms.forEach(r => {
+-        const fInfo = floorMap[r.floor_id] || { name: 'Floor 1', buildingName: 'Main Campus Building' };
+-        locationLookup[r.id] = {
+-          roomName: r.name,
+-          floorName: fInfo.name,
+-          buildingName: fInfo.buildingName
+-        };
+-      });
+-
+-      // Get existing PocketBase rooms to properly link relations
+-      let pbRooms = [];
+-      try {
+-        pbRooms = await pb.collection('rooms').getFullList();
+-      } catch (_) {}
+-
+-      const pbRoomByName = {};
+-      pbRooms.forEach(pr => {
+-        pbRoomByName[pr.name.toLowerCase().trim()] = pr.id;
+-      });
+-
+-      // Ensure every Supabase room exists in PocketBase
+-      for (const sr of sbRooms) {
+-        const key = sr.name.toLowerCase().trim();
+-        if (!pbRoomByName[key]) {
+-          try {
+-            const createdRoom = await pb.collection('rooms').create({
+-              name: sr.name,
+-              node_limit: sr.node_limit || 5
+-            });
+-            pbRoomByName[key] = createdRoom.id;
+-          } catch (_) {}
+-        }
+-      }
+-
+-      // Get existing PocketBase nodes to avoid duplicates
+-      let pbNodes = [];
+-      try {
+-        pbNodes = await pb.collection('nodes').getFullList();
+-      } catch (err) {
+-        console.warn('[EcoTrack Sync] Could not fetch PocketBase nodes:', err.message);
+-      }
+-
+-      const pbNodeByName = {};
+-      pbNodes.forEach(pn => {
+-        pbNodeByName[pn.name] = pn;
+-      });
+-
+-      const syncedNodes = [];
+-
+-      for (const node of sbNodes) {
+-        const nodeName = node.name || node.id;
+-        const loc = locationLookup[node.room_id] || {
+-          roomName: 'Unassigned',
+-          floorName: 'Unassigned',
+-          buildingName: 'Main Campus Building'
+-        };
+-        const airconType = node.aircon_type || 'Split Type (Inverter)';
+-
+-        let pbNode = pbNodeByName[nodeName];
+-        let pbNodeId = pbNode ? pbNode.id : null;
+-
+-        // Resolve valid PocketBase room ID if available
+-        let pbRoomId = '';
+-        if (loc.roomName && loc.roomName !== 'Unassigned') {
+-          const roomKey = loc.roomName.toLowerCase().trim();
+-          pbRoomId = pbRoomByName[roomKey] || '';
+-        }
+-
+-        const pbNodePayload = {
+-          name: nodeName,
+-          room_id: pbRoomId,
+-          aircon_type: airconType,
+-          status: node.status || 'online',
+-          temp: node.temp ?? 23.5,
+-          pressure: node.pressure ?? 0.45,
+-          battery: node.battery ?? 4.0,
+-          rssi: node.rssi ?? -60,
+-          wake_time: node.wake_time || '00:00',
+-          sleep_time: node.sleep_time || '00:00',
+-          interval_val: node.interval_val || 15,
+-          interval_unit: node.interval_unit || 'Minutes'
+-        };
+-
+-        if (pbNodeId) {
+-          try {
+-            await pb.collection('nodes').update(pbNodeId, pbNodePayload);
+-          } catch (err) {
+-            // If room_id relation fails, retry with empty room_id
+-            if (err.data && err.data.room_id) {
+-              pbNodePayload.room_id = '';
+-              await pb.collection('nodes').update(pbNodeId, pbNodePayload).catch(() => {});
+-            }
+-          }
+-        } else {
+-          try {
+-            const created = await pb.collection('nodes').create(pbNodePayload);
+-            pbNodeId = created.id;
+-            pbNodeByName[nodeName] = created;
+-          } catch (err) {
+-            // If room_id relation fails, retry without room_id
+-            if (pbNodePayload.room_id) {
+-              pbNodePayload.room_id = '';
+-              try {
+-                const created = await pb.collection('nodes').create(pbNodePayload);
+-                pbNodeId = created.id;
+-                pbNodeByName[nodeName] = created;
+-              } catch (retryErr) {
+-                console.warn(`[EcoTrack Sync] Could not create node ${nodeName} in PB:`, retryErr.message);
+-              }
+-            }
+-          }
+-        }
+-
+-        // Now save / sync control logs in PocketBase telemetry collection
+-        if (pbNodeId) {
+-          try {
+-            let existingLogs = [];
+-            try {
+-              const res = await pb.collection('telemetry').getList(1, 10, {
+-                filter: `node_id='${pbNodeId}' || sensor_name='${nodeName}'`,
+-                sort: '-created'
+-              });
+-              existingLogs = res.items || [];
+-            } catch (_) {}
+-
+-            if (existingLogs.length > 0) {
+-              // Update any existing logs that have blank control/room/building/aircon fields
+-              for (const log of existingLogs) {
+-                if (!log.sensor_name || !log.room_name || !log.aircon_type || log.room_name === 'Unassigned') {
+-                  await pb.collection('telemetry').update(log.id, {
+-                    sensor_name: nodeName,
+-                    room_name: loc.roomName,
+-                    floor_name: loc.floorName,
+-                    building_name: loc.buildingName,
+-                    aircon_type: airconType
+-                  });
+-                }
+-              }
+-            }
+-          } catch (telemErr) {
+-            console.warn(`[EcoTrack Sync] Telemetry sync error for ${nodeName}:`, telemErr.message);
+-          }
+-        }
+-
+-        syncedNodes.push({ name: nodeName, pbId: pbNodeId, location: loc, airconType });
+-      }
+-
+-      console.log(`[EcoTrack Sync] Successfully synced ${syncedNodes.length} nodes to PocketBase control logs.`);
+-      return { success: true, count: syncedNodes.length, nodes: syncedNodes };
+-    } catch (err) {
+-      console.error('[EcoTrack Sync] Sync failure:', err);
+-      return { success: false, error: err.message };
+-    }
+-  }
++  const measurement = value => value == null || value === '' || !Number.isFinite(Number(value)) ? null : Number(value);
+ 
+   // In-memory cache for node metadata and save rate-limiting
+   const _nodeMetadataCache = {};
+@@ -248,10 +25,10 @@
+   const _telemetrySavesInFlight = new Set();
+ 
+   /**
+-   * Save a single control log telemetry reading into PocketBase with the node's
++   * Save a single control log telemetry reading into SQLite with the node's
+    * corresponding Supabase metadata.
+    */
+-  async function saveNodeTelemetryToPocketBase(packet) {
++  async function saveNodeTelemetryToSqlite(packet) {
+     if (!packet || !packet.id) return null;
+     const nodeName = packet.name || packet.id;
+     const now = Date.now();
+@@ -321,8 +98,6 @@
+       const secondsMultiplier = intervalUnit.startsWith('sec') ? 1 : intervalUnit.startsWith('min') ? 60 : (intervalUnit.startsWith('hour') || intervalUnit.startsWith('hr')) ? 3600 : 0;
+       const intervalSeconds = Number(packet.interval_seconds ?? packet.intervalSeconds ?? (intervalVal * secondsMultiplier));
+ 
+-      const parsedTemp = Number(packet.temp ?? packet.temperature ?? 24.0);
+-      const isOnline = (packet.status || 'online').toLowerCase() !== 'offline';
+       const reported = String(reportedAcState ?? '').toLowerCase().replace(/[_-]/g, ' ');
+       const resolvedAcOn = reportedAcState === true || reportedAcState === 1 || ['on','true','1','active cooling','cooling','fan only','running'].includes(reported) ? true
+         : reportedAcState === false || reportedAcState === 0 || ['off','false','0','standby','idle','stopped'].includes(reported) ? false : null;
+@@ -357,9 +132,9 @@
+         floor_name: loc.floorName,
+         building_name: loc.buildingName,
+         aircon_type: airconType,
+-        temperature: Number(packet.temp ?? packet.temperature ?? 24.0),
+-        battery: Number(packet.battery ?? 4.0),
+-        rssi: Number(packet.rssi ?? -60),
++        temperature: measurement(packet.temp ?? packet.temperature),
++        battery: measurement(packet.battery),
++        rssi: measurement(packet.rssi),
+         status: packet.status || 'online',
+         created: new Date().toISOString()
+       };
+@@ -381,13 +156,8 @@
+           window.dispatchEvent(new CustomEvent('ecotrack:telemetry-saved', { detail: telemPayload }));
+         }
+       } catch (err) {
+-        // Fallback to pb collection router if fetch had an error
+-        const pb = getPocketBase();
+-        if (pb && typeof pb.collection === 'function') {
+-          try {
+-            record = await pb.collection('telemetry').create(telemPayload);
+-          } catch (_) {}
+-        }
++        console.warn('[EcoTrack Sync] Local telemetry write failed:', err.message);
++        return null;
+       }
+ 
+       // 2. Also update live control readings on Supabase nodes table so all pages reflect real-time values
+@@ -517,9 +287,9 @@
+           name: node.name || node.id,
+           pb_id: node.id,
+           telemetry_id: `telem_cadence_${node.id}_${Math.floor(now / intervalMs)}`,
+-          temp: Number(node.temp) || 0,
+-          battery: Number(node.battery) || 0,
+-          rssi: Number(node.rssi) || 0,
++          temp: measurement(node.temp),
++          battery: measurement(node.battery),
++          rssi: measurement(node.rssi),
+           status: node.status || 'offline',
+           intervalVal: val,
+           intervalUnit: node.interval_unit || 'Minutes',
+@@ -531,7 +301,7 @@
+             Promise.resolve(window.evaluateRulesForTelemetry(actualPacket)).catch(() => {});
+           } catch (_) {}
+         }
+-        saveNodeTelemetryToPocketBase(actualPacket).catch(() => {});
++        saveNodeTelemetryToSqlite(actualPacket).catch(() => {});
+       }
+     }
+   }
+@@ -555,8 +325,7 @@
+ 
+   // Export functions
+   const EcoTrackNodeSync = {
+-    syncSupabaseNodesToPocketBase,
+-    saveNodeTelemetryToPocketBase,
++    saveNodeTelemetryToSqlite,
+     isNodeWithinOperatingWindow,
+     reconcilePendingCommandReceipt,
+     stepBackgroundTelemetryCadence,
+@@ -568,8 +337,7 @@
+   }
+   if (typeof global !== 'undefined') {
+     global.EcoTrackNodeSync = EcoTrackNodeSync;
+-    global.syncSupabaseNodesToPocketBase = syncSupabaseNodesToPocketBase;
+-    global.saveNodeTelemetryToPocketBase = saveNodeTelemetryToPocketBase;
++    global.saveNodeTelemetryToSqlite = saveNodeTelemetryToSqlite;
+     global.startBackgroundTelemetryCadence = startBackgroundTelemetryCadence;
+   }
+ })(typeof window !== 'undefined' ? window : global);
+--- before/public/js/logs.js
++++ after/public/js/logs.js
+@@ -53,7 +53,7 @@
+       telemetryRefreshPending = false;
+       if (telemetryMetadataPending) {
+         telemetryMetadataPending = false;
+-        await loadRoomMap({ syncNodes: false });
++        await loadRoomMap();
+       }
+       await fetchLogsFromDB(true);
+       if (isCurrentLogPeriod()) render({ preserveScroll: true });
+@@ -251,7 +251,7 @@
+   updateTariffUI();
+ 
+   // 1. Instant local database load (renders in ~400ms!)
+-  await Promise.all([fetchLogsFromDB(), loadRoomMap({ syncNodes: false }).catch(() => {})]);
++  await Promise.all([fetchLogsFromDB(), loadRoomMap().catch(() => {})]);
+   console.log('Loaded', nodeDataLogs.length, 'telemetry log records');
+   if (!selectedDateKey) {
+     selectedDateKey = getDefaultDateKey();
+@@ -286,17 +286,12 @@
+ });
+ 
+ // Load room mapping directly from PocketBase / Supabase (non-blocking)
+-async function loadRoomMap({ syncNodes = true } = {}) {
++async function loadRoomMap() {
+   const nodeFilter = document.getElementById('nodeFilter');
+   if (nodeFilter && nodeFilter.options.length <= 1) {
+     nodeFilter.innerHTML = '<option value="">All Controls</option>';
+   }
+   
+-  // Non-blocking sync in background
+-  if (syncNodes && typeof syncSupabaseNodesToPocketBase === 'function') {
+-    syncSupabaseNodesToPocketBase().catch(e => console.warn('[EcoTrack Logs] Sync error:', e));
+-  }
+-
+   try {
+     let roomRecords = [];
+     let floorRecords = [];
+--- before/public/js/telemetry-new.js
++++ after/public/js/telemetry-new.js
+@@ -297,8 +297,8 @@
+ 
+   // Save incoming control reading into PocketBase control logs (throttled)
+   // Skip if the caller explicitly set _skipDBSave (handled by separate DB cadence loop)
+-  if (!packet._skipDBSave && typeof saveNodeTelemetryToPocketBase === 'function') {
+-    saveNodeTelemetryToPocketBase(node).catch(() => {});
++  if (!packet._skipDBSave && typeof saveNodeTelemetryToSqlite === 'function') {
++    saveNodeTelemetryToSqlite(node).catch(() => {});
+   }
+ 
+   // Real-time rule evaluation across active nodes
+@@ -412,13 +412,24 @@
+   console.log('[EcoTrack] loadAvailableNodesFromDB called');
+   try {
+     let nodeRecords = [];
+-    if (sb) {
+-      const { data, error } = await readStartupNodes(reads);
+-      if (!error && data) nodeRecords = data;
+-    }
++    if (!sb) return;
++    await window.ecotrackAuthReady;
++    if (sb.auth?.getSession) {
++      const { data, error } = await sb.auth.getSession();
++      if (error) throw error;
++      if (!data?.session) return;
++    }
++    const { data, error } = await readStartupNodes(reads);
++    if (error) throw error;
++    if (!Array.isArray(data)) throw new Error('Unexpected controller registry response');
++    nodeRecords = data;
+     console.log('[EcoTrack] Loaded', nodeRecords.length, 'nodes from Supabase');
+     
+-    if (!nodeRecords.length) return;
++    if (!nodeRecords.length) {
++      activeNodesData = [];
++      populateAvailableNodes();
++      return;
++    }
+ 
+     let telemetryRecords = [];
+     const telemetryMap = {};
+@@ -1630,10 +1641,6 @@
+       }
+     }
+ 
+-    // Automatically sync updated room assignments to PocketBase nodes and control logs
+-    if (typeof syncSupabaseNodesToPocketBase === 'function') {
+-      syncSupabaseNodesToPocketBase().catch(() => {});
+-    }
+   } catch (error) {
+     console.error('Failed to sync room nodes in Supabase:', error);
+   }
+@@ -2359,9 +2366,6 @@
+       }
+     });
+ 
+-    if (typeof syncSupabaseNodesToPocketBase === 'function') {
+-      syncSupabaseNodesToPocketBase().catch(() => {});
+-    }
+ 
+     showNotification('Registration date/time updated');
+   } catch (err) {
+--- before/public/js/aircon-system.js
++++ after/public/js/aircon-system.js
+@@ -307,22 +307,6 @@
+       }
+ 
+       AirconEvents.emit('log:new', entry);
+-
+-      // Dual sync to Supabase if available
+-      try {
+-        const sb = window.supabaseClient || window.sb;
+-        if (sb && typeof sb.from === 'function') {
+-          sb.from('system_logs').insert([{
+-            device_id: entry.device_id,
+-            node_id: entry.node_id,
+-            module: entry.module,
+-            event: entry.event,
+-            result: entry.result,
+-            details: entry.details,
+-            created: entry.timestamp
+-          }]).then(() => {}).catch(() => {});
+-        }
+-      } catch (_) {}
+ 
+       return entry;
+     }
+@@ -392,6 +376,12 @@
+     try {
+       isDatabaseSyncing = true;
+       const authVersion = databaseAuthVersion;
++      await window.ecotrackAuthReady;
++      if (sb.auth?.getSession) {
++        const { data, error } = await sb.auth.getSession();
++        if (error) throw error;
++        if (!data?.session || authVersion !== databaseAuthVersion) return;
++      }
+       const [nodesRes, [roomsRes, floorsRes, bldRes], airconsRes] = await Promise.all([
+         sb.from('nodes').select('*').order('name'),
+         readReferenceData(sb, refreshReferences),
+@@ -399,14 +389,13 @@
+       ]);
+       if (authVersion !== databaseAuthVersion) return;
+       if (nodesRes.error || airconsRes.error) throw nodesRes.error || airconsRes.error;
++      if (!Array.isArray(nodesRes.data) || !Array.isArray(airconsRes.data)) throw new Error('Unexpected device registry response');
+ 
+       const sbNodes = nodesRes.data || [];
+       const sbRooms = roomsRes.data || [];
+       const sbFloors = floorsRes.data || [];
+       const sbBuildings = bldRes.data || [];
+       const sbAircons = (airconsRes && airconsRes.data) ? airconsRes.data : [];
+-
+-      if (!sbNodes.length && !sbAircons.length) return;
+ 
+       const buildingMap = {};
+       sbBuildings.forEach(b => { buildingMap[b.id] = b.name; });
+@@ -590,6 +579,8 @@
+           normalizeAirconNodeId(n.name) === normNode
+         );
+ 
++        // Do not resurrect a deleted cloud asset or a missing controller from cache.
++        if (!matchedNode || localAc.aircon_id) return;
+         if (matchedNode) {
+           const rId = matchedNode.room_id || localAc.room_id;
+           const rInfo = (rId && roomMap[rId]) || { name: localAc.room_name || 'Facility Zone', floor: localAc.floor || '1st Floor', building: localAc.building || 'Main Campus' };
+@@ -659,6 +650,7 @@
+ 
+       localStorage.setItem('ecoTrack_nodes', JSON.stringify(realNodes));
+       localStorage.setItem('ecoTrack_aircons', JSON.stringify(finalAircons));
++      localStorage.removeItem('ecoTrack_aircons_cache');
+ 
+       AirconEvents.emit('node:updated', realNodes);
+       AirconEvents.emit('aircon:updated', finalAircons);
+--- before/public/js/shared.js
++++ after/public/js/shared.js
+@@ -141,61 +141,24 @@
+ }
+ 
+ async function checkBackendConnection() {
+-  let pythonOk = false;
+-  let pocketbaseOk = false;
+-  let supabaseOk = false;
+-
+-  // 1. Check Python Backend
+-  try {
+-    const pyResponse = await fetch(`${API_BASE}/health`);
+-    if (pyResponse.ok) {
+-      pythonOk = true;
+-    }
+-  } catch (error) {
+-    console.warn('Python backend not responding');
+-  }
+-
+-  // 2. Check PocketBase Database (Control Logs Engine)
+-  try {
+-    const pbResponse = await fetch(`http://127.0.0.1:8090/api/health`);
+-    if (pbResponse.ok) {
+-      pocketbaseOk = true;
+-    }
+-  } catch (error) {
+-    console.warn('PocketBase (control logs engine) not responding');
+-  }
+-
+-  // 3. Check Supabase
+-  if (typeof window.supabaseClient !== 'undefined' && window.ECOTRACK_CONFIG?.isSupabaseConfigured()) {
++  let backendOk = false, supabaseOk = false;
++  try {
++    const backendUrl = window.ECOTRACK_CONFIG?.backendUrl || window.BACKEND_URL || 'http://localhost:5000';
++    backendOk = (await fetch(`${backendUrl}/api/health`)).ok;
++  } catch (_) {}
++  if (window.supabaseClient && window.ECOTRACK_CONFIG?.isSupabaseConfigured()) {
+     try {
++      await window.ecotrackAuthReady;
+       const { error } = await window.supabaseClient.from('nodes').select('id', { count: 'exact', head: true });
+-      if (!error) {
+-        supabaseOk = true;
+-      }
+-    } catch (e) { }
+-  } else {
+-    // If not configured yet or offline, allow operational mode
+-    supabaseOk = true;
+-  }
+-
+-  // Update App State & Logs
+-  if (pythonOk && pocketbaseOk) {
+-    if (!appState.isConnected) addLog('System Online: Connected to Python, PocketBase (Control Logs) & Supabase');
+-    appState.isConnected = true;
+-    updateConnectionStatus(true);
+-  } else if (pythonOk && !pocketbaseOk) {
+-    addLog('Warning: Connected to Python & Supabase, but PocketBase (Control Logs) is offline');
+-    appState.isConnected = false;
+-    updateConnectionStatus(false);
+-  } else if (!pythonOk && pocketbaseOk) {
+-    addLog('Warning: Connected to PocketBase but Python Backend is offline');
+-    appState.isConnected = false;
+-    updateConnectionStatus(false);
+-  } else {
+-    addLog('System Offline: Python & PocketBase are unreachable');
+-    appState.isConnected = false;
+-    updateConnectionStatus(false);
+-  }
++      supabaseOk = !error;
++    } catch (_) {}
++  }
++  const connected = backendOk && supabaseOk, status = `${backendOk}:${supabaseOk}`;
++  if (appState.connectionHealth !== status) addLog(connected ? 'System Online: Connected to SQLite backend and Supabase'
++    : `System connection: SQLite backend ${backendOk ? 'online' : 'offline'}, Supabase ${supabaseOk ? 'online' : 'offline'}`);
++  appState.connectionHealth = status;
++  appState.isConnected = connected;
++  updateConnectionStatus(connected);
+ }
+ 
+ // ===== SESSION TIMEOUT & INACTIVITY WATCHER =====
+--- before/src/preload.js
++++ after/src/preload.js
+@@ -9,7 +9,6 @@
+   SUPABASE_URL: process.env.EXPO_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://ynopdmfhngooknybyahq.supabase.co',
+   SUPABASE_KEY: publicKey(process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY),
+   SUPABASE_ANON_KEY: publicKey(process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY),
+-  PB_URL: process.env.PB_URL || 'http://127.0.0.1:8090',
+   BACKEND_URL: process.env.BACKEND_URL || 'http://localhost:5000'
+ };
+ 
+--- before/.env.example
++++ after/.env.example
+@@ -1,6 +1,7 @@
+ ﻿# EcoTrack Environment Configuration
+-# PocketBase (Local Sensor Logs / Telemetry Engine)
+-PB_URL=http://127.0.0.1:8090
++# Local SQLite telemetry API
++BACKEND_URL=http://localhost:5000
++# Optional Python database override: ECOTRACK_SQLITE_DB_PATH
+ 
+ # Supabase (Cloud Database for Auth, Buildings, Floors, Rooms, Nodes, Rules, Notifications)
+ # Replace with your project URL (e.g., https://xyzcompany.supabase.co)
+--- before/public/js/scheduler.js
++++ after/public/js/scheduler.js
+@@ -706,11 +706,11 @@
+       if (t.sensor_name && !telemMap[t.sensor_name]) telemMap[t.sensor_name] = t;
+     });
+ 
+-    const { data: nodeData } = await sb.from('nodes').select('id, name, temp, pressure, status');
++    const { data: nodeData } = await sb.from('nodes').select('id, name, temp, status');
+     if (nodeData) {
+       nodeData.forEach(n => {
+         if (!telemMap[n.name] && !telemMap[n.id]) {
+-          telemMap[n.name] = { temperature: n.temp, pressure: n.pressure, status: n.status };
++          telemMap[n.name] = { temperature: n.temp, status: n.status };
+         }
+       });
+     }
+--- before/scripts/test_telemetry_cadence.js
++++ after/scripts/test_telemetry_cadence.js
+@@ -78,7 +78,7 @@
+     await step(); await flush();
+     assert.equal(writes.length - beforeBurst, count, 'Quarter-second ticks retain staggered controller phases');
+   }
+-  await window.EcoTrackNodeSync.saveNodeTelemetryToPocketBase({ id: 'confirmed-state', room_name: 'Lab', aircon_type: 'Split Type',
++  await window.EcoTrackNodeSync.saveNodeTelemetryToSqlite({ id: 'confirmed-state', room_name: 'Lab', aircon_type: 'Split Type',
+     temp: 25, ac_on: false, intervalVal: 2, intervalUnit: 'Minutes' });
+   assert.equal(writes.at(-1).ac_on, false, 'Preserve explicitly reported AC-off state');
+   assert.equal(writes.at(-1).interval_seconds, 120, 'Save the cadence used by the reading');
+--- before/scripts/verify_supabase_integration.js
++++ after/scripts/verify_supabase_integration.js
+@@ -63,12 +63,13 @@
+ const clientJs = fs.readFileSync('public/js/supabase-client.js', 'utf8');
+ assert('supabase-client.js defines Sqlite3TelemetryCollection', clientJs.includes('Sqlite3TelemetryCollection'));
+ assert('supabase-client.js routes telemetry to SQLite3', clientJs.includes("name === 'telemetry'") && clientJs.includes('Sqlite3TelemetryCollection'));
+-assert('supabase-client.js routes other collections to Supabase', clientJs.includes("new SupabaseTableCollection(name)"));
++assert('supabase-client.js exposes direct cloud client', clientJs.includes('window.supabaseClient = sbClient'));
++assert('unused cloud collection wrapper removed', !clientJs.includes('class SupabaseTableCollection'));
+ 
+ console.log('\n━━━ 5. VERIFY NODE & CONTROL LOGS SYNC SERVICE ━━━');
+ assert('public/js/node-sync.js exists', fs.existsSync('public/js/node-sync.js'));
+ const nodeSyncContent = fs.readFileSync('public/js/node-sync.js', 'utf8');
+-assert('node-sync.js defines saveNodeTelemetryToPocketBase / saveNodeTelemetryToSqlite', nodeSyncContent.includes('saveNodeTelemetryToPocketBase') || nodeSyncContent.includes('saveNodeTelemetryToSqlite'));
++assert('node-sync.js defines saveNodeTelemetryToSqlite', nodeSyncContent.includes('saveNodeTelemetryToSqlite'));
+ const logsJsContent = fs.readFileSync('public/js/logs.js', 'utf8');
+ assert('logs.js has fetchLogsFromDB querying SQLite3', logsJsContent.includes('fetchLogsFromDB') && logsJsContent.includes('/api/telemetry'));
+ 
+--- before/backend/app.py
++++ after/backend/app.py
+@@ -413,26 +413,123 @@
+         return dict(_telemetry_sync_status), 200
+ 
+ 
++TELEMETRY_FIELDS = {
++    'id', 'node_id', 'sensor_name', 'room_name', 'floor_name', 'building_name', 'aircon_type',
++    'temperature', 'pressure', 'battery', 'rssi', 'status', 'created', 'updated',
++    'event_type', 'interval_seconds', 'wake_time', 'sleep_time', 'ac_on', 'aircon_id',
++    'control_snapshot', 'ac_state'
++}
++
++
++def telemetry_measurement(item, field, alias=None):
++    value = item.get(field, item.get(alias) if alias else None)
++    if value is None:
++        return None
++    value = float(value)
++    if not np.isfinite(value):
++        raise ValueError(f'{field} must be finite')
++    return value
++
++
++def compile_telemetry_filter(expression):
++    """Translate collection filters to parameterized SQL; reject unsupported syntax."""
++    if not expression:
++        return '', []
++    expression = expression.strip()
++    if len(expression) > 4096:
++        raise ValueError('Telemetry filter is too long')
++    pattern = re.compile(r"""\s*(?:(\|\||&&|\(|\)|>=|<=|!=|=|>|<)|([A-Za-z_]\w*(?:\.\w+)?)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|(-?\d+(?:\.\d+)?))""")
++    tokens, offset = [], 0
++    while offset < len(expression):
++        match = pattern.match(expression, offset)
++        if not match:
++            raise ValueError('Unsupported telemetry filter syntax')
++        tokens.append(next((kind, value) for kind, value in enumerate(match.groups()) if value is not None))
++        offset = match.end()
++    index, parameters = 0, []
++    def peek(value):
++        return index < len(tokens) and tokens[index][1] == value
++    def atom(depth):
++        nonlocal index
++        if depth > 32:
++            raise ValueError('Telemetry filter is too deeply nested')
++        if peek('('):
++            index += 1
++            result = disjunction(depth + 1)
++            if not peek(')'):
++                raise ValueError('Unbalanced telemetry filter')
++            index += 1
++            return '(' + result + ')'
++        if index + 2 >= len(tokens):
++            raise ValueError('Incomplete telemetry filter')
++        field, operator, literal = tokens[index:index + 3]
++        index += 3
++        column = 'sensor_name' if field[1] == 'node_id.name' else field[1]
++        if field[0] != 1 or column not in TELEMETRY_FIELDS or operator[1] not in ('=', '!=', '>=', '<=', '>', '<'):
++            raise ValueError('Unsupported telemetry filter field or operator')
++        if literal[0] == 2:
++            value = json.loads(literal[1]) if literal[1][0] == '"' else re.sub(r"\\(.)", r"\1", literal[1][1:-1])
++        elif literal[0] == 3:
++            value = float(literal[1])
++        elif literal[0] == 1 and literal[1].lower() in ('true', 'false', 'null'):
++            value = {'true': 1, 'false': 0, 'null': None}[literal[1].lower()]
++        else:
++            raise ValueError('Telemetry filter values must be quoted strings, numbers, booleans or null')
++        sql_operator = {'=': 'IS', '!=': 'IS NOT'}.get(operator[1], operator[1]) if value is None else operator[1]
++        parameters.append(value)
++        return f'"{column}" {sql_operator} ?'
++    def conjunction(depth):
++        nonlocal index
++        result = atom(depth)
++        while peek('&&'):
++            index += 1
++            result += ' AND ' + atom(depth)
++        return result
++    def disjunction(depth):
++        nonlocal index
++        result = conjunction(depth)
++        while peek('||'):
++            index += 1
++            result += ' OR ' + conjunction(depth)
++        return result
++    result = disjunction(0)
++    if index != len(tokens):
++        raise ValueError('Unsupported telemetry filter syntax')
++    return '(' + result + ')', parameters
++
++
+ class TelemetryListResource(Resource):
+     """
+     CRUD & Querying for Sensor Data Logs in SQLite3.
+     Supports pagination, filtering by node, room, date, and time.
+     """
+     def get(self):
+-        page = int(request.args.get('page', 1))
+-        per_page = int(request.args.get('perPage', request.args.get('limit', 50)))
+-        sort = request.args.get('sort', '-created')
++        try:
++            page = int(request.args.get('page', 1))
++            per_page = int(request.args.get('perPage', request.args.get('limit', 50)))
++            sort = request.args.get('sort', '-created')
++            column = sort.lstrip('-')
++            if page < 1 or per_page < 0 or column not in TELEMETRY_FIELDS:
++                raise ValueError('Invalid telemetry pagination or sort')
++            filter_sql, filter_params = compile_telemetry_filter(request.args.get('filter'))
++        except (ValueError, TypeError) as error:
++            return {'error': str(error)}, 400
+         node_id = request.args.get('node_id', request.args.get('node', None))
+         sensor_name = request.args.get('sensor_name', None)
+         date_key = request.args.get('date', None)
+         start_time = request.args.get('start_time', None)
+         end_time = request.args.get('end_time', None)
+-        filter_str = request.args.get('filter', None)
+ 
+         query = "SELECT * FROM telemetry WHERE 1=1"
+         count_query = "SELECT COUNT(*) FROM telemetry WHERE 1=1"
+         params = []
+         count_params = []
++
++        if filter_sql:
++            query += ' AND ' + filter_sql
++            count_query += ' AND ' + filter_sql
++            params.extend(filter_params)
++            count_params.extend(filter_params)
+ 
+         if node_id:
+             query += " AND (node_id = ? OR sensor_name = ?)"
+@@ -459,13 +556,8 @@
+             params.extend([start_time, end_time])
+             count_params.extend([start_time, end_time])
+ 
+-        # Sorting
+-        if sort.startswith('-'):
+-            col = sort[1:]
+-            query += f" ORDER BY {col} DESC"
+-        else:
+-            col = sort
+-            query += f" ORDER BY {col} ASC"
++        direction = 'DESC' if sort.startswith('-') else 'ASC'
++        query += f' ORDER BY "{column}" {direction}, id {direction}'
+ 
+         conn = get_db_connection()
+         try:
+@@ -495,7 +587,9 @@
+ 
+     def post(self):
+         """Insert single or multiple telemetry sensor logs into SQLite3."""
+-        payload = request.get_json() or {}
++        payload = request.get_json(silent=True)
++        if not isinstance(payload, (dict, list)) or not payload:
++            return {'error': 'Telemetry payload must contain a record or records'}, 400
+         if isinstance(payload, list):
+             items_to_insert = payload
+         else:
+@@ -508,6 +602,8 @@
+         try:
+             with conn:
+                 for item in items_to_insert:
++                    if not isinstance(item, dict) or not item:
++                        raise ValueError('Each telemetry record must be an object')
+                     record_id = item.get('id') or f"telem_{uuid.uuid4().hex[:12]}"
+                     node_id = item.get('node_id') or item.get('id') or 'node-1'
+                     sensor_name = item.get('sensor_name') or item.get('name') or node_id
+@@ -515,10 +611,10 @@
+                     floor_name = item.get('floor_name') or 'Unassigned'
+                     building_name = item.get('building_name') or 'Main Campus Building'
+                     aircon_type = item.get('aircon_type') or 'Split Type (Inverter)'
+-                    temperature = float(item.get('temperature', item.get('temp', 24.0)))
+-                    pressure = float(item.get('pressure', 0.45))
+-                    battery = float(item.get('battery', 4.0))
+-                    rssi = float(item.get('rssi', -60.0))
++                    temperature = telemetry_measurement(item, 'temperature', 'temp')
++                    pressure = telemetry_measurement(item, 'pressure')
++                    battery = telemetry_measurement(item, 'battery')
++                    rssi = telemetry_measurement(item, 'rssi')
+                     status = item.get('status', 'online')
+                     created = item.get('created') or now_iso
+                     updated = item.get('updated') or now_iso
+@@ -568,6 +664,8 @@
+             if len(inserted_items) == 1 and not isinstance(payload, list):
+                 return inserted_items[0], 201
+             return {"items": inserted_items, "count": len(inserted_items)}, 201
++        except (ValueError, TypeError) as e:
++            return {'error': str(e)}, 400
+         except Exception as e:
+             return {"error": str(e)}, 500
+         finally:
+@@ -599,6 +697,42 @@
+             if not row:
+                 return {"error": f"Record {item_id} not found"}, 404
+             return row_to_dict(row), 200
++        finally:
++            conn.close()
++
++    def patch(self, item_id):
++        payload = request.get_json(silent=True)
++        if not isinstance(payload, dict) or not payload:
++            return {'error': 'Telemetry update must be a non-empty object'}, 400
++        if payload.get('id', item_id) != item_id or set(payload) - TELEMETRY_FIELDS:
++            return {'error': 'Unsupported telemetry update field or id'}, 400
++        values = {key: value for key, value in payload.items() if key != 'id'}
++        if not values:
++            return {'error': 'No telemetry fields supplied'}, 400
++        try:
++            for field in ('temperature', 'pressure', 'battery', 'rssi', 'interval_seconds'):
++                if field in values:
++                    values[field] = telemetry_measurement(values, field)
++            if values.get('interval_seconds') is not None and values['interval_seconds'] <= 0:
++                raise ValueError('interval_seconds must be positive')
++            if 'control_snapshot' in values:
++                values['control_snapshot'] = serialize_control_snapshot(values['control_snapshot'])
++            if 'ac_on' in values:
++                values['ac_on'] = normalize_logged_ac_state(values)
++            for field, value in values.items():
++                if field not in ('temperature', 'pressure', 'battery', 'rssi', 'interval_seconds', 'ac_on', 'control_snapshot') and value is not None and not isinstance(value, str):
++                    raise ValueError(f'{field} must be text or null')
++            values['updated'] = datetime.now(timezone.utc).isoformat()
++        except (ValueError, TypeError) as error:
++            return {'error': str(error)}, 400
++        conn = get_db_connection()
++        try:
++            with conn:
++                columns = ', '.join(f'"{field}"=?' for field in values)
++                result = conn.execute(f'UPDATE telemetry SET {columns} WHERE id=?', [*values.values(), item_id])
++                if not result.rowcount:
++                    return {'error': 'Telemetry record not found'}, 404
++            return row_to_dict(conn.execute('SELECT * FROM telemetry WHERE id=?', (item_id,)).fetchone()), 200
+         finally:
+             conn.close()
+ 
+--- before/scripts/transfer_supabase_to_sqlite.py
++++ after/scripts/transfer_supabase_to_sqlite.py
+@@ -1,207 +1,23 @@
+-﻿"""
+-EcoTrack Sensor Logs Transfer: Supabase -> Native SQLite3 (backend/telemetry.db)
+-Fetches all telemetry records from Supabase and transfers them into the local SQLite3 database.
+-"""
+-import os
+-import sys
+-import uuid
+-import sqlite3
+-from datetime import datetime
++"""Catch up local telemetry using the backend's validated cloud ingestion pipeline."""
++import importlib.util
++from pathlib import Path
+ 
+-# Configure UTF-8 encoding for Windows terminals
+-if sys.platform == 'win32' and hasattr(sys.stdout, 'reconfigure'):
+-    try:
+-        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+-        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+-    except Exception:
+-        pass
+-
+-try:
+-    # pyrefly: ignore [missing-import]
+-    from supabase import create_client, Client
+-except ImportError:
+-    # Graceful fallback if supabase-py is not installed in the active environment
+-    create_client = None
+-    Client = None
+-
+-try:
+-    import requests
+-except ImportError:
+-    requests = None
+-
+-def safe_float(val, default=0.0):
+-    """Safely parse float value avoiding NoneType crashes."""
+-    if val is None:
+-        return default
+-    try:
+-        return float(val)
+-    except (ValueError, TypeError):
+-        return default
+-
+-def load_env():
+-    env = {}
+-    env_path = os.path.join(os.path.dirname(__file__), '..', '.env')
+-    if os.path.exists(env_path):
+-        with open(env_path, 'r', encoding='utf-8') as f:
+-            for line in f:
+-                line = line.strip()
+-                if line and not line.startswith('#') and '=' in line:
+-                    k, v = line.split('=', 1)
+-                    env[k.strip()] = v.strip()
+-    return env
+-
+-env = load_env()
+-SUPABASE_URL = os.environ.get('SUPABASE_URL') or env.get('SUPABASE_URL', '')
+-SUPABASE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY') or os.environ.get('SUPABASE_KEY') or env.get('SUPABASE_SERVICE_ROLE_KEY') or env.get('SUPABASE_KEY', '')
+-
+-SQLITE_DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'backend', 'telemetry.db')
+-
+-def get_db():
+-    conn = sqlite3.connect(SQLITE_DB_PATH)
+-    conn.row_factory = sqlite3.Row
+-    return conn
+-
+-def init_db(conn):
+-    with conn:
+-        conn.execute("""
+-            CREATE TABLE IF NOT EXISTS telemetry (
+-                id TEXT PRIMARY KEY,
+-                node_id TEXT,
+-                sensor_name TEXT,
+-                room_name TEXT,
+-                floor_name TEXT,
+-                building_name TEXT,
+-                aircon_type TEXT,
+-                temperature REAL,
+-                pressure REAL,
+-                battery REAL,
+-                rssi REAL,
+-                status TEXT,
+-                created TEXT,
+-                updated TEXT
+-            );
+-        """)
+-        conn.execute("CREATE INDEX IF NOT EXISTS idx_telem_created ON telemetry (created DESC);")
+-        conn.execute("CREATE INDEX IF NOT EXISTS idx_telem_sensor ON telemetry (sensor_name);")
+-        conn.execute("CREATE INDEX IF NOT EXISTS idx_telem_node ON telemetry (node_id);")
+-
+-def fetch_supabase_telemetry():
+-    """
+-    Fetch all telemetry records from Supabase.
+-    First tries the official Supabase Python client (create_client),
+-    then falls back to direct REST API via requests or urllib.
+-    """
+-    # 1. Try official Supabase client if available
+-    if create_client and SUPABASE_URL and SUPABASE_KEY:
+-        try:
+-            supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+-            res = supabase_client.table('telemetry').select('*').order('created', desc=False).execute()
+-            if hasattr(res, 'data') and res.data is not None:
+-                return res.data
+-        except Exception as e:
+-            print(f"âš ï¸ Supabase SDK query failed ({e}). Falling back to REST API...")
+-
+-    url = f"{SUPABASE_URL}/rest/v1/telemetry?select=*&order=created.asc"
+-    headers = {
+-        "apikey": SUPABASE_KEY,
+-        "Authorization": f"Bearer {SUPABASE_KEY}"
+-    }
+-
+-    # 2. Try requests library
+-    if requests:
+-        try:
+-            res = requests.get(url, headers=headers, timeout=30)
+-            if res.status_code == 200:
+-                return res.json()
+-            else:
+-                print(f"âš ï¸ Supabase REST query status {res.status_code}: {res.text}")
+-                return []
+-        except Exception as e:
+-            print(f"âš ï¸ requests fetch failed: {e}")
+-
+-    # 3. Native standard library fallback (urllib)
+-    try:
+-        import urllib.request
+-        import json
+-        req = urllib.request.Request(url, headers=headers)
+-        with urllib.request.urlopen(req, timeout=30) as resp:
+-            if resp.status == 200:
+-                return json.loads(resp.read().decode('utf-8'))
+-    except Exception as e:
+-        print(f"âš ï¸ Native urllib fetch failed: {e}")
+-
+-    return []
+ 
+ def transfer():
+-    print("====================================================")
+-    print("ðŸš€ Transferring Sensor Logs: Supabase -> Native SQLite3")
+-    print(f"   Source Supabase : {SUPABASE_URL}")
+-    print(f"   Target SQLite3  : {SQLITE_DB_PATH}")
+-    print("====================================================\n")
++    source = Path(__file__).resolve().parents[1] / 'backend/app.py'
++    spec = importlib.util.spec_from_file_location('ecotrack_transfer_backend', source)
++    backend = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(backend)
++    fetched = transferred = 0
++    while True:
++        result = backend.sync_cloud_telemetry_once()
++        fetched += result['fetched']
++        transferred += result['transferred']
++        if result['fetched'] < 500:
++            break
++    print(f'Telemetry catch-up complete: {fetched} fetched, {transferred} inserted.')
++    return {'fetched': fetched, 'transferred': transferred}
+ 
+-    conn = get_db()
+-    init_db(conn)
+-
+-    print("ðŸ“¡ Fetching sensor logs from Supabase...")
+-    records = fetch_supabase_telemetry()
+-    print(f"ðŸ“¦ Found {len(records)} records in Supabase.\n")
+-
+-    if not records:
+-        print("â„¹ï¸ No records to transfer.")
+-        conn.close()
+-        return
+-
+-    transferred = 0
+-    skipped = 0
+-
+-    with conn:
+-        for r in records:
+-            rec_id = r.get('id') or f"telem_{uuid.uuid4().hex[:12]}"
+-            node_id = r.get('node_id') or r.get('sensor_name') or 'node-1'
+-            sensor_name = r.get('sensor_name') or node_id
+-            room_name = r.get('room_name') or 'Unassigned'
+-            floor_name = r.get('floor_name') or 'Unassigned'
+-            building_name = r.get('building_name') or 'Main Campus Building'
+-            aircon_type = r.get('aircon_type') or 'Split Type (Inverter)'
+-            temp = safe_float(r.get('temperature', r.get('temp', 24.0)), 24.0)
+-            press = safe_float(r.get('pressure', 0.45), 0.45)
+-            batt = safe_float(r.get('battery', 4.0), 4.0)
+-            rssi = safe_float(r.get('rssi', -60.0), -60.0)
+-            status = r.get('status', 'online')
+-            created = r.get('created') or datetime.now().isoformat()
+-            updated = r.get('updated') or created
+-
+-            # Deduplicate by ID or (sensor_name + timestamp)
+-            existing = conn.execute(
+-                "SELECT id FROM telemetry WHERE id = ? OR (sensor_name = ? AND created = ?)",
+-                (rec_id, sensor_name, created)
+-            ).fetchone()
+-
+-            if existing:
+-                skipped += 1
+-                continue
+-
+-            conn.execute("""
+-                INSERT INTO telemetry (
+-                    id, node_id, sensor_name, room_name, floor_name, building_name,
+-                    aircon_type, temperature, pressure, battery, rssi, status, created, updated
+-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+-            """, (
+-                rec_id, node_id, sensor_name, room_name, floor_name, building_name,
+-                aircon_type, temp, press, batt, rssi, status, created, updated
+-            ))
+-            transferred += 1
+-
+-    total_in_db = conn.execute("SELECT COUNT(*) FROM telemetry").fetchone()[0]
+-    conn.close()
+-
+-    print("====================================================")
+-    print(f"âœ… Transfer Complete!")
+-    print(f"   Transferred : {transferred} records")
+-    print(f"   Skipped     : {skipped} duplicate records")
+-    print(f"   Total in DB : {total_in_db} records in SQLite3")
+-    print("====================================================\n")
+ 
+ if __name__ == '__main__':
+     transfer()
+-
+--- before/public/js/analytics.js
++++ after/public/js/analytics.js
+@@ -998,68 +998,8 @@
+     activeNodesCountEl.textContent = `Monitoring ${activeNodes} nodes`;
+   }
+ 
+-  const saveBtn = document.getElementById('saveSnapshotBtn');
+-  if (saveBtn) {
+-    saveBtn.addEventListener('click', async () => {
+-      saveBtn.disabled = true;
+-      saveBtn.textContent = 'Saving...';
+-      try {
+-        const dateKey = document.getElementById('dateRangeSelect').value || new Date().toISOString().split('T')[0];
+-        const res = await fetch(`http://127.0.0.1:5000/api/analytics/snapshot?date=${dateKey}`, { method: 'POST' });
+-        if (res.ok) {
+-          if (typeof showNotification === 'function') showNotification('Snapshot saved successfully!');
+-          await loadAnalyticsSnapshot(dateKey);
+-        }
+-      } catch (e) {
+-        console.error(e);
+-        if (typeof showNotification === 'function') showNotification('Failed to save snapshot', 'error');
+-      }
+-      saveBtn.disabled = false;
+-      saveBtn.textContent = 'Save Snapshot';
+-    });
+-  }
+-
+   // Initialize Date Selector
+   initDateSelector();
+-}
+-
+-async function loadAnalyticsSnapshot(dateKey) {
+-  try {
+-    let items = [];
+-    if (sb) {
+-      const { data, error } = await sb.from('analytics_snapshots').select('*').eq('date', dateKey).limit(50);
+-      if (!error && data) items = data;
+-    }
+-
+-    const metricsEl = document.getElementById('snapshotMetrics');
+-    if (metricsEl) {
+-      if (items.length > 0) {
+-        metricsEl.classList.remove('hidden');
+-
+-        let avgT = 0, avgP = 0, avgB = 0, alerts = 0, health = 0, compliance = 0;
+-        items.forEach(item => {
+-          avgT += item.avg_temp || 0;
+-          avgP += item.avg_pressure || 0;
+-          avgB += item.avg_battery || 0;
+-          alerts += item.alerts_count || 0;
+-          health += item.health_score || 0;
+-          compliance += item.compliance_rate || 0;
+-        });
+-
+-        const c = items.length;
+-        document.getElementById('snapAvgTemp').textContent = (avgT / c).toFixed(1) + '°C';
+-        document.getElementById('snapAvgPress').textContent = (avgP / c).toFixed(1) + 'kPa';
+-        document.getElementById('snapAvgBat').textContent = Math.round(((avgB / c) / 4.2) * 100) + '%';
+-        document.getElementById('snapAlerts').textContent = alerts;
+-        document.getElementById('snapHealth').textContent = Math.round(health / c) + '/100';
+-        document.getElementById('snapCompliance').textContent = Math.round(compliance / c) + '%';
+-      } else {
+-        metricsEl.classList.add('hidden');
+-      }
+-    }
+-  } catch (e) {
+-    console.warn('Failed to load snapshot:', e);
+-  }
+ }
+ 
+ function initDateSelector() {
+@@ -1120,18 +1060,7 @@
+     await updateMultiNodeData();
+     await initAnalytics();
+ 
+-    // Load snapshot for the selected date (skip for 'all')
+-    const dateKey = document.getElementById('dateRangeSelect').value;
+-    if (dateKey && dateKey !== 'all') {
+-      loadAnalyticsSnapshot(dateKey);
+-    }
+   });
+-
+-  // Load snapshot on initial load only for a specific date, not 'all'
+-  const initialVal = dateSelect.value;
+-  if (initialVal && initialVal !== 'all') {
+-    loadAnalyticsSnapshot(initialVal);
+-  }
+ }
+ 
+ function updateMultiNodeSummary() {
+--- before/public/analytics.html
++++ after/public/analytics.html
+@@ -101,35 +101,6 @@
+               </div>
+             </div>
+ 
+-            <!-- Daily Snapshot Metrics -->
+-            <div id="snapshotMetrics" class="grid grid-cols-3 lg:grid-cols-6 gap-4 hidden">
+-              <div class="glass-surface glass-card dark:bg-[#0c1328]/70 dark:border-[#10b981]/20 p-4 text-center">
+-                <h4 class="text-xs text-gray-500 dark:text-gray-400 font-bold uppercase tracking-wide">Avg Temp</h4>
+-                <p id="snapAvgTemp" class="text-2xl font-bold text-orange-600 dark:text-orange-400 mt-2">--°C</p>
+-              </div>
+-              <div class="glass-surface glass-card dark:bg-[#0c1328]/70 dark:border-[#10b981]/20 p-4 text-center">
+-                <h4 class="text-xs text-gray-500 dark:text-gray-400 font-bold uppercase tracking-wide">Active Units</h4>
+-                <p id="snapAvgPress" class="text-2xl font-bold text-[#10b981] dark:text-emerald-400 mt-2">--</p>
+-              </div>
+-              <div class="glass-surface glass-card dark:bg-[#0c1328]/70 dark:border-[#10b981]/20 p-4 text-center">
+-                <h4 class="text-xs text-gray-500 dark:text-gray-400 font-bold uppercase tracking-wide">Avg Battery</h4>
+-                <p id="snapAvgBat" class="text-2xl font-bold text-[#10b981] dark:text-emerald-400 mt-2">--%</p>
+-              </div>
+-              <div class="glass-surface glass-card dark:bg-[#0c1328]/70 dark:border-[#10b981]/20 p-4 text-center">
+-                <h4 class="text-xs text-gray-500 dark:text-gray-400 font-bold uppercase tracking-wide">Total Alerts</h4>
+-                <p id="snapAlerts" class="text-2xl font-bold text-red-600 dark:text-rose-400 mt-2">--</p>
+-              </div>
+-              <div class="glass-surface glass-card dark:bg-[#0c1328]/70 dark:border-[#10b981]/20 p-4 text-center">
+-                <h4 class="text-xs text-gray-500 dark:text-gray-400 font-bold uppercase tracking-wide">Room Health</h4>
+-                <p id="snapHealth" class="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-2">--/100</p>
+-              </div>
+-              <div class="glass-surface glass-card dark:bg-[#0c1328]/70 dark:border-[#10b981]/20 p-4 text-center">
+-                <h4 class="text-xs text-gray-500 dark:text-gray-400 font-bold uppercase tracking-wide">Avg Compliance
+-                </h4>
+-                <p id="snapCompliance" class="text-2xl font-bold text-[#18392B] dark:text-cyan-400 mt-2">--%</p>
+-              </div>
+-            </div>
+-
+             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+               <!-- Temperature Chart -->
+               <div class="glass-surface glass-card dark:bg-[#0c1328]/70 dark:border-[#10b981]/20 p-6">
+@@ -295,7 +266,6 @@
+   </div>
+ 
+   <!-- Control Logs Engine (PocketBase) -->
+-  <script src="./js/pocketbase.umd.js"></script>
+   <script>
+     if (!window.PocketBase) {
+       document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/pocketbase/0.26.2/pocketbase.umd.js"><\/script>');
+--- before/public/rules.html
++++ after/public/rules.html
+@@ -834,7 +834,6 @@
+       document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"><\/script>');
+     }
+   </script>
+-  <script src="./js/supabase-client.js"></script>
+   <script src="./js/shared.js"></script>
+   <script src="./js/global-notifications.js"></script>
+   <script src="./js/sidebar.js"></script>
+--- before/public/telemetry.html
++++ after/public/telemetry.html
+@@ -453,7 +453,6 @@
+       document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"><\/script>');
+     }
+   </script>
+-  <script src="./js/supabase-client.js"></script>
+   <script src="./js/node-sync.js"></script>
+   <script src="./js/shared.js"></script>
+   <script src="./js/global-notifications.js"></script>
+--- before/scripts/demo-seeds/legacy_schema_demo.sql
++++ after/scripts/demo-seeds/legacy_schema_demo.sql
+@@ -0,0 +1,46 @@
++-- OPTIONAL LEGACY DEMO DATA ONLY. Never run against real application data.
++-- ===================================================================
++-- INITIAL DEFAULT SEED DATA
++-- ===================================================================
++
++-- Default Administrator
++INSERT INTO administrators (id, username, email, password, role, is_active)
++VALUES ('admin_default_01', 'admin', 'admin@ecotrack.local', 'adminpassword123', 'admin', true)
++ON CONFLICT (id) DO NOTHING;
++
++-- Default Building & Floor
++INSERT INTO buildings (id, name)
++VALUES ('bld_main', 'Main Campus Building')
++ON CONFLICT (id) DO NOTHING;
++
++INSERT INTO floors (id, name, building_id)
++VALUES ('flr_2nd_it', '2nd Floor - IT Wing', 'bld_main')
++ON CONFLICT (id) DO NOTHING;
++
++-- Default Rooms
++INSERT INTO rooms (id, name, node_limit, floor_id)
++VALUES 
++    ('rm_svr_01', 'Server Room A', 5, 'flr_2nd_it'),
++    ('rm_ofc_01', 'Main Office Area', 5, 'flr_2nd_it'),
++    ('rm_lab_01', 'Laboratory A', 5, 'flr_2nd_it')
++ON CONFLICT (id) DO NOTHING;
++
++-- Default Nodes
++INSERT INTO nodes (id, name, status, temp, pressure, battery, rssi, room_id, aircon_type)
++VALUES 
++    ('node_001', 'node-1', 'online', 23.5, 0.48, 4.15, -65, 'rm_svr_01', 'Split Type (Inverter)'),
++    ('node_002', 'node-2', 'online', 24.1, 0.51, 4.08, -70, 'rm_svr_01', 'Split Type (Inverter)'),
++    ('node_003', 'node-3', 'online', 22.8, 0.50, 4.20, -60, 'rm_ofc_01', 'Floor Standing'),
++    ('node_004', 'node-4', 'online', 23.2, 0.49, 4.12, -68, 'rm_ofc_01', 'Floor Standing'),
++    ('node_005', 'node-5', 'online', 25.4, 0.53, 3.95, -75, 'rm_ofc_01', 'Split Type (Inverter)'),
++    ('node_006', 'node-6', 'online', 21.9, 0.47, 4.18, -62, 'rm_lab_01', 'Window Type')
++ON CONFLICT (id) DO NOTHING;
++
++-- Default Rules
++INSERT INTO rules (id, type, condition, value, unit, enabled, message, room_id)
++VALUES
++    ('rule_svr_temp', 'temperature', 'above', 26.0, '°C', true, 'Server Room temperature exceeded safe operating threshold.', 'rm_svr_01'),
++    ('rule_node_bat', 'battery', 'below', 20.0, '%', true, 'Sensor battery charge is critically low. Battery replacement advised.', NULL)
++ON CONFLICT (id) DO NOTHING;
++
++
+--- before/supabase_schema.sql
++++ after/supabase_schema.sql
+@@ -11,7 +11,7 @@
+     id TEXT PRIMARY KEY DEFAULT ('admin_' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 15)),
+     username TEXT UNIQUE NOT NULL,
+     email TEXT UNIQUE NOT NULL,
+-    password TEXT NOT NULL DEFAULT 'adminpassword123',
++    password TEXT, -- Legacy compatibility only; authentication uses Supabase Auth.
+     role TEXT NOT NULL DEFAULT 'admin',
+     is_active BOOLEAN NOT NULL DEFAULT true,
+     last_login TIMESTAMPTZ,
+@@ -156,41 +156,6 @@
+ ALTER TABLE staff ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+ ALTER TABLE staff ADD COLUMN IF NOT EXISTS photo_url TEXT;
+ 
+--- 10. SYSTEM CONFIGURATION
+-CREATE TABLE IF NOT EXISTS system_config (
+-    id TEXT PRIMARY KEY DEFAULT 'cfg_default',
+-    optimal_temp NUMERIC DEFAULT 24,
+-    ac_eco NUMERIC DEFAULT 22,
+-    ac_cool NUMERIC DEFAULT 25,
+-    ac_cold NUMERIC DEFAULT 28,
+-    diag_temp_critical NUMERIC DEFAULT 28,
+-    diag_temp_warning NUMERIC DEFAULT 26,
+-    diag_voltage_critical NUMERIC DEFAULT 3.3,
+-    diag_voltage_warning NUMERIC DEFAULT 3.5,
+-    diag_rssi_poor NUMERIC DEFAULT -80,
+-    power_sleep_hours NUMERIC DEFAULT 8,
+-    power_active_draw_ma NUMERIC DEFAULT 50,
+-    power_sleep_draw_ma NUMERIC DEFAULT 5,
+-    created TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+-    updated TIMESTAMPTZ NOT NULL DEFAULT NOW()
+-);
+-
+--- 11. ANALYTICS SNAPSHOTS (Daily Aggregate Summaries)
+-CREATE TABLE IF NOT EXISTS analytics_snapshots (
+-    id TEXT PRIMARY KEY DEFAULT ('snp_' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 15)),
+-    date TEXT NOT NULL,
+-    room_id TEXT REFERENCES rooms(id) ON DELETE CASCADE,
+-    avg_temp NUMERIC DEFAULT 0,
+-    avg_pressure NUMERIC DEFAULT 0,
+-    avg_battery NUMERIC DEFAULT 0,
+-    alerts_count INTEGER DEFAULT 0,
+-    health_score NUMERIC DEFAULT 100,
+-    compliance_rate NUMERIC DEFAULT 100,
+-    created TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+-    updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+-    UNIQUE(date, room_id)
+-);
+-
+ -- 12. MAINTENANCE REPORTS (Preventive, Sensor Calibration, Cleaning, Repairs)
+ CREATE TABLE IF NOT EXISTS maintenance_reports (
+     id TEXT PRIMARY KEY DEFAULT ('mr_' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 15)),
+@@ -235,7 +200,7 @@
+         SELECT table_name 
+         FROM information_schema.tables 
+         WHERE table_schema = 'public' 
+-          AND table_name IN ('administrators', 'buildings', 'floors', 'rooms', 'nodes', 'rules', 'rule_nodes', 'notifications', 'staff', 'system_config', 'analytics_snapshots', 'maintenance_reports')
++          AND table_name IN ('administrators', 'buildings', 'floors', 'rooms', 'nodes', 'rules', 'rule_nodes', 'notifications', 'staff', 'maintenance_reports')
+     LOOP
+         EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY;', t);
+         EXECUTE format('DROP POLICY IF EXISTS %I_all ON %I;', t, t);
+@@ -243,54 +208,7 @@
+     END LOOP;
+ END $$;
+ 
+--- ===================================================================
+--- INITIAL DEFAULT SEED DATA
+--- ===================================================================
+-
+--- Default Administrator
+-INSERT INTO administrators (id, username, email, password, role, is_active)
+-VALUES ('admin_default_01', 'admin', 'admin@ecotrack.local', 'adminpassword123', 'admin', true)
+-ON CONFLICT (id) DO NOTHING;
+-
+--- Default Building & Floor
+-INSERT INTO buildings (id, name)
+-VALUES ('bld_main', 'Main Campus Building')
+-ON CONFLICT (id) DO NOTHING;
+-
+-INSERT INTO floors (id, name, building_id)
+-VALUES ('flr_2nd_it', '2nd Floor - IT Wing', 'bld_main')
+-ON CONFLICT (id) DO NOTHING;
+-
+--- Default Rooms
+-INSERT INTO rooms (id, name, node_limit, floor_id)
+-VALUES 
+-    ('rm_svr_01', 'Server Room A', 5, 'flr_2nd_it'),
+-    ('rm_ofc_01', 'Main Office Area', 5, 'flr_2nd_it'),
+-    ('rm_lab_01', 'Laboratory A', 5, 'flr_2nd_it')
+-ON CONFLICT (id) DO NOTHING;
+-
+--- Default Nodes
+-INSERT INTO nodes (id, name, status, temp, pressure, battery, rssi, room_id, aircon_type)
+-VALUES 
+-    ('node_001', 'node-1', 'online', 23.5, 0.48, 4.15, -65, 'rm_svr_01', 'Split Type (Inverter)'),
+-    ('node_002', 'node-2', 'online', 24.1, 0.51, 4.08, -70, 'rm_svr_01', 'Split Type (Inverter)'),
+-    ('node_003', 'node-3', 'online', 22.8, 0.50, 4.20, -60, 'rm_ofc_01', 'Floor Standing'),
+-    ('node_004', 'node-4', 'online', 23.2, 0.49, 4.12, -68, 'rm_ofc_01', 'Floor Standing'),
+-    ('node_005', 'node-5', 'online', 25.4, 0.53, 3.95, -75, 'rm_ofc_01', 'Split Type (Inverter)'),
+-    ('node_006', 'node-6', 'online', 21.9, 0.47, 4.18, -62, 'rm_lab_01', 'Window Type')
+-ON CONFLICT (id) DO NOTHING;
+-
+--- Default Rules
+-INSERT INTO rules (id, type, condition, value, unit, enabled, message, room_id)
+-VALUES
+-    ('rule_svr_temp', 'temperature', 'above', 26.0, '°C', true, 'Server Room temperature exceeded safe operating threshold.', 'rm_svr_01'),
+-    ('rule_node_bat', 'battery', 'below', 20.0, '%', true, 'Sensor battery charge is critically low. Battery replacement advised.', NULL)
+-ON CONFLICT (id) DO NOTHING;
+-
+--- Default Config
+-INSERT INTO system_config (id, optimal_temp, ac_eco, ac_cool, ac_cold)
+-VALUES ('cfg_default', 24.0, 22.0, 25.0, 28.0)
+-ON CONFLICT (id) DO NOTHING;
++-- Demo inserts are excluded from schema setup; see scripts/demo-seeds/.
+ 
+ -- ===================================================================
+ -- 13. SENSOR TELEMETRY LOGS (Replaces PocketBase sensor logs)
+--- before/scripts/demo-seeds/legacy_notifications_demo.sql
++++ after/scripts/demo-seeds/legacy_notifications_demo.sql
+@@ -0,0 +1,71 @@
++-- OPTIONAL LEGACY DEMO DATA ONLY. Never run against real application data.
++-- 6. INSERT SEED NOTIFICATIONS FOR IMMEDIATE DEMO & TESTING
++INSERT INTO public.mobile_notifications (
++  id, staff_name, title, message, type, priority, category,
++  related_report_id, aircon_id, aircon_name, location, due_date, is_read, created_at
++) VALUES 
++(
++  'mob_notif_001',
++  'Maintenance Staff',
++  'Routine Maintenance Due Today',
++  'Scheduled filter cleaning & sensor inspection for Node 01 (Server Room A) is due today. Please complete checklist.',
++  'task_reminder',
++  'high',
++  'task',
++  'MR-2026-001',
++  'node_01',
++  'Server Room AC Unit',
++  'Main Campus Building • Server Room A',
++  to_char(NOW(), 'YYYY-MM-DD'),
++  FALSE,
++  NOW() - INTERVAL '15 minutes'
++),
++(
++  'mob_notif_002',
++  'Maintenance Staff',
++  'New Task Assigned: Coil Inspection',
++  'You have been assigned to quarterly condenser coil inspection & airflow diagnostics for IT Wing AC 02.',
++  'task_assigned',
++  'medium',
++  'task',
++  'MR-2026-002',
++  'node_02',
++  'IT Wing Split AC',
++  'Main Campus Building • 2nd Floor IT Wing',
++  to_char(NOW() + INTERVAL '2 days', 'YYYY-MM-DD'),
++  FALSE,
++  NOW() - INTERVAL '1 hour'
++),
++(
++  'mob_notif_003',
++  'Maintenance Staff',
++  'Urgent Repair Alert: High Temperature',
++  'AC Unit 03 in Conference Hall B exceeded critical threshold (29.4°C). Immediate inspection required.',
++  'urgent_repair',
++  'critical',
++  'maintenance',
++  'MR-2026-003',
++  'node_03',
++  'Conference Hall Multi-Split',
++  'Executive Building • Conf Hall B',
++  to_char(NOW(), 'YYYY-MM-DD'),
++  FALSE,
++  NOW() - INTERVAL '2 hours'
++),
++(
++  'mob_notif_004',
++  'Maintenance Staff',
++  'Weekly Preventive Checklist Reminder',
++  'Ensure all condensate drain trays and electrical terminal connections in East Wing are checked before weekend.',
++  'preventive_routine',
++  'medium',
++  'maintenance',
++  'MR-2026-004',
++  'node_04',
++  'East Wing Ducted AC',
++  'East Wing • Floor 1 Corridor',
++  to_char(NOW() + INTERVAL '3 days', 'YYYY-MM-DD'),
++  TRUE,
++  NOW() - INTERVAL '1 day'
++)
++ON CONFLICT (id) DO NOTHING;
+--- before/supabase_mobile_notifications_setup.sql
++++ after/supabase_mobile_notifications_setup.sql
+@@ -174,73 +174,4 @@
+ ON public.mobile_notifications(related_report_id, type) 
+ WHERE related_report_id IS NOT NULL;
+ 
+--- 6. INSERT SEED NOTIFICATIONS FOR IMMEDIATE DEMO & TESTING
+-INSERT INTO public.mobile_notifications (
+-  id, staff_name, title, message, type, priority, category,
+-  related_report_id, aircon_id, aircon_name, location, due_date, is_read, created_at
+-) VALUES 
+-(
+-  'mob_notif_001',
+-  'Maintenance Staff',
+-  'Routine Maintenance Due Today',
+-  'Scheduled filter cleaning & sensor inspection for Node 01 (Server Room A) is due today. Please complete checklist.',
+-  'task_reminder',
+-  'high',
+-  'task',
+-  'MR-2026-001',
+-  'node_01',
+-  'Server Room AC Unit',
+-  'Main Campus Building • Server Room A',
+-  to_char(NOW(), 'YYYY-MM-DD'),
+-  FALSE,
+-  NOW() - INTERVAL '15 minutes'
+-),
+-(
+-  'mob_notif_002',
+-  'Maintenance Staff',
+-  'New Task Assigned: Coil Inspection',
+-  'You have been assigned to quarterly condenser coil inspection & airflow diagnostics for IT Wing AC 02.',
+-  'task_assigned',
+-  'medium',
+-  'task',
+-  'MR-2026-002',
+-  'node_02',
+-  'IT Wing Split AC',
+-  'Main Campus Building • 2nd Floor IT Wing',
+-  to_char(NOW() + INTERVAL '2 days', 'YYYY-MM-DD'),
+-  FALSE,
+-  NOW() - INTERVAL '1 hour'
+-),
+-(
+-  'mob_notif_003',
+-  'Maintenance Staff',
+-  'Urgent Repair Alert: High Temperature',
+-  'AC Unit 03 in Conference Hall B exceeded critical threshold (29.4°C). Immediate inspection required.',
+-  'urgent_repair',
+-  'critical',
+-  'maintenance',
+-  'MR-2026-003',
+-  'node_03',
+-  'Conference Hall Multi-Split',
+-  'Executive Building • Conf Hall B',
+-  to_char(NOW(), 'YYYY-MM-DD'),
+-  FALSE,
+-  NOW() - INTERVAL '2 hours'
+-),
+-(
+-  'mob_notif_004',
+-  'Maintenance Staff',
+-  'Weekly Preventive Checklist Reminder',
+-  'Ensure all condensate drain trays and electrical terminal connections in East Wing are checked before weekend.',
+-  'preventive_routine',
+-  'medium',
+-  'maintenance',
+-  'MR-2026-004',
+-  'node_04',
+-  'East Wing Ducted AC',
+-  'East Wing • Floor 1 Corridor',
+-  to_char(NOW() + INTERVAL '3 days', 'YYYY-MM-DD'),
+-  TRUE,
+-  NOW() - INTERVAL '1 day'
+-)
+-ON CONFLICT (id) DO NOTHING;
++-- Optional demo notifications are stored separately in scripts/demo-seeds/.
+--- before/public/js/maintenance-modal.js
++++ after/public/js/maintenance-modal.js
+@@ -1392,6 +1392,10 @@
+   }
+ 
+   let _nodesAirconCache = [];
++  window.addEventListener?.('devices:synced', () => {
++    _nodesAirconCache = [];
++    localStorage.removeItem('ecoTrack_aircons_cache');
++  });
+ 
+   function formatBatteryDisplay(rawVal, isOnline = true) {
+     if (rawVal === undefined || rawVal === null || rawVal === '') {
+--- before/scripts/test_database_cleanup.js
++++ after/scripts/test_database_cleanup.js
+@@ -0,0 +1,129 @@
++const assert = require('node:assert/strict');
++const fs = require('node:fs');
++const vm = require('node:vm');
++const path = require('node:path');
++const source = file => fs.readFileSync(path.join(__dirname, '..', 'public/js', file), 'utf8');
++const storage = () => {
++  const values = new Map();
++  return { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, String(value)), removeItem: key => values.delete(key) };
++};
++const quiet = { log() {}, warn() {}, error() {} };
++async function testAdapter() {
++  const localStorage = storage(), calls = [], events = [];
++  let poll, stopped = false, failure = false;
++  let records = [{ id: 'reading/1', temperature: 25, updated: '2026-10-08T10:00:00Z' }];
++  const window = { localStorage };
++  const context = vm.createContext({ window, localStorage, URLSearchParams, console: quiet,
++    setInterval(fn) { poll = fn; return 1; }, clearInterval() { stopped = true; },
++    fetch: async (url, options = {}) => {
++      calls.push({ url, ...options });
++      return { ok: !failure, status: failure ? 500 : 200, json: async () => failure ? { error: 'Backend unavailable' }
++        : options.method === 'PATCH' ? { id: 'reading/1', ...JSON.parse(options.body) }
++        : options.method === 'DELETE' ? { success: true }
++        : { items: records, totalItems: records.length, page: 1, perPage: 1, totalPages: 1 } };
++    } });
++  vm.runInContext(source('supabase-client.js'), context);
++  const telemetry = window.pb.collection('telemetry');
++  const updated = await telemetry.update('reading/1', { room_name: 'Lab' });
++  assert.equal(updated.room_name, 'Lab');
++  assert.equal(calls.at(-1).method, 'PATCH');
++  assert(calls.at(-1).url.endsWith('/api/telemetry/reading%2F1'));
++  await telemetry.getList(2, 10, { node_id: 'controller', date: '2026-10-08', filter: "battery >= 3.5" });
++  const url = new URL(calls.at(-1).url);
++  assert.equal(url.searchParams.get('node_id'), 'controller');
++  assert.equal(url.searchParams.get('filter'), 'battery >= 3.5');
++  failure = true;
++  await assert.rejects(() => telemetry.getFullList(), /Backend unavailable/);
++  await assert.rejects(() => telemetry.delete('reading'), /Backend unavailable/);
++  failure = false;
++  const unsubscribe = await telemetry.subscribe('*', event => events.push(event));
++  await poll(); assert.equal(events.length, 1);
++  failure = true; await poll(); assert.equal(events.length, 1, 'Failed requests cannot clear subscriber state');
++  failure = false; records = []; await poll();
++  assert.equal(events.at(-1).action, 'delete'); assert.equal(events.at(-1).record, null);
++  unsubscribe(); assert(stopped); await poll(); assert.equal(events.length, 2);
++  assert.equal(window.pb.authStore, undefined);
++  assert.equal(window.pb.autoCancellation, undefined);
++  assert.throws(() => window.pb.collection('nodes'), /supabaseClient/);
++  assert.equal(window.pb, window.telemetryClient);
++}
++function engine() {
++  const localStorage = storage(), events = [], queries = [];
++  const window = { localStorage, addEventListener() {}, dispatchEvent(event) { events.push(event); } };
++  const context = vm.createContext({ window, localStorage, console: quiet, setTimeout() {},
++    CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options?.detail; } } });
++  vm.runInContext(source('aircon-system.js'), context);
++  let state = { nodes: [], aircons: [], rooms: [], floors: [], buildings: [] }, error = null, session = { user: { id: 'test' } };
++  window.supabaseClient = { auth: { getSession: async () => ({ data: { session } }) }, from(table) {
++    queries.push(table);
++    const query = { select() { return query; }, order() { return query; },
++      then(resolve, reject) { return Promise.resolve({ data: state[table], error: table === 'nodes' ? error : null }).then(resolve, reject); } };
++    return query;
++  } };
++  return { localStorage, window, events, queries, system: window.EcoTrackAirconSystem,
++    rows(value) { state = { ...state, ...value }; }, error(value) { error = value; }, session(value) { session = value; } };
++}
++function seed(e) {
++  e.localStorage.setItem('ecoTrack_nodes', JSON.stringify([{ node_id: 'old-node' }]));
++  e.localStorage.setItem('ecoTrack_aircons', JSON.stringify([{ device_id: 'OLD-AC', name: 'Old AC', node_id: 'old-node' }]));
++  e.localStorage.setItem('ecoTrack_aircons_cache', 'legacy');
++}
++async function testRegistryReconciliation() {
++  const e = engine(); seed(e);
++  e.error({ message: 'Permission denied' });
++  await e.system.syncWithDatabase();
++  assert.equal(e.system.AirconProfileManager.getAll().length, 1, 'Query failures preserve cached data');
++  e.error(null); e.session(null); await e.system.syncWithDatabase();
++  assert.equal(e.system.AirconProfileManager.getAll().length, 1, 'Unauthenticated empty results cannot erase cache');
++  e.session({ user: { id: 'test' } }); e.rows({ nodes: null }); await e.system.syncWithDatabase();
++  assert.equal(e.system.AirconProfileManager.getAll().length, 1, 'Malformed results cannot erase cache');
++  e.rows({ nodes: [] });
++  let ready; e.window.ecotrackAuthReady = new Promise(resolve => { ready = resolve; });
++  const before = e.queries.length, pending = e.system.syncWithDatabase();
++  await Promise.resolve(); assert.equal(e.queries.length, before, 'Wait for restored authentication before reads');
++  ready(); await pending;
++  assert.equal(e.system.AirconProfileManager.getAll().length, 0);
++  assert.equal(e.system.NodeService.getNodes().length, 0);
++  assert.equal(e.localStorage.getItem('ecoTrack_aircons_cache'), null);
++  assert(e.events.some(event => event.type === 'devices:synced' && event.detail.aircons.length === 0));
++  const partial = engine();
++  partial.localStorage.setItem('ecoTrack_aircons', JSON.stringify([
++    { device_id: 'AC-1', aircon_id: 'asset-1', node_id: 'node-1', name: 'Custom AC Name' },
++    { device_id: 'DELETED', aircon_id: 'removed', node_id: 'node-2', name: 'Deleted asset' },
++    { device_id: 'ORPHAN', node_id: 'missing', name: 'Orphan profile' }
++  ]));
++  partial.rows({ nodes: [{ id: 'db-1', name: 'node-1', status: 'online' }, { id: 'db-2', name: 'node-2', status: 'online' }],
++    aircons: [{ id: 'asset-1', asset_tag: 'AC-1', node_id: 'db-1', brand: 'Midea', protocol_name: 'midea_ir' }] });
++  await partial.system.syncWithDatabase();
++  const profiles = partial.system.AirconProfileManager.getAll();
++  assert.equal(profiles.find(ac => ac.device_id === 'AC-1').name, 'Custom AC Name');
++  assert(!profiles.some(ac => ['DELETED', 'ORPHAN'].includes(ac.device_id)));
++  assert.equal(partial.system.NodeService.getNodes().length, 2);
++}
++async function testTelemetryRegistryFailures() {
++  const code = source('telemetry-new.js');
++  const begin = code.indexOf('async function loadAvailableNodesFromDB(');
++  const end = code.indexOf('function populateAvailableNodes(', begin);
++  let response = { error: { message: 'Offline' }, data: null }, renders = 0;
++  const context = vm.createContext({ window: {}, sb: {}, console: quiet,
++    activeNodesData: [{ id: 'cached' }], readStartupNodes: async () => response,
++    populateAvailableNodes() { renders++; } });
++  vm.runInContext(code.slice(begin, end), context);
++  await context.loadAvailableNodesFromDB();
++  assert.equal(context.activeNodesData.length, 1, 'Failed telemetry registry reads preserve controls');
++  assert.equal(renders, 0);
++  response = { data: [] };
++  await context.loadAvailableNodesFromDB();
++  assert.equal(context.activeNodesData.length, 0);
++  assert.equal(renders, 1);
++}
++
++async function main() {
++  await testAdapter(); await testRegistryReconciliation(); await testTelemetryRegistryFailures();
++  for (const page of ['rules.html', 'telemetry.html']) {
++    const html = fs.readFileSync(path.join(__dirname, '..', 'public', page), 'utf8');
++    assert.equal((html.match(/src="\.\/js\/supabase-client\.js"/g) || []).length, 1);
++  }
++  console.log('Database cleanup passed: real update requests, filter forwarding, error preservation, empty subscriptions, authenticated cache reconciliation and partial deletions.');
++}
++main().catch(error => { console.error(error); process.exitCode = 1; });
+--- before/public/js/notifications.js
++++ after/public/js/notifications.js
+@@ -1139,7 +1139,7 @@
+       } catch (_) {}
+     } else if (pb && typeof pb.collection === 'function') {
+       try {
+-        const telem = await pb.collection('telemetry').getFirstListItem(`node_id.name='${node.id}'`, { sort: '-created' });
++        const telem = await pb.collection('telemetry').getFirstListItem(`node_id=${JSON.stringify(node.id)} || sensor_name=${JSON.stringify(node.name || node.id)}`, { sort: '-created' });
+         node.temp = telem.temperature;
+         node.pressure = telem.pressure;
+         node.battery = telem.battery;
+--- before/package.json
++++ after/package.json
+@@ -14,7 +14,8 @@
+     "test:all": "concurrently \"npm run dev\" \"npm run test\"",
+     "build": "electron-builder",
+     "pack": "electron-builder --dir",
+-    "dist": "electron-builder"
++    "dist": "electron-builder",
++    "test:database": "node scripts/test_database_cleanup.js && venv\\Scripts\\python.exe scripts/test_database_cleanup.py"
+   },
+   "keywords": [
+     "ecotrack",
+--- before/README.md
++++ after/README.md
+@@ -118,3 +118,13 @@
+ ## License
+ 
+ MIT License
++
++## Data storage and database checks
++
++Supabase owns users, controller/AC registries, locations, rules, notifications and maintenance records. Firmware uploads telemetry to Supabase. The Python backend keeps an independent SQLite telemetry history at `backend/telemetry.db`; `ECOTRACK_SQLITE_DB_PATH` can override this path. Cloud deletions do not automatically erase this local history.
++
++The renderer uses the Supabase client directly for cloud tables and a telemetry adapter for `/api/telemetry`. The old PocketBase service and `PB_URL` are no longer required. Profile/controller caches reconcile successful authenticated cloud results, including empty results; connection errors preserve the cache.
++
++`npm run transfer:sqlite` catches up local telemetry using the same validated importer as automatic backend sync. Missing measurements stay unknown. Demo inserts are separate optional legacy SQL files under `scripts/demo-seeds/`; normal schema setup does not insert demo records. The obsolete analytics snapshot store and save endpoint have been retired.
++
++Run `npm run test:database` for cache/adapter regressions and CRUD/filter tests against a temporary SQLite database. Run `npm test` for the existing mock-data checks. The database audit and cleanup results are in `reports/database-audit/`.
+--- before/scripts/test_database_cleanup.py
++++ after/scripts/test_database_cleanup.py
+@@ -0,0 +1,86 @@
++"""Exercise database cleanup against an isolated SQLite database, with no cloud writes."""
++import importlib.util
++import os
++from pathlib import Path
++import tempfile
++import unittest
++from contextlib import closing
++
++sandbox = tempfile.TemporaryDirectory(prefix='ecotrack-db-cleanup-test-')
++os.environ['ECOTRACK_SQLITE_DB_PATH'] = str(Path(sandbox.name) / 'telemetry.db')
++os.environ['ECOTRACK_TELEMETRY_SYNC'] = '0'
++spec = importlib.util.spec_from_file_location('cleanup_backend', Path(__file__).resolve().parents[1] / 'backend/app.py')
++backend = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(backend)
++
++
++class DatabaseCleanupTests(unittest.TestCase):
++    def setUp(self):
++        self.api = backend.app.test_client()
++        with closing(backend.get_db_connection()) as conn:
++            conn.execute('DELETE FROM telemetry'); conn.commit()
++        for row in [{'id': 'a', 'node_id': 'db-a', 'sensor_name': 'node-a', 'battery': 3.7},
++                    {'id': 'b', 'node_id': 'db-b', 'sensor_name': 'node-b', 'battery': 3.9},
++                    {'id': 'c', 'node_id': 'db-b', 'sensor_name': 'node-b', 'battery': None}]:
++            self.assertEqual(self.api.post('/api/telemetry', json=row).status_code, 201)
++
++    def rows(self, expression):
++        response = self.api.get('/api/telemetry', query_string={'filter': expression, 'perPage': 0})
++        self.assertEqual(response.status_code, 200, response.get_json())
++        return {row['id'] for row in response.get_json()['items']}
++
++    def test_filters_and_precedence(self):
++        self.assertEqual(self.rows("node_id='db-a' || sensor_name='node-b' && battery>=3.8"), {'a', 'b'})
++        self.assertEqual(self.rows("(node_id='db-a' || sensor_name='node-b') && battery>=3.8"), {'b'})
++        self.assertEqual(self.rows("node_id.name='node-a'"), {'a'})
++        self.assertEqual(self.rows('battery=null'), {'c'})
++        self.assertEqual(self.rows("battery != null && battery <= 3.7"), {'a'})
++
++    def test_filter_and_sort_rejections(self):
++        for value in ["node_id='a'; DROP TABLE telemetry", "missing='a'", "node_id~'a'", "(node_id='a'", "node_id='a' ||"]:
++            self.assertEqual(self.api.get('/api/telemetry', query_string={'filter': value}).status_code, 400)
++        for args in [{'sort': 'created; DROP TABLE telemetry'}, {'page': 'bad'}, {'page': 0}, {'perPage': -1}]:
++            self.assertEqual(self.api.get('/api/telemetry', query_string=args).status_code, 400)
++        self.assertEqual(self.rows('sensor_name="x\' OR 1=1"'), set())
++        self.assertEqual(self.api.get('/api/telemetry').get_json()['totalItems'], 3)
++
++    def test_patch_changes_existing_row_only(self):
++        response = self.api.patch('/api/telemetry/a', json={'room_name': 'Laboratory', 'battery': 3.8,
++            'control_snapshot': {'desired_state': {'power': True}}})
++        self.assertEqual(response.status_code, 200)
++        with closing(backend.get_db_connection()) as conn:
++            row = conn.execute("SELECT * FROM telemetry WHERE id='a'").fetchone()
++            self.assertEqual(row['room_name'], 'Laboratory'); self.assertEqual(row['battery'], 3.8)
++            self.assertIsNone(row['ac_on'], 'Commanded power cannot turn into measured operation')
++            self.assertEqual(conn.execute('SELECT COUNT(*) FROM telemetry').fetchone()[0], 3)
++        self.assertEqual(self.api.patch('/api/telemetry/missing', json={'room_name': 'Lab'}).status_code, 404)
++
++    def test_invalid_patch_preserves_record(self):
++        for payload in [{}, {'id': 'changed'}, {'unknown': True}, {'battery': 'bad'}, {'interval_seconds': -1}, {'room_name': []}]:
++            self.assertEqual(self.api.patch('/api/telemetry/a', json=payload).status_code, 400)
++        self.assertEqual(self.api.get('/api/telemetry/a').get_json()['battery'], 3.7)
++
++    def test_missing_measurements_are_unknown(self):
++        row = self.api.get('/api/telemetry/c').get_json()
++        for field in ['temperature', 'pressure', 'battery', 'rssi', 'ac_on']:
++            self.assertIsNone(row[field])
++        self.assertEqual(self.api.patch('/api/telemetry/b', json={'battery': None, 'ac_on': False}).status_code, 200)
++        self.assertIsNone(self.api.get('/api/telemetry/b').get_json()['battery'])
++        self.assertEqual(self.api.get('/api/telemetry/b').get_json()['ac_on'], 0)
++
++    def test_invalid_batch_rolls_back(self):
++        response = self.api.post('/api/telemetry', json=[{'id': 'new', 'node_id': 'new'}, {'battery': 'bad'}])
++        self.assertEqual(response.status_code, 400)
++        self.assertEqual(self.api.get('/api/telemetry').get_json()['totalItems'], 3)
++
++    def test_empty_results_after_delete(self):
++        self.assertEqual(self.api.delete('/api/telemetry').status_code, 200)
++        result = self.api.get('/api/telemetry').get_json()
++        self.assertEqual(result['totalItems'], 0); self.assertEqual(result['items'], [])
++
++
++if __name__ == '__main__':
++    try:
++        unittest.main()
++    finally:
++        sandbox.cleanup()
+--- before/public/js/data-logic.js
++++ after/public/js/data-logic.js
+@@ -1,425 +0,0 @@
+-// ===================================================================
+-// ECOTRACK DATA LOGIC LAYER — Phase 3
+-// CRUD operations, business logic, diagnostics, rule evaluation
+-// ===================================================================
+-
+-const EcoTrackDataLayer = (() => {
+-  // ---- Internal State ----
+-  let _rooms = {};
+-  let _rules = [];
+-  let _notifications = [];
+-  let _telemetry = [];
+-  let _nodes = [];
+-  let _config = {};
+-  let _initialized = false;
+-
+-  // ===== INITIALIZATION =====
+-  function initialize(dataset) {
+-    if (!dataset) throw new Error('EcoTrackDataLayer: dataset is required');
+-    _rooms = {};
+-    (dataset.rooms || []).forEach(r => { _rooms[r.id] = { ...r }; delete _rooms[r.id].nodes; });
+-    _rules = (dataset.rules || []).map(r => ({ ...r }));
+-    _notifications = (dataset.notifications || []).map(n => ({ ...n }));
+-    _telemetry = (dataset.telemetry || []).map(t => ({ ...t }));
+-    _nodes = (dataset.nodes || []).map(n => ({ ...n }));
+-    
+-    // Seed room_id based on initial dataset (if present)
+-    (dataset.rooms || []).forEach(r => {
+-      (r.nodes || []).forEach(n => {
+-        const nId = typeof n === 'object' ? n.id : n;
+-        const targetNode = _nodes.find(nd => nd.id === nId);
+-        if (targetNode) targetNode.room_id = r.id;
+-      });
+-    });
+-
+-    _config = JSON.parse(JSON.stringify(dataset.config || {}));
+-    _initialized = true;
+-    return { success: true, rooms: Object.keys(_rooms).length, rules: _rules.length, telemetry: _telemetry.length };
+-  }
+-
+-  function _assertInit() { if (!_initialized) throw new Error('Call initialize() first'); }
+-
+-  // ===== ROOM CRUD =====
+-  function createRoom(name, nodeLimit) {
+-    _assertInit();
+-    if (!name || typeof name !== 'string' || !name.trim()) return { error: 'Room name is required' };
+-    if (!nodeLimit || nodeLimit < 1 || nodeLimit > 20) return { error: 'AC Control limit must be 1–20' };
+-    const id = 'rm_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+-    const room = { id, name: name.trim(), nodeLimit: parseInt(nodeLimit), nodes: [], created: new Date().toISOString() };
+-    _rooms[id] = room;
+-    return { success: true, room };
+-  }
+-
+-  function getRoom(roomId) {
+-    _assertInit();
+-    const room = _rooms[roomId];
+-    if (!room) return null;
+-    return { ...room, nodes: _nodes.filter(n => n.room_id === roomId) };
+-  }
+-
+-  function getAllRooms() {
+-    _assertInit();
+-    return Object.values(_rooms).map(r => ({ ...r, nodes: _nodes.filter(n => n.room_id === r.id) }));
+-  }
+-
+-  function deleteRoom(roomId) {
+-    _assertInit();
+-    if (!_rooms[roomId]) return { error: 'Room not found' };
+-    delete _rooms[roomId];
+-    return { success: true };
+-  }
+-
+-  function updateRoom(roomId, updates) {
+-    _assertInit();
+-    const room = _rooms[roomId];
+-    if (!room) return { error: 'Room not found' };
+-    if (updates && typeof updates === 'object') {
+-      if (typeof updates.name === 'string') room.name = updates.name.trim() || room.name;
+-      if (updates.nodeLimit != null) room.nodeLimit = parseInt(updates.nodeLimit, 10) || room.nodeLimit;
+-      if (Array.isArray(updates.nodes)) room.nodes = updates.nodes.map(n => ({ ...n }));
+-    }
+-    return { success: true, room };
+-  }
+-
+-  // ===== NODE PLACEMENT =====
+-  function addNodeToRoom(roomId, nodeId) {
+-    _assertInit();
+-    const room = _rooms[roomId];
+-    if (!room) return { error: 'Room not found' };
+-    const roomNodes = _nodes.filter(n => n.room_id === roomId);
+-    if (roomNodes.length >= room.nodeLimit) return { error: `Room limit reached (${room.nodeLimit} max)` };
+-    const nodeData = _nodes.find(n => n.id === nodeId);
+-    if (!nodeData) return { error: 'AC Control not found in Active AC Controls' };
+-    if (nodeData.room_id === roomId) return { error: 'AC Control already in this room' };
+-    
+-    // Check node isn't already in another room
+-    if (nodeData.room_id && nodeData.room_id !== roomId) {
+-      const oldRoom = _rooms[nodeData.room_id];
+-      if (oldRoom) return { error: `Node already placed in room "${oldRoom.name}"` };
+-    }
+-    
+-    nodeData.room_id = roomId;
+-    return { success: true, room: getRoom(roomId) };
+-  }
+-
+-  function removeNodeFromRoom(roomId, nodeId) {
+-    _assertInit();
+-    const room = _rooms[roomId];
+-    if (!room) return { error: 'Room not found' };
+-    const node = _nodes.find(n => n.id === nodeId);
+-    if (!node || node.room_id !== roomId) return { error: 'Node not in this room' };
+-    node.room_id = null;
+-    return { success: true, room: getRoom(roomId) };
+-  }
+-
+-  function clearRoomNodes(roomId) {
+-    _assertInit();
+-    const room = _rooms[roomId];
+-    if (!room) return { error: 'Room not found' };
+-    const roomNodes = _nodes.filter(n => n.room_id === roomId);
+-    const cleared = roomNodes.length;
+-    roomNodes.forEach(n => n.room_id = null);
+-    return { success: true, clearedCount: cleared };
+-  }
+-
+-  // ===== TELEMETRY =====
+-  function getLatestTelemetryByNode() {
+-    _assertInit();
+-    const latest = {};
+-    // telemetry is sorted chronologically, so iterate forward and last wins
+-    _telemetry.forEach(t => { latest[t.node_id] = t; });
+-    return latest;
+-  }
+-
+-  function getTelemetryForNode(nodeId, limit = 24) {
+-    _assertInit();
+-    return _telemetry.filter(t => t.node_id === nodeId).slice(-limit);
+-  }
+-
+-  function getAllTelemetry() {
+-    _assertInit();
+-    return _telemetry.map(t => ({ ...t }));
+-  }
+-
+-  function deleteTelemetryForNode(nodeId) {
+-    _assertInit();
+-    _telemetry = _telemetry.filter(t => t.node_id !== nodeId);
+-    const idx = _nodes.findIndex(n => n.id === nodeId);
+-    if (idx >= 0) {
+-      _nodes.splice(idx, 1);
+-    }
+-    return { success: true };
+-  }
+-
+-  function ingestPacket(packet) {
+-    _assertInit();
+-    if (!packet || !packet.id) return { error: 'Packet must have an id field' };
+-    const record = {
+-      id: Math.random().toString(36).substring(2, 17),
+-      node_id: packet.id,
+-      temperature: packet.temp ?? packet.temperature ?? 0,
+-      pressure: packet.pressure ?? 0,
+-      rssi: packet.rssi ?? -70,
+-      battery: packet.battery ?? packet.voltage ?? 3.7,
+-      status: packet.status || 'online',
+-      created: packet.timestamp || new Date().toISOString(),
+-    };
+-    _telemetry.push(record);
+-    // Update node in _nodes
+-    const idx = _nodes.findIndex(n => n.id === packet.id);
+-    const nodeUpdate = { id: packet.id, name: packet.name || packet.id, temp: record.temperature, pressure: record.pressure, rssi: record.rssi, battery: record.battery, status: record.status };
+-    if (idx >= 0) Object.assign(_nodes[idx], nodeUpdate);
+-    else _nodes.push({ ...nodeUpdate, wakeTime: '06:00', sleepTime: '22:00', intervalVal: 15, intervalUnit: 'Minutes' });
+-    return { success: true, record };
+-  }
+-
+-  function getHistorical(period = '24h') {
+-    _assertInit();
+-    const cutoff = { '24h': 24, '12h': 12, '6h': 6, '1h': 1 }[period] || 24;
+-    const since = new Date(Date.now() - cutoff * 3600000).toISOString();
+-    const filtered = _telemetry.filter(t => t.created >= since);
+-    return {
+-      period,
+-      temperatures: filtered.map(t => t.temperature),
+-      pressures: filtered.map(t => t.pressure),
+-      timestamps: filtered.map(t => t.created),
+-      data_points: filtered.length,
+-    };
+-  }
+-
+-  // ===== DIAGNOSTICS =====
+-  function runDiagnostics() {
+-    _assertInit();
+-    const alerts = [];
+-    const th = _config.diagnostics_thresholds || {};
+-    const latest = getLatestTelemetryByNode();
+-
+-    Object.entries(latest).forEach(([nodeId, t]) => {
+-      if (t.status === 'offline') return;
+-      if (t.temperature > (th.temp_critical || 35))
+-        alerts.push({ type: 'temperature_critical', message: `High temp: ${t.temperature}°C on ${nodeId}`, severity: 'critical', nodeId });
+-      else if (t.temperature > (th.temp_warning || 30))
+-        alerts.push({ type: 'temperature_warning', message: `Temp rising: ${t.temperature}°C on ${nodeId}`, severity: 'warning', nodeId });
+-      const batteryPercent = Math.round((t.battery / 4.2) * 100);
+-      if (batteryPercent < (th.voltage_critical ? Math.round((th.voltage_critical / 4.2) * 100) : 15))
+-        alerts.push({ type: 'battery_critical', message: `Low battery: ${batteryPercent}% on ${nodeId}`, severity: 'critical', nodeId });
+-      else if (batteryPercent < (th.voltage_warning ? Math.round((th.voltage_warning / 4.2) * 100) : 30))
+-        alerts.push({ type: 'battery_warning', message: `Battery low: ${batteryPercent}% on ${nodeId}`, severity: 'warning', nodeId });
+-      if (t.rssi < (th.rssi_poor || -90))
+-        alerts.push({ type: 'rssi_poor', message: `Weak signal: ${t.rssi} dBm on ${nodeId}`, severity: 'warning', nodeId });
+-    });
+-
+-    return { status: alerts.length ? 'warning' : 'ok', alerts, last_check: new Date().toISOString() };
+-  }
+-
+-  // ===== EFFICIENCY =====
+-  function calculateEfficiency(nodeId) {
+-    _assertInit();
+-    const latest = getLatestTelemetryByNode();
+-    const t = latest[nodeId];
+-    if (!t) return { error: 'No telemetry for node' };
+-    const optimal = _config.optimal_temp || 24;
+-    const deviation = Math.abs(t.temperature - optimal);
+-    const score = Math.max(0, 100 - deviation * 5);
+-    return { efficiency_score: Math.round(score * 10) / 10, optimal_temperature: optimal, current_temperature: t.temperature, deviation: Math.round(deviation * 100) / 100 };
+-  }
+-
+-  function estimateACDial(temp) {
+-    const th = (_config.ac_thresholds || { eco: 20, cool: 24, cold: 28 });
+-    if (temp < th.eco) return { dial: 'Off', description: 'Idle - No cooling needed', estimated_power: 0 };
+-    if (temp < th.cool) return { dial: 'Eco', description: 'Minimal cooling - Eco mode', estimated_power: 15 };
+-    if (temp < th.cold) return { dial: 'Cool', description: 'Standard cooling mode', estimated_power: 35 };
+-    return { dial: 'Cold', description: 'Maximum cooling - High demand', estimated_power: 60 };
+-  }
+-
+-  function getPowerStats() {
+-    _assertInit();
+-    const s = _config.power_settings || { sleep_hours: 8, active_draw_ma: 50, sleep_draw_ma: 5 };
+-    const mahActive = s.sleep_hours * s.active_draw_ma;
+-    const mahSleep = s.sleep_hours * s.sleep_draw_ma;
+-    const mahSaved = mahActive - mahSleep;
+-    const gain = mahActive ? (mahSaved / mahActive * 100) : 0;
+-    return { sleep_duration_hours: s.sleep_hours, mah_saved: mahSaved, active_hours: 24 - s.sleep_hours, efficiency_gain_percent: Math.round(gain * 10) / 10 };
+-  }
+-
+-  // ===== RULE CRUD & EVALUATION =====
+-  function createRule(ruleData) {
+-    _assertInit();
+-    if (!ruleData.type || !ruleData.condition || ruleData.value == null || !ruleData.unit)
+-      return { error: 'Missing required fields: type, condition, value, unit' };
+-    if (!['temperature', 'battery'].includes(ruleData.type)) return { error: 'Invalid rule type' };
+-    if (ruleData.type === 'temperature' && !ruleData.room) return { error: 'Temperature rules require a room' };
+-    if (ruleData.type === 'temperature' && (!ruleData.nodes || !ruleData.nodes.length)) return { error: 'Temperature rules require at least one node' };
+-    if (ruleData.type === 'battery' && !ruleData.node) return { error: 'Battery rules require a node' };
+-
+-    const rule = { id: Date.now(), ...ruleData, enabled: ruleData.enabled !== false };
+-    _rules.push(rule);
+-    return { success: true, rule };
+-  }
+-
+-  function updateRule(ruleId, updates) {
+-    _assertInit();
+-    const idx = _rules.findIndex(r => r.id === ruleId);
+-    if (idx === -1) return { error: 'Rule not found' };
+-    Object.assign(_rules[idx], updates);
+-    return { success: true, rule: _rules[idx] };
+-  }
+-
+-  function deleteRule(ruleId) {
+-    _assertInit();
+-    const before = _rules.length;
+-    _rules = _rules.filter(r => r.id !== ruleId);
+-    return _rules.length < before ? { success: true } : { error: 'Rule not found' };
+-  }
+-
+-  function toggleRule(ruleId) {
+-    _assertInit();
+-    const rule = _rules.find(r => r.id === ruleId);
+-    if (!rule) return { error: 'Rule not found' };
+-    rule.enabled = !rule.enabled;
+-    return { success: true, enabled: rule.enabled };
+-  }
+-
+-  function getAllRules(filter = 'all') {
+-    _assertInit();
+-    if (filter === 'all') return [..._rules];
+-    if (filter === 'disabled') return _rules.filter(r => !r.enabled);
+-    return _rules.filter(r => r.type === filter);
+-  }
+-
+-  function _normalizeRuleValue(value, unit) {
+-    const v = parseFloat(value);
+-    if (isNaN(v)) return 0;
+-    if (unit === '°F') return (v - 32) * (5 / 9);
+-    return v;
+-  }
+-
+-  function evaluateRules() {
+-    _assertInit();
+-    const latest = getLatestTelemetryByNode();
+-    const enabledRules = _rules.filter(r => r.enabled);
+-    const violations = [];
+-
+-    enabledRules.forEach(rule => {
+-      const targetNodes = rule.type === 'temperature' ? (rule.nodes || []) : (rule.node ? [rule.node] : []);
+-      targetNodes.forEach(nodeId => {
+-        const telemetry = latest[nodeId];
+-        if (!telemetry) return;
+-        let violated = false;
+-        if (rule.type === 'temperature') {
+-          const threshold = _normalizeRuleValue(rule.value, rule.unit);
+-          if (rule.condition === 'above') violated = telemetry.temperature > threshold;
+-          if (rule.condition === 'below') violated = telemetry.temperature < threshold;
+-        } else if (rule.type === 'battery') {
+-          const threshold = parseFloat(rule.value);
+-          const compareVal = threshold < 10 ? telemetry.battery : Math.round((telemetry.battery / 4.2) * 100);
+-          if (rule.condition === 'below') violated = compareVal < threshold;
+-          if (rule.condition === 'equals') violated = Math.abs(compareVal - threshold) <= 0.1;
+-        }
+-        if (violated) violations.push({ ruleId: rule.id, nodeId, message: rule.message, type: rule.type, severity: rule.type === 'battery' ? 'critical' : 'warning' });
+-      });
+-    });
+-    return violations;
+-  }
+-
+-  // ===== SCHEDULER =====
+-  function applySchedule(nodeId, wakeTime, sleepTime, intervalVal, intervalUnit) {
+-    _assertInit();
+-    if (!nodeId) return { error: 'nodeId is required' };
+-    // Find the room containing this node
+-    const node = _nodes.find(n => n.id === nodeId);
+-    if (!node || !node.room_id) return { error: 'AC Control not found in any room' };
+-    const targetRoom = _rooms[node.room_id];
+-    if (!targetRoom) return { error: 'Room not found' };
+-    
+-    node.wakeTime = wakeTime;
+-    node.sleepTime = sleepTime;
+-    node.intervalVal = intervalVal;
+-    node.intervalUnit = intervalUnit;
+-    // Calculate sleep seconds for downlink
+-    let sleepSecs = intervalVal;
+-    if (intervalUnit === 'Minutes') sleepSecs *= 60;
+-    if (intervalUnit === 'Hours') sleepSecs *= 3600;
+-    return { success: true, nodeId, sleepSeconds: sleepSecs, room: targetRoom.name };
+-  }
+-
+-  // ===== NOTIFICATIONS CRUD =====
+-  function createNotification(time, date, content, roomId) {
+-    _assertInit();
+-    if (!time || !date || !content) return { error: 'time, date, and content are required' };
+-    if (!roomId) return { error: 'Room is required' };
+-    const notif = { id: Date.now(), id_internal: Date.now(), time, date, content, room: roomId, triggered: false };
+-    _notifications.push(notif);
+-    return { success: true, notification: notif };
+-  }
+-
+-  function deleteNotification(id) {
+-    _assertInit();
+-    const before = _notifications.length;
+-    _notifications = _notifications.filter(n => n.id !== id);
+-    return _notifications.length < before ? { success: true } : { error: 'Notification not found' };
+-  }
+-
+-  function processScheduledNotifications() {
+-    _assertInit();
+-    const now = new Date();
+-    const nowDate = now.toISOString().split('T')[0];
+-    const nowHour = String(now.getHours()).padStart(2, '0');
+-    const nowMin = String(now.getMinutes()).padStart(2, '0');
+-    const nowTime = `${nowHour}:${nowMin}`;
+-    const triggered = [];
+-
+-    _notifications.forEach(n => {
+-      if (n.triggered) return;
+-      if (n.date < nowDate || (n.date === nowDate && n.time <= nowTime)) {
+-        n.triggered = true;
+-        triggered.push(n);
+-      }
+-    });
+-    return { triggered };
+-  }
+-
+-  function getAllNotifications() { _assertInit(); return [..._notifications]; }
+-
+-  // ===== CSV EXPORT =====
+-  function exportTelemetryCSV(nodeFilter = null) {
+-    _assertInit();
+-    const filtered = nodeFilter ? _telemetry.filter(t => t.node_id === nodeFilter) : _telemetry;
+-    const lines = ['Timestamp,AC Control ID,Temperature (°C),Pressure (kPa),Battery (V),RSSI (dBm),Status'];
+-    filtered.forEach(t => {
+-      lines.push(`"${t.created}","${t.node_id}","${t.temperature}","${t.pressure}","${t.battery}","${t.rssi}","${t.status}"`);
+-    });
+-    return lines.join('\n');
+-  }
+-
+-  // ===== CONFIG CRUD =====
+-  function getConfig() { _assertInit(); return JSON.parse(JSON.stringify(_config)); }
+-  function updateConfig(updates) {
+-    _assertInit();
+-    for (const k of Object.keys(updates)) {
+-      if (k in _config) {
+-        if (typeof _config[k] === 'object' && typeof updates[k] === 'object') Object.assign(_config[k], updates[k]);
+-        else _config[k] = updates[k];
+-      }
+-    }
+-    return { success: true, config: getConfig() };
+-  }
+-
+-  // ===== PUBLIC API =====
+-  return {
+-    initialize, createRoom, getRoom, getAllRooms, updateRoom, deleteRoom,
+-    addNodeToRoom, removeNodeFromRoom, clearRoomNodes,
+-    getLatestTelemetryByNode, getTelemetryForNode, getAllTelemetry, deleteTelemetryForNode, ingestPacket, getHistorical,
+-    runDiagnostics, calculateEfficiency, estimateACDial, getPowerStats,
+-    createRule, updateRule, deleteRule, toggleRule, getAllRules, evaluateRules,
+-    applySchedule,
+-    createNotification, deleteNotification, processScheduledNotifications, getAllNotifications,
+-    exportTelemetryCSV, getConfig, updateConfig,
+-    // Getters for internal state (testing)
+-    _getNodes: () => [..._nodes],
+-    getAllNodes: () => _nodes.map(n => ({ ...n })),
+-  };
+-})();
+-
+-if (typeof window !== 'undefined') window.EcoTrackDataLayer = EcoTrackDataLayer;
+-if (typeof module !== 'undefined' && module.exports) module.exports = EcoTrackDataLayer;
+--- before/public/js/data-schemas.js
++++ after/public/js/data-schemas.js
+@@ -1,117 +0,0 @@
+-// ===================================================================
+-// ECOTRACK DATA SCHEMAS
+-// Pure type definitions and schema signatures (mock generators removed)
+-// ===================================================================
+-
+-/**
+- * @typedef {Object} TelemetryPacket
+- * @property {string} id - PocketBase record ID
+- * @property {string} node_id - AC Control IDentifier (e.g., "node-1")
+- * @property {number} temperature - Temperature in °C
+- * @property {number} pressure - Atmospheric pressure in kPa
+- * @property {number} rssi - Signal strength in dBm (negative)
+- * @property {number} battery - Battery voltage in V
+- * @property {string} status - "online" | "offline"
+- * @property {string} created - ISO timestamp
+- */
+-
+-/**
+- * @typedef {Object} NodeData
+- * @property {string} id - AC Control IDentifier
+- * @property {string} name - Human-readable label
+- * @property {string} room_id - The ID of the room this node belongs to
+- * @property {number} temp - Current temperature in °C
+- * @property {number} pressure - Current pressure in kPa
+- * @property {number} rssi - Signal strength in dBm
+- * @property {number} battery - Battery voltage in V
+- * @property {string} status - "online" | "offline"
+- * @property {string} [wakeTime] - Schedule: HH:MM
+- * @property {string} [sleepTime] - Schedule: HH:MM
+- * @property {number} [intervalVal] - Transmission interval value
+- * @property {string} [intervalUnit] - "Seconds" | "Minutes" | "Hours"
+- */
+-
+-/**
+- * @typedef {Object} RoomData
+- * @property {string} id - PocketBase record ID
+- * @property {string} name - Room name
+- * @property {number} node_limit - Maximum number of nodes
+- * @property {string} created - ISO timestamp
+- */
+-
+-/**
+- * @typedef {Object} RuleData
+- * @property {number|string} id - Local rule ID
+- * @property {string} [pbId] - PocketBase record ID
+- * @property {"temperature"|"battery"} type - Rule type
+- * @property {"above"|"below"|"equals"} condition - Evaluation condition
+- * @property {number} value - Threshold value
+- * @property {string} unit - "°C" | "°F" | "%"
+- * @property {boolean} enabled - Active flag
+- * @property {string} message - Alert message
+- * @property {string} [room] - Room ID (temperature rules)
+- * @property {string} [roomName] - Denormalized room name
+- * @property {string[]} [nodes] - Target AC Control IDs (temperature rules)
+- * @property {string[]} [nodeNames] - Denormalized AC Control Names
+- * @property {string} [node] - Single AC Control ID (battery rules)
+- * @property {string} [nodeName] - Denormalized AC Control Name
+- * @property {number} [duration] - Duration in minutes (temperature rules)
+- * @property {string|null} [startDate] - Optional YYYY-MM-DD
+- * @property {string|null} [startTime] - Optional HH:MM
+- * @property {string|null} [endDate] - Optional YYYY-MM-DD
+- * @property {string|null} [endTime] - Optional HH:MM
+- */
+-
+-/**
+- * @typedef {Object} NotificationData
+- * @property {string} [pbId] - PocketBase record ID
+- * @property {number|string} id - Local internal ID
+- * @property {number} [id_internal] - Timestamp-based internal ID
+- * @property {string} time - HH:MM format
+- * @property {string} date - YYYY-MM-DD format
+- * @property {string} content - Message body
+- * @property {string} room - Room ID or name
+- * @property {boolean} triggered - Whether notification has fired
+- */
+-
+-/**
+- * @typedef {Object} SystemConfig
+- * @property {{eco: number, cool: number, cold: number}} ac_thresholds
+- * @property {number} optimal_temp
+- * @property {{sleep_hours: number, active_draw_ma: number, sleep_draw_ma: number}} power_settings
+- * @property {{temp_critical: number, temp_warning: number, voltage_critical: number, voltage_warning: number, rssi_poor: number}} diagnostics_thresholds
+- */
+-
+-/**
+- * @typedef {Object} DiagnosticAlert
+- * @property {string} type - Alert type identifier
+- * @property {string} message - Human-readable description
+- * @property {"critical"|"warning"} severity - Severity level
+- */
+-
+-/**
+- * @typedef {Object} SerialPortInfo
+- * @property {string} port - Port name (e.g., "COM3")
+- * @property {string} description - Device description
+- * @property {string} hwid - Hardware ID
+- * @property {number|null} vid - Vendor ID
+- * @property {number|null} pid - Product ID
+- * @property {string|null} manufacturer - Device manufacturer
+- * @property {string|null} serial_number - Serial number
+- * @property {string|null} location - USB location
+- * @property {string|null} interface - Interface description
+- */
+-
+-// Safe empty stub for any backward-compatible callers
+-const MockDataGenerator = {
+-  generateFullDataset: () => ({ nodes: [], rooms: [], telemetry: [], rules: [], notifications: [] }),
+-  generateSerialPorts: () => []
+-};
+-
+-// Make available globally if needed
+-if (typeof window !== 'undefined') {
+-  window.MockDataGenerator = MockDataGenerator;
+-}
+-if (typeof module !== 'undefined' && module.exports) {
+-  module.exports = MockDataGenerator;
+-}
+--- before/public/js/data-tests.js
++++ after/public/js/data-tests.js
+@@ -1,232 +0,0 @@
+-// ===================================================================
+-// ECOTRACK VALIDATION SCRIPT — Phase 4
+-// Demonstrates all data-logic operations against mock data
+-// Run: node public/js/data-tests.js
+-// ===================================================================
+-
+-const MockDataGenerator = require('./data-schemas.js');
+-const DL = require('./data-logic.js');
+-
+-let passed = 0, failed = 0;
+-function assert(label, condition, detail = '') {
+-  if (condition) { passed++; console.log(`  ✅ ${label}`); }
+-  else { failed++; console.error(`  ❌ ${label}${detail ? ' — ' + detail : ''}`); }
+-}
+-
+-function section(title) { console.log(`\n━━━ ${title} ━━━`); }
+-
+-// ---- Generate & Initialize ----
+-section('INITIALIZATION');
+-const dataset = MockDataGenerator.generateFullDataset();
+-const initResult = DL.initialize(dataset);
+-assert('Initialize succeeds', initResult.success);
+-assert('4 rooms loaded', initResult.rooms === 4);
+-assert('5 rules loaded', initResult.rules === 5);
+-assert('Telemetry records loaded', initResult.telemetry > 100);
+-
+-// ---- Room CRUD ----
+-section('ROOM CRUD');
+-const rooms = DL.getAllRooms();
+-assert('getAllRooms returns 4', rooms.length === 4);
+-
+-const newRoom = DL.createRoom('Conference Room C', 3);
+-assert('createRoom succeeds', newRoom.success);
+-assert('New room has correct name', newRoom.room.name === 'Conference Room C');
+-
+-const noNameRoom = DL.createRoom('', 3);
+-assert('Empty name rejected', !!noNameRoom.error);
+-
+-const badLimitRoom = DL.createRoom('Test', 0);
+-assert('Zero limit rejected', !!badLimitRoom.error);
+-
+-const emptyRoom = rooms.find(r => r.name === 'Storage Closet B2');
+-assert('Empty room exists', !!emptyRoom);
+-assert('Empty room has 0 nodes', emptyRoom.nodes.length === 0);
+-
+-const delResult = DL.deleteRoom(newRoom.room.id);
+-assert('deleteRoom succeeds', delResult.success);
+-assert('Deleted room no longer exists', DL.getRoom(newRoom.room.id) === null);
+-
+-// ---- Node Placement ----
+-section('NODE PLACEMENT');
+-const serverRoom = rooms.find(r => r.name === 'Server Room A');
+-const addDuplicate = DL.addNodeToRoom(serverRoom.id, 'node-1');
+-assert('Duplicate node rejected', !!addDuplicate.error);
+-
+-const offlineResult = DL.addNodeToRoom(serverRoom.id, 'node-7');
+-assert('Offline node can be added if found', offlineResult.success || !!offlineResult.error);
+-
+-const removeResult = DL.removeNodeFromRoom(serverRoom.id, 'node-1');
+-assert('removeNodeFromRoom succeeds', removeResult.success);
+-
+-const addBack = DL.addNodeToRoom(serverRoom.id, 'node-1');
+-assert('Re-add removed node succeeds', addBack.success);
+-
+-const clearResult = DL.clearRoomNodes(serverRoom.id);
+-assert('clearRoomNodes succeeds', clearResult.success);
+-assert('Cleared 2+ nodes', clearResult.clearedCount >= 1);
+-
+-// Re-add for subsequent tests
+-DL.addNodeToRoom(serverRoom.id, 'node-1');
+-DL.addNodeToRoom(serverRoom.id, 'node-2');
+-
+-// ---- Telemetry ----
+-section('TELEMETRY');
+-const latestMap = DL.getLatestTelemetryByNode();
+-assert('Latest telemetry has multiple nodes', Object.keys(latestMap).length >= 5);
+-assert('node-7 has stale offline data', latestMap['node-7'] && latestMap['node-7'].status === 'offline');
+-
+-const node1History = DL.getTelemetryForNode('node-1', 10);
+-assert('getTelemetryForNode returns data', node1History.length > 0);
+-assert('History respects limit', node1History.length <= 10);
+-
+-const historical = DL.getHistorical('24h');
+-assert('getHistorical returns temps', historical.temperatures.length > 0);
+-assert('getHistorical returns pressures', historical.pressures.length > 0);
+-
+-// Ingest a new packet
+-const ingestResult = DL.ingestPacket({ id: 'node-99', temp: 25.5, pressure: 0.5, rssi: -60, battery: 4.0, status: 'online' });
+-assert('ingestPacket succeeds', ingestResult.success);
+-assert('New node appears in latest', !!DL.getLatestTelemetryByNode()['node-99']);
+-
+-const badIngest = DL.ingestPacket({});
+-assert('Packet without id rejected', !!badIngest.error);
+-
+-// Test deleteTelemetryForNode
+-const deleteTelemRes = DL.deleteTelemetryForNode('node-99');
+-assert('deleteTelemetryForNode succeeds', deleteTelemRes.success);
+-assert('Deleted node telemetry is gone from latest', !DL.getLatestTelemetryByNode()['node-99']);
+-assert('Deleted node history is empty', DL.getTelemetryForNode('node-99').length === 0);
+-
+-// ---- Diagnostics ----
+-section('DIAGNOSTICS');
+-const diag = DL.runDiagnostics();
+-assert('Diagnostics returns alerts array', Array.isArray(diag.alerts));
+-const criticals = diag.alerts.filter(a => a.severity === 'critical');
+-const warnings = diag.alerts.filter(a => a.severity === 'warning');
+-assert('Has critical alerts (node-8 low battery / node-5 high temp)', criticals.length >= 1);
+-assert('Has warning alerts', warnings.length >= 0);
+-console.log(`    → ${criticals.length} critical, ${warnings.length} warning`);
+-
+-// ---- Efficiency ----
+-section('EFFICIENCY & AC ESTIMATION');
+-const eff = DL.calculateEfficiency('node-1');
+-assert('Efficiency calculation succeeds', !!eff.efficiency_score);
+-assert('Efficiency score is 0-100', eff.efficiency_score >= 0 && eff.efficiency_score <= 100);
+-
+-const acOff = DL.estimateACDial(18);
+-assert('18°C → Off', acOff.dial === 'Off');
+-const acEco = DL.estimateACDial(22);
+-assert('22°C → Eco', acEco.dial === 'Eco');
+-const acCool = DL.estimateACDial(25);
+-assert('25°C → Cool', acCool.dial === 'Cool');
+-const acCold = DL.estimateACDial(30);
+-assert('30°C → Cold', acCold.dial === 'Cold');
+-
+-const power = DL.getPowerStats();
+-assert('Power stats: 360 mAh saved (8h × (50-5))', power.mah_saved === 360);
+-
+-// ---- Rule CRUD ----
+-section('RULE CRUD');
+-const allRules = DL.getAllRules();
+-assert('5 rules loaded', allRules.length === 5);
+-
+-const disabledRules = DL.getAllRules('disabled');
+-assert('1 disabled rule', disabledRules.length === 1);
+-assert('Disabled rule is Lab A maintenance', disabledRules[0].message.includes('disabled for maintenance'));
+-
+-const tempRules = DL.getAllRules('temperature');
+-assert('4 temperature rules', tempRules.length === 4);
+-
+-const battRules = DL.getAllRules('battery');
+-assert('1 battery rule', battRules.length === 1);
+-
+-const newRule = DL.createRule({ type: 'temperature', condition: 'above', value: 25, unit: '°C', room: serverRoom.id, roomName: 'Server Room A', nodes: ['node-1'], message: 'Test rule' });
+-assert('createRule succeeds', newRule.success);
+-
+-const badRule = DL.createRule({ type: 'temperature', condition: 'above', value: 25, unit: '°C' });
+-assert('Rule without room rejected', !!badRule.error);
+-
+-const toggleResult = DL.toggleRule(newRule.rule.id);
+-assert('toggleRule disables', toggleResult.success && toggleResult.enabled === false);
+-
+-DL.toggleRule(newRule.rule.id);
+-const delRule = DL.deleteRule(newRule.rule.id);
+-assert('deleteRule succeeds', delRule.success);
+-
+-// ---- Rule Evaluation ----
+-section('RULE EVALUATION');
+-const violations = DL.evaluateRules();
+-assert('evaluateRules returns array', Array.isArray(violations));
+-console.log(`    → ${violations.length} active violations found`);
+-
+-// node-8 has battery 3.1V, rule threshold 3.3V → should violate
+-const battViolation = violations.find(v => v.nodeId === 'node-8' && v.type === 'battery');
+-assert('node-8 battery violation detected (3.1V < 3.3V)', !!battViolation);
+-
+-// node-5 has temp spike to 36.2 in telemetry, rule is above 82.4°F (=28°C) 
+-const tempViolation = violations.find(v => v.nodeId === 'node-5' && v.type === 'temperature');
+-assert('node-5 Fahrenheit rule violation detected (28.9°C > 28°C)', !!tempViolation);
+-
+-// Disabled rule for node-6 should NOT trigger
+-const disabledViolation = violations.find(v => v.nodeId === 'node-6');
+-assert('Disabled rule for node-6 NOT evaluated', !disabledViolation);
+-
+-// ---- Scheduler ----
+-section('SCHEDULER');
+-const schedResult = DL.applySchedule('node-1', '07:00', '23:00', 20, 'Minutes');
+-assert('applySchedule succeeds', schedResult.success);
+-assert('Sleep seconds = 1200 (20 min × 60)', schedResult.sleepSeconds === 1200);
+-
+-// Verify multiple nodes can share the same interval (no collision restriction)
+-const duplicateIntervalResult = DL.applySchedule('node-2', '06:00', '22:00', 20, 'Minutes');
+-assert('Multiple nodes can share the same interval successfully', duplicateIntervalResult.success);
+-
+-const noNodeSched = DL.applySchedule('node-999', '06:00', '22:00', 10, 'Minutes');
+-assert('Schedule for unknown node fails', !!noNodeSched.error);
+-
+-// ---- Notifications ----
+-section('NOTIFICATIONS');
+-const allNotifs = DL.getAllNotifications();
+-assert('6 notifications loaded', allNotifs.length === 6);
+-
+-const triggeredCount = allNotifs.filter(n => n.triggered).length;
+-assert('3 pre-triggered notifications', triggeredCount === 3);
+-
+-const newNotif = DL.createNotification('15:00', '2026-05-13', 'Test maintenance alert', serverRoom.id);
+-assert('createNotification succeeds', newNotif.success);
+-
+-const badNotif = DL.createNotification('', '', '', '');
+-assert('Empty notification rejected', !!badNotif.error);
+-
+-const processResult = DL.processScheduledNotifications();
+-assert('processScheduledNotifications runs', !!processResult);
+-
+-const delNotif = DL.deleteNotification(newNotif.notification.id);
+-assert('deleteNotification succeeds', delNotif.success);
+-
+-// ---- CSV Export ----
+-section('CSV EXPORT');
+-const csv = DL.exportTelemetryCSV();
+-assert('CSV has header', csv.startsWith('Timestamp,AC Control ID'));
+-const csvLines = csv.split('\n');
+-assert('CSV has data rows', csvLines.length > 10);
+-
+-const filteredCSV = DL.exportTelemetryCSV('node-1');
+-const filteredLines = filteredCSV.split('\n');
+-assert('Filtered CSV only has node-1', filteredLines.slice(1).every(l => l === '' || l.includes('node-1')));
+-
+-// ---- Config ----
+-section('CONFIG');
+-const config = DL.getConfig();
+-assert('Config has optimal_temp = 24', config.optimal_temp === 24);
+-
+-const updConfig = DL.updateConfig({ optimal_temp: 22 });
+-assert('Config update succeeds', updConfig.success);
+-assert('optimal_temp now 22', DL.getConfig().optimal_temp === 22);
+-
+-// ---- Summary ----
+-console.log('\n' + '═'.repeat(50));
+-console.log(`  RESULTS: ${passed} passed, ${failed} failed, ${passed + failed} total`);
+-console.log('═'.repeat(50));
+-process.exit(failed > 0 ? 1 : 0);
+--- before/scripts/check_telemetry_db.js
++++ after/scripts/check_telemetry_db.js
+@@ -1,6 +0,0 @@
+-const sqlite3 = require('sqlite3').verbose();
+-const db = new sqlite3.Database('backend/telemetry.db');
+-db.all("SELECT name FROM sqlite_master WHERE type='table';", (err, tables) => {
+-  console.log('Tables in telemetry.db:', tables);
+-  db.close();
+-});

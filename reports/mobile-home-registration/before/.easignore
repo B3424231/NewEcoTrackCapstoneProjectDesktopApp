@@ -1,0 +1,42 @@
+# Integration reports, build output, and local agent instructions
+artifacts/
+reports/
+.agents/
+.codex/
+*.log
+*REPORT.md
+
+# Dependencies
+node_modules/
+
+# Version control and IDE
+.git/
+.vscode/
+.idea/
+.claude/
+
+# Expo output
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+*.apk
+*.aab
+
+# Large non-mobile repository folders
+firmware/
+data-viewer/
+scratch/
+.system_generated/
+
+# Backend scripts and SQL files
+scripts/
+*.sql
+BACKEND_AUDIT.md
+
+# Environment files (public keys are supplied via eas.json)
+.env
+.env*
+!.env.example
+secrets/
+credentials/

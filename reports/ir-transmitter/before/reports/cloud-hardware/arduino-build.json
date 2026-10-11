@@ -1,0 +1,24 @@
+{
+  "result": "passed",
+  "board": "esp32:esp32:heltec_wireless_stick_lite_V3",
+  "esp32_core": "3.3.12",
+  "ArduinoJson": "7.4.3",
+  "IRremoteESP8266": "2.9.0",
+  "program_bytes": 1451216,
+  "program_limit": 3342336,
+  "global_variable_bytes": 50708,
+  "dynamic_memory_limit": 327680,
+  "source_sha256": "69b347b4f0db6666693eff7c344b3a61ec096faae1be2fe9d3dc4c4dbef9e9c6",
+  "firmware_version": "cloud-ir-receiver-1.2-monitor",
+  "ir_receiver_gpio_default": 4,
+  "hardware_flashed": false,
+  "physical_hardware_tested": false,
+  "firmware_directory_edited": false,
+  "bluetooth_pairing": "Just Works; no PIN, encrypted writes and capture reads",
+  "features": [
+    "Bluetooth capture metadata before registration",
+    "Decoded AC remote state through existing latest_ir JSON",
+    "Receiver-only capability enforcement"
+  ],
+  "compile_command": "arduino-cli compile --fqbn esp32:esp32:heltec_wireless_stick_lite_V3 --build-path scratch/build-receiver-monitor scratch/EcoTrackReceiverMonitor"
+}

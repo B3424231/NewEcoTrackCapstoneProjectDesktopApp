@@ -1,0 +1,30 @@
+--- before/public/logs.html
++++ public/logs.html
+@@ -774,7 +774,7 @@
+                 Aircon Control & Telemetry Logs
+               </h3>
+               <p class="text-xs text-slate-500 dark:text-gray-400 mt-0.5">
+-                Historical record of aircon operating states, temperatures, and hardware dispatches
++                Historical record of operating modes, blower fan settings, temperatures, and hardware readings
+               </p>
+             </div>
+             <div class="flex items-center gap-2">
+@@ -803,7 +803,8 @@
+                   <th class="px-5 py-3.5 bg-[#0b291d] dark:bg-[#081a14]">Floor</th>
+                   <th class="px-5 py-3.5 bg-[#0b291d] dark:bg-[#081a14]">Room</th>
+                   <th class="px-5 py-3.5 bg-[#0b291d] dark:bg-[#081a14] whitespace-nowrap">Attached Aircon Type</th>
+-                  <th class="px-5 py-3.5 bg-[#0b291d] dark:bg-[#081a14] whitespace-nowrap">Aircon State</th>
++                  <th class="px-5 py-3.5 bg-[#0b291d] dark:bg-[#081a14] whitespace-nowrap">Operating Mode</th>
++                  <th class="px-5 py-3.5 bg-[#0b291d] dark:bg-[#081a14] whitespace-nowrap">Blower Fan Mode</th>
+                   <th class="px-5 py-3.5 bg-[#0b291d] dark:bg-[#081a14]">Temperature</th>
+                   <th class="px-5 py-3.5 bg-[#0b291d] dark:bg-[#081a14]">Battery</th>
+                   <th class="px-5 py-3.5 bg-[#0b291d] dark:bg-[#081a14]">RSSI</th>
+@@ -1249,7 +1250,7 @@
+   <script src="./js/global-notifications.js"></script>
+   <script src="./js/sidebar.js"></script>
+   <script src="./js/clear-logs-dialog.js?v=1"></script>
+-  <script src="./js/logs.js?v=39"></script>
++  <script src="./js/logs.js?v=40"></script>
+ </body>
+ 
+ </html>

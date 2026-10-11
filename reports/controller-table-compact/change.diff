@@ -1,0 +1,12 @@
+--- before/public/nodes.html
++++ public/nodes.html
+@@ -1411,8 +1411,7 @@
+             <td class="py-3.5 px-4 font-mono font-bold text-teal-700 dark:text-cyan-400 text-xs">${n.node_id}</td>
+             <td class="py-3.5 px-4">
+               <div class="font-bold text-slate-900 dark:text-white text-xs">${displayName}</div>
+-              <div class="text-[11px] text-slate-500 dark:text-gray-400 font-mono mt-0.5">${n.hardware || 'AC Controller Device (WiFi + IR)'} &bull; ${n.firmware || 'Firmware not reported'}</div>
+-              <div class="text-[11px] text-teal-700 dark:text-teal-300 mt-1">${n.capabilities?.ir_receiver === true ? 'IR receiver: monitoring enabled' : 'IR receiver not reported'} · ${n.capabilities?.ir_transmitter === true ? 'IR transmitter: control enabled' : 'IR transmitter required for control'}</div>
++              <div class="text-[11px] text-slate-500 dark:text-gray-400 mt-0.5">${n.hardware || 'AC Controller Device (WiFi + IR)'}</div>
+             </td>
+             <td class="py-3.5 px-4">
+               <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all shadow-sm ${

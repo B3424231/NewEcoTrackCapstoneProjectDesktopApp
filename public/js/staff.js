@@ -25,7 +25,8 @@ function getCleanStaffList() {
 
 let staffList = getCleanStaffList();
 let currentPage = 1;
-const PAGE_SIZE = 10;
+let archivedCurrentPage = 1;
+const PAGE_SIZE = 20;
 let pendingDeleteId = null;
 let searchQuery = '';
 let statusFilter = 'all';
@@ -99,58 +100,78 @@ function resolveAvatarUrl(s) {
   return raw;
 }
 
+function applyStaffData(data) {
+  if (!Array.isArray(data)) return;
+  staffList = data.map(s => {
+    const rawStatus = (s.status || '').toLowerCase();
+    const isArch = isStaffArchived(s);
+    const isOnline = (rawStatus === 'online' || s.is_online === true || s.online_status === 'online') && rawStatus !== 'offline' && s.is_online !== false && !isArch;
+    const status = isArch ? 'Archived' : (isOnline ? 'Online' : 'Offline');
+
+    return {
+      id: s.id,
+      name: s.name,
+      email: s.email,
+      phone: s.phone || '',
+      role: s.role || 'HVAC / Aircon Technician',
+      avatar: resolveAvatarUrl(s),
+      buildingId: (s.building_name === 'All Buildings' || s.building_id === 'all_buildings' || (s.assignment && s.assignment.toLowerCase().includes('all building'))) ? 'all_buildings' : (s.building_id || 'bld_main'),
+      buildingName: s.building_name || 'Main Campus Building',
+      floorId: (s.floor_name === 'All Floors' || s.floor_id === 'all_floors' || (s.assignment && s.assignment.toLowerCase().includes('all floor'))) ? 'all_floors' : (s.floor_id || 'flr_2nd_it'),
+      floorName: s.floor_name || '2nd Floor - IT Wing',
+      roomId: (s.room_name === 'All Rooms' || s.room_id === 'all_rooms' || (s.assignment && s.assignment.toLowerCase().includes('all room')) || (!s.room_id && (s.room_name?.toLowerCase().includes('all') || s.floor_name?.toLowerCase().includes('all') || s.building_name?.toLowerCase().includes('all')))) ? 'all_rooms' : (s.room_id || 'rm_svr_01'),
+      roomName: s.room_name || ((s.room_id === 'all_rooms' || s.floor_name === 'All Floors' || s.building_name === 'All Buildings') ? 'All Rooms' : 'Server Room A'),
+      assignment: s.assignment || `${s.building_name || 'Main Campus Building'} • ${s.floor_name || '2nd Floor - IT Wing'} • ${s.room_name || 'Server Room A'}`,
+      status: status,
+      isOnline: isOnline,
+      isArchived: isArch,
+      is_archived: isArch,
+      archiveReason: s.archive_reason || '',
+      archiveNotes: s.archive_notes || '',
+      archivedAt: s.archived_at || null,
+      lastActive: s.last_active || s.created,
+      created: s.created
+    };
+  });
+  saveStaff();
+  renderTable();
+  renderArchivedTable();
+  updateStats();
+
+  const modal = document.getElementById('staffDetailModal');
+  if (modal && !modal.classList.contains('hidden')) {
+    const detailName = document.getElementById('detailName')?.textContent;
+    const currentStaff = staffList.find(st => st.name === detailName);
+    if (currentStaff) showStaffDetails(null, currentStaff.id);
+  }
+}
+
 async function loadStaffFromSupabase() {
+  const tbody = document.getElementById('staffTableBody');
+  if (tbody && (!staffList || staffList.length === 0)) {
+    window.EcoTrackSkeletons?.renderStaffTableSkeleton('staffTableBody', { rows: 5 });
+  }
+
+  // 1. Authenticated administrator IPC
+  if (window.electron && typeof window.electron.invoke === 'function') {
+    try {
+      await window.ecotrackAuthReady;
+      const res = await window.electron.invoke('staff-fetch-all');
+      if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {
+        applyStaffData(res.data);
+        return;
+      }
+    } catch (e) {
+      console.warn('[Staff fetch IPC failed, attempting client fallback]:', e);
+    }
+  }
+
+  // 2. Client-side Supabase
   if (sb) {
     try {
-      const tbody = document.getElementById('staffTableBody');
-      if (tbody && (!staffList || staffList.length === 0)) {
-        window.EcoTrackSkeletons?.renderStaffTableSkeleton('staffTableBody', { rows: 5 });
-      }
-      const { data, error } = await sb.from('staff').select('*').order('created', { ascending: false });
-      if (!error && Array.isArray(data)) {
-        console.log('[Supabase staff data loaded]:', data);
-        staffList = data.map(s => {
-          const rawStatus = (s.status || '').toLowerCase();
-          const isArch = isStaffArchived(s);
-          const isOnline = (rawStatus === 'online' || s.is_online === true || s.online_status === 'online') && rawStatus !== 'offline' && s.is_online !== false && !isArch;
-          const status = isArch ? 'Archived' : (isOnline ? 'Online' : 'Offline');
-
-          return {
-            id: s.id,
-            name: s.name,
-            email: s.email,
-            phone: s.phone || '',
-            role: s.role || 'HVAC / Aircon Technician',
-            avatar: resolveAvatarUrl(s),
-            buildingId: (s.building_name === 'All Buildings' || s.building_id === 'all_buildings' || (s.assignment && s.assignment.toLowerCase().includes('all building'))) ? 'all_buildings' : (s.building_id || 'bld_main'),
-            buildingName: s.building_name || 'Main Campus Building',
-            floorId: (s.floor_name === 'All Floors' || s.floor_id === 'all_floors' || (s.assignment && s.assignment.toLowerCase().includes('all floor'))) ? 'all_floors' : (s.floor_id || 'flr_2nd_it'),
-            floorName: s.floor_name || '2nd Floor - IT Wing',
-            roomId: (s.room_name === 'All Rooms' || s.room_id === 'all_rooms' || (s.assignment && s.assignment.toLowerCase().includes('all room')) || (!s.room_id && (s.room_name?.toLowerCase().includes('all') || s.floor_name?.toLowerCase().includes('all') || s.building_name?.toLowerCase().includes('all')))) ? 'all_rooms' : (s.room_id || 'rm_svr_01'),
-            roomName: s.room_name || ((s.room_id === 'all_rooms' || s.floor_name === 'All Floors' || s.building_name === 'All Buildings') ? 'All Rooms' : 'Server Room A'),
-            assignment: s.assignment || `${s.building_name || 'Main Campus Building'} • ${s.floor_name || '2nd Floor - IT Wing'} • ${s.room_name || 'Server Room A'}`,
-            status: status,
-            isOnline: isOnline,
-            isArchived: isArch,
-            archiveReason: s.archive_reason || '',
-            archiveNotes: s.archive_notes || '',
-            archivedAt: s.archived_at || null,
-            lastActive: s.last_active || s.created,
-            created: s.created
-          };
-        });
-        saveStaff();
-        renderTable();
-        renderArchivedTable();
-        updateStats();
-
-        // If detail modal is open, refresh its content
-        const modal = document.getElementById('staffDetailModal');
-        if (modal && !modal.classList.contains('hidden')) {
-          const detailName = document.getElementById('detailName')?.textContent;
-          const currentStaff = staffList.find(st => st.name === detailName);
-          if (currentStaff) showStaffDetails(null, currentStaff.id);
-        }
+      const { data, error } = await sb.rpc('ecotrack_admin_list_staff');
+      if (!error && Array.isArray(data) && data.length > 0) {
+        applyStaffData(data);
         return;
       }
     } catch (e) {
@@ -163,6 +184,21 @@ async function loadStaffFromSupabase() {
 }
 
 async function loadBuildingsFloorsRooms() {
+  if (window.electron && typeof window.electron.invoke === 'function') {
+    try {
+      const res = await window.electron.invoke('locations-fetch-all');
+      if (res && res.success) {
+        _buildingsData = res.buildings || [];
+        _floorsData = res.floors || [];
+        _roomsData = res.rooms || [];
+        populateLocationDropdowns();
+        return;
+      }
+    } catch (e) {
+      console.warn('[Locations IPC load error]:', e);
+    }
+  }
+
   if (sb) {
     try {
       const [bRes, fRes, rRes] = await Promise.all([
@@ -178,20 +214,9 @@ async function loadBuildingsFloorsRooms() {
     }
   }
 
-  // Fallbacks if tables are empty
-  if (!_buildingsData.length) {
-    _buildingsData = [{ id: 'bld_main', name: 'Main Campus Building' }];
-  }
-  if (!_floorsData.length) {
-    _floorsData = [{ id: 'flr_2nd_it', name: '2nd Floor - IT Wing', building_id: 'bld_main' }];
-  }
-  if (!_roomsData.length) {
-    _roomsData = [
-      { id: 'rm_svr_01', name: 'Server Room A', floor_id: 'flr_2nd_it' },
-      { id: 'rm_ofc_01', name: 'Main Office Area', floor_id: 'flr_2nd_it' },
-      { id: 'rm_lab_01', name: 'Laboratory A', floor_id: 'flr_2nd_it' }
-    ];
-  }
+  _buildingsData = _buildingsData || [];
+  _floorsData = _floorsData || [];
+  _roomsData = _roomsData || [];
 
   populateLocationDropdowns();
 }
@@ -294,7 +319,13 @@ function getFilteredStaff() {
   let list = staffList.filter(s => !isStaffArchived(s));
 
   if (statusFilter !== 'all') {
-    list = list.filter(s => (s.status || '').toLowerCase() === statusFilter.toLowerCase());
+    const sf = statusFilter.toLowerCase();
+    list = list.filter(s => {
+      const st = (s.status || '').toLowerCase();
+      if (sf === 'online' || sf === 'active') return st === 'online' || st === 'active';
+      if (sf === 'offline' || sf === 'inactive') return st === 'offline' || st === 'inactive';
+      return st === sf;
+    });
   }
 
   if (searchQuery) {
@@ -454,6 +485,9 @@ function renderTable() {
     ? 'Showing 0 of 0'
     : `Showing ${start + 1}–${Math.min(end, filtered.length)} of ${filtered.length}`;
 
+  const staffPagesEl = document.getElementById('staffPaginationPages');
+  if (staffPagesEl) staffPagesEl.textContent = `Page ${currentPage} of ${totalPages}`;
+
   document.getElementById('staffPrevBtn').disabled = currentPage <= 1;
   document.getElementById('staffNextBtn').disabled = currentPage >= totalPages;
 
@@ -482,12 +516,16 @@ function updateStats() {
   const pageReportCountBadge = document.getElementById('pageReportCountBadge');
   if (pageReportCountBadge) {
     const tabReportsContent = document.getElementById('tabReportsContent');
+    const tabArchivedContent = document.getElementById('tabArchivedContent');
     const isReportsTab = tabReportsContent && !tabReportsContent.classList.contains('hidden');
+    const isArchivedTab = tabArchivedContent && !tabArchivedContent.classList.contains('hidden');
     if (isReportsTab) {
       const reports = window.EcoTrackMaintenance?.getReports?.() || [];
       pageReportCountBadge.textContent = `${reports.length} records`;
+    } else if (isArchivedTab) {
+      pageReportCountBadge.textContent = `${archived} archived`;
     } else {
-      pageReportCountBadge.textContent = `${activeStaff.length} records`;
+      pageReportCountBadge.textContent = `${activeStaff.length} staff`;
     }
   }
 }
@@ -501,7 +539,7 @@ function updateStats() {
 const DEFAULT_STAFF_ROLES = [
   'HVAC / Aircon Technician',
   'Electrical & Power Specialist',
-  'Sensor & IoT Calibration Specialist',
+  'Control & IoT Calibration Specialist',
   'Refrigeration & Cooling Engineer',
   'General Maintenance & Facilities',
   'Preventive Maintenance Lead'
@@ -529,7 +567,7 @@ function getRoleIcon(roleName) {
   const lower = roleName.toLowerCase();
   if (lower.includes('hvac') || lower.includes('aircon') || lower.includes('cooling')) return '❄️';
   if (lower.includes('electric') || lower.includes('power')) return '⚡';
-  if (lower.includes('sensor') || lower.includes('iot') || lower.includes('calibration')) return '📡';
+  if (lower.includes('control') || lower.includes('iot') || lower.includes('calibration')) return '📡';
   if (lower.includes('refriger')) return '🧊';
   if (lower.includes('lead') || lower.includes('supervisor') || lower.includes('manager')) return '🛡️';
   if (lower.includes('facility') || lower.includes('facilities') || lower.includes('general')) return '🛠️';
@@ -921,6 +959,8 @@ function openEditStaffModal(event, staffId) {
 
   document.getElementById('editStaffEmail').value = staff.email || '';
   document.getElementById('editStaffPhone').value = staff.phone || '';
+  const editStaffPassInput = document.getElementById('editStaffPassword');
+  if (editStaffPassInput) editStaffPassInput.value = '';
   
   const statusEl = document.getElementById('editStaffStatus');
   if (statusEl) {
@@ -965,7 +1005,8 @@ async function saveEditStaff() {
   const email = document.getElementById('editStaffEmail').value.trim();
   const phone = document.getElementById('editStaffPhone').value.trim();
   const role = document.getElementById('editStaffRole')?.value || 'HVAC / Aircon Technician';
-  const status = document.getElementById('editStaffStatus')?.value || 'Offline';
+  const statusRaw = document.getElementById('editStaffStatus')?.value || 'Offline';
+  const status = (statusRaw === 'Active' || statusRaw === 'Online') ? 'Online' : statusRaw;
 
   if (!name) {
     showStaffInputError('editStaffName', 'Full name cannot be empty.');
@@ -978,6 +1019,15 @@ async function saveEditStaff() {
   if (phone && phone.length !== 11) {
     showStaffInputError('editStaffPhone', 'Phone number must be exactly 11 digits (e.g. 09853308630).');
     return;
+  }
+
+  const editPasswordVal = document.getElementById('editStaffPassword')?.value;
+  if (editPasswordVal) {
+    if (editPasswordVal.length < 6) {
+      showStaffInputError('editStaffPassword', 'New password must be at least 6 characters long.');
+      return;
+    }
+    staff.password = editPasswordVal;
   }
 
   const bSelect = document.getElementById('editStaffBuilding');
@@ -1011,35 +1061,59 @@ async function saveEditStaff() {
     staff.avatar_url = window._editStaffAvatarBase64;
   }
 
-  // Persist to Supabase
-  if (sb) {
+  const saveBtn = document.getElementById('saveEditStaffBtn');
+  const origSaveHtml = saveBtn ? saveBtn.innerHTML : '';
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = `<svg class="animate-spin" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-opacity="0.25"></circle><path d="M4 12a8 8 0 018-8" stroke="currentColor" stroke-width="3"></path></svg> <span>Saving...</span>`;
+  }
+
+  // Persist via Electron IPC or Supabase
+  const editPayload = {
+    name: staff.name,
+    email: staff.email,
+    phone: staff.phone,
+    role: staff.role,
+    status: staff.status,
+    is_online: staff.isOnline,
+    building_name: staff.buildingName,
+    floor_name: staff.floorName,
+    room_name: staff.roomName,
+    room_id: staff.roomId === 'all_rooms' ? null : staff.roomId,
+    assignment: staff.assignment,
+    avatar_url: staff.avatar,
+    photo_url: staff.avatar,
+    updated: new Date().toISOString()
+  };
+
+  if (window.electron && typeof window.electron.invoke === 'function') {
     try {
-      await sb.from('staff').update({
-        name: staff.name,
-        email: staff.email,
-        phone: staff.phone,
-        role: staff.role,
-        status: staff.status,
-        is_online: staff.isOnline,
-        building_name: staff.buildingName,
-        floor_name: staff.floorName,
-        room_name: staff.roomName,
-        room_id: staff.roomId === 'all_rooms' ? null : staff.roomId,
-        assignment: staff.assignment,
-        avatar_url: staff.avatar,
-        photo_url: staff.avatar,
-        updated: new Date().toISOString()
-      }).eq('id', staff.id);
+      await window.electron.invoke('staff-update', { id: staff.id, updates: editPayload });
+    } catch (e) {
+      console.warn('[Staff update IPC failed]:', e);
+    }
+  } else if (sb) {
+    try {
+      await sb.from('staff').update(editPayload).eq('id', staff.id);
     } catch (err) {
       console.warn('[Supabase staff update error]:', err.message);
     }
+  }
+
+  if (saveBtn) {
+    saveBtn.disabled = false;
+    saveBtn.innerHTML = origSaveHtml;
   }
 
   saveStaff();
   closeEditStaffModal();
   renderTable();
   updateStats();
-  showEcoTrackToast(`Updated ${staff.name} successfully!`, 'success');
+  if (window.EcoToast) {
+    window.EcoToast.success(`Updated ${staff.name} successfully!`);
+  } else {
+    showEcoTrackToast(`Updated ${staff.name} successfully!`, 'success');
+  }
 }
 
 // ===== CUSTOM TOAST NOTIFICATION SYSTEM =====
@@ -1204,7 +1278,8 @@ function closeStaffSuccessModal(highlightId) {
 }
 
 // Add staff
-function addStaff() {
+let pendingStaffRegistration = null;
+async function addStaff() {
   const name = document.getElementById('staffName').value.trim();
   const email = document.getElementById('staffEmail').value.trim();
   const phone = document.getElementById('staffPhone').value.trim();
@@ -1229,6 +1304,11 @@ function addStaff() {
   }
   if (password !== confirmPassword) {
     showStaffInputError('staffPasswordConfirm', 'Passwords do not match. Please re-check.');
+    return;
+  }
+
+  if (phone && phone.length !== 11) {
+    showStaffInputError('staffPhone', 'Phone number must be exactly 11 digits (e.g. 09123456789).');
     return;
   }
 
@@ -1264,48 +1344,59 @@ function addStaff() {
     roomId,
     roomName,
     assignment: `${buildingName} • ${floorName} • ${roomName}`,
-    status: 'Active',
+    status: 'Online',
     lastActive: new Date().toISOString(),
     created: new Date().toISOString()
   };
 
-  // Sync to Supabase staff table
-  if (sb) {
-    const fullPayload = {
-      name: newStaff.name,
-      email: newStaff.email,
-      phone: newStaff.phone,
-      role: newStaff.role,
-      building_name: newStaff.buildingName,
-      floor_name: newStaff.floorName,
-      room_name: newStaff.roomName,
-      room_id: newStaff.roomId === 'all_rooms' ? null : newStaff.roomId,
-      assignment: newStaff.assignment,
-      status: newStaff.status,
-      last_active: newStaff.lastActive
-    };
+  const addBtn = document.getElementById('addStaffBtn');
+  const origAddHtml = addBtn ? addBtn.innerHTML : '';
+  if (addBtn) {
+    addBtn.disabled = true;
+    addBtn.innerHTML = `<svg class="animate-spin" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-opacity="0.25"></circle><path d="M4 12a8 8 0 018-8" stroke="currentColor" stroke-width="3"></path></svg> <span>Registering...</span>`;
+  }
 
-    sb.from('staff').insert([fullPayload]).select().single().then(({ data, error }) => {
-      if (error) {
-        // Graceful fallback to base columns if new columns aren't in Supabase schema cache yet
-        return sb.from('staff').insert([{
-          name: newStaff.name,
-          email: newStaff.email,
-          phone: newStaff.phone,
-          status: newStaff.status,
-          last_active: newStaff.lastActive
-        }]).select().single();
-      }
-      return { data, error };
-    }).then(({ data, error }) => {
-      if (!error && data) {
-        newStaff.id = data.id;
-        saveStaff();
-        renderTable();
-        const idEl = document.getElementById('successStaffId');
-        if (idEl) idEl.textContent = data.id;
-      }
-    }).catch(console.warn);
+  // Sync to Supabase staff table via Electron IPC or client
+  const fullPayload = {
+    password,
+    name: newStaff.name,
+    email: newStaff.email,
+    phone: newStaff.phone,
+    role: newStaff.role,
+    building_name: newStaff.buildingName,
+    floor_name: newStaff.floorName,
+    room_name: newStaff.roomName,
+    room_id: newStaff.roomId === 'all_rooms' ? null : newStaff.roomId,
+    assignment: newStaff.assignment,
+    status: newStaff.status,
+    last_active: newStaff.lastActive
+  };
+
+  const signature = JSON.stringify(fullPayload);
+  if (!pendingStaffRegistration || pendingStaffRegistration.signature !== signature) pendingStaffRegistration = { signature, id: 'desktop-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) };
+  const operationId = pendingStaffRegistration.id;
+  try {
+    await window.ecotrackAuthReady;
+    let profile;
+    if (window.electron?.invoke) {
+      const result = await window.electron.invoke('staff-create', { ...fullPayload, operationId });
+      if (!result.success) throw new Error(result.error);
+      profile = result.data;
+    } else {
+      if (!sb) throw new Error('Database connection is unavailable.');
+      const { data, error } = await sb.functions.invoke('provision-staff', { body: { profile: fullPayload, operationId } });
+      if (error || !data?.profile) throw new Error(data?.error || 'Staff credentials could not be provisioned.');
+      profile = data.profile;
+    }
+    pendingStaffRegistration = null;
+    newStaff.id = profile.id;
+    newStaff.status = 'Offline';
+  } catch (error) {
+    if (window.EcoToast) window.EcoToast.error(error.message || 'Staff registration failed.');
+    else alert(error.message || 'Staff registration failed.');
+    return;
+  } finally {
+    if (addBtn) { addBtn.disabled = false; addBtn.innerHTML = origAddHtml; }
   }
 
   staffList.push(newStaff);
@@ -1313,6 +1404,10 @@ function addStaff() {
 
   closeRegisterModal();
   renderTable();
+
+  if (window.EcoToast) {
+    window.EcoToast.success(`Staff member "${newStaff.name}" registered successfully!`);
+  }
 
   // Trigger modern premium success modal
   openStaffSuccessModal(newStaff);
@@ -1345,7 +1440,17 @@ function toggleStaffStatus(eventOrId, possibleId) {
     showEcoTrackToast(`${staff.name} is now Online (Active).`, 'success');
   }
 
-  if (sb) {
+  if (window.electron && typeof window.electron.invoke === 'function') {
+    window.electron.invoke('staff-update', {
+      id: targetId,
+      updates: {
+        status: newStatus,
+        is_online: !isCurrentlyOnline,
+        last_active: staff.lastActive,
+        updated: new Date().toISOString()
+      }
+    }).catch(console.warn);
+  } else if (sb) {
     sb.from('staff').update({
       status: newStatus,
       is_online: !isCurrentlyOnline,
@@ -1415,11 +1520,18 @@ async function confirmArchiveStaff() {
   const notes = document.getElementById('archiveStaffNotes')?.value.trim() || '';
 
   staff.isArchived = true;
+  staff.is_archived = true;
   staff.status = 'Archived';
   staff.isOnline = false;
+  staff.is_online = false;
+  staff.is_active = false;
+  staff.online_status = 'offline';
   staff.archiveReason = reason;
+  staff.archive_reason = reason;
   staff.archiveNotes = notes;
+  staff.archive_notes = notes;
   staff.archivedAt = new Date().toISOString();
+  staff.archived_at = staff.archivedAt;
 
   saveStaff();
   closeArchiveModal();
@@ -1429,6 +1541,20 @@ async function confirmArchiveStaff() {
   updateStats();
 
   showEcoTrackToast(`${staff.name} has been soft-deleted and moved to Archived Accounts.`, 'warning');
+
+  if (window.electron && typeof window.electron.invoke === 'function') {
+    try {
+      const res = await window.electron.invoke('staff-archive', {
+        id: staff.id,
+        reason,
+        notes,
+        archivedAt: staff.archivedAt
+      });
+      if (res && res.success) return;
+    } catch (e) {
+      console.warn('[Staff archive IPC failed]:', e);
+    }
+  }
 
   if (sb) {
     try {
@@ -1463,15 +1589,34 @@ function renderArchivedTable() {
   if (!tbody) return;
 
   const list = getFilteredArchivedStaff();
+  document.getElementById('archivedStaffCard')?.classList.toggle('is-empty', list.length === 0);
+  const totalPages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+  if (archivedCurrentPage > totalPages) archivedCurrentPage = totalPages;
+  if (archivedCurrentPage < 1) archivedCurrentPage = 1;
+
+  const start = (archivedCurrentPage - 1) * PAGE_SIZE;
+  const end = Math.min(start + PAGE_SIZE, list.length);
+  const pageItems = list.slice(start, end);
 
   const info = document.getElementById('archivedPageInfo');
-  if (info) info.textContent = `Showing ${list.length} archived ${list.length === 1 ? 'account' : 'accounts'}`;
+  if (info) {
+    info.textContent = list.length === 0
+      ? 'Showing 0 of 0 archived accounts'
+      : `Showing ${start + 1}–${end} of ${list.length} archived ${list.length === 1 ? 'account' : 'accounts'} (Page ${archivedCurrentPage} of ${totalPages})`;
+  }
+
+  const prevBtn = document.getElementById('archivedPrevBtn');
+  const nextBtn = document.getElementById('archivedNextBtn');
+  const pagesEl = document.getElementById('archivedPaginationPages');
+  if (prevBtn) prevBtn.disabled = archivedCurrentPage <= 1;
+  if (nextBtn) nextBtn.disabled = archivedCurrentPage >= totalPages;
+  if (pagesEl) pagesEl.textContent = `Page ${archivedCurrentPage} of ${totalPages}`;
 
   if (!list || list.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="6" class="px-6 py-16 text-center">
-          <div class="flex flex-col items-center gap-3">
+        <td colspan="6" class="px-6 py-12 text-center">
+          <div class="archived-empty-state flex flex-col items-center gap-3">
             <div class="w-12 h-12 rounded-2xl bg-amber-500/15 text-amber-500 flex items-center justify-center">
               <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="21 8 21 21 3 21 3 8"></polyline>
@@ -1479,8 +1624,8 @@ function renderArchivedTable() {
                 <line x1="10" y1="12" x2="14" y2="12"></line>
               </svg>
             </div>
-            <p class="text-sm font-bold text-gray-500 dark:text-gray-400">No archived personnel accounts</p>
-            <p class="text-xs text-gray-400">Technicians that have been soft-deleted will appear here with full historical records and deletion reasons.</p>
+            <p class="text-sm font-bold text-gray-500 dark:text-gray-400">${archivedSearchQuery.trim() ? 'No matching archived accounts' : 'No archived personnel accounts'}</p>
+            <p class="text-xs text-gray-400">${archivedSearchQuery.trim() ? 'Try a different name, email, or role, or clear the search.' : 'Archived technicians will appear here. You can review their records and restore their accounts.'}</p>
           </div>
         </td>
       </tr>`;
@@ -1488,7 +1633,7 @@ function renderArchivedTable() {
   }
 
   try {
-    tbody.innerHTML = list.map(staff => {
+    tbody.innerHTML = pageItems.map(staff => {
       const name = staff.name || 'Unknown Technician';
       const id = staff.id || '';
       const idDisplay = id ? (id.length > 12 ? `${id.slice(0, 12)}...` : id) : 'stf_archived';
@@ -1580,6 +1725,7 @@ function showArchivedDetails(id) {
   if (!staff) return;
 
   pendingRestoreId = id;
+  _currentDetailStaffId = id;
   const modal = document.getElementById('archivedRecordDetailModal');
   if (!modal) return;
 
@@ -1626,18 +1772,45 @@ function closeArchivedDetailModal() {
   if (modal) modal.classList.add('hidden');
 }
 
-function restoreStaff(id) {
+async function restoreStaff(id) {
   const targetId = id || pendingRestoreId;
   const staff = staffList.find(s => s.id === targetId);
   if (!staff) return;
 
+  const lastActive = new Date().toISOString();
+  try {
+    if (window.electron && typeof window.electron.invoke === 'function') {
+      const result = await window.electron.invoke('staff-restore', targetId);
+      if (!result?.success || !result.data?.length) throw new Error(result?.error || 'No staff account was restored');
+    } else {
+      if (!sb) throw new Error('Database service unavailable');
+      const result = await sb.from('staff').update({
+        status: 'Offline', is_archived: false, is_active: true,
+        is_online: false, online_status: 'offline',
+        archive_reason: null, archive_notes: null, archived_at: null,
+        last_active: lastActive, updated: lastActive
+      }).eq('id', targetId).select('id');
+      if (result.error || !result.data?.length) throw new Error(result.error?.message || 'No staff account was restored');
+    }
+  } catch (error) {
+    showEcoTrackToast(`Could not restore ${staff.name}: ${error.message}`, 'error');
+    return false;
+  }
+
   staff.isArchived = false;
+  staff.is_archived = false;
+  staff.is_active = true;
   staff.status = 'Offline';
   staff.isOnline = false;
-  staff.lastActive = new Date().toISOString();
+  staff.is_online = false;
+  staff.online_status = 'offline';
+  staff.lastActive = lastActive;
   delete staff.archivedAt;
+  delete staff.archived_at;
   delete staff.archiveReason;
+  delete staff.archive_reason;
   delete staff.archiveNotes;
+  delete staff.archive_notes;
 
   saveStaff();
   closeArchivedDetailModal();
@@ -1648,29 +1821,7 @@ function restoreStaff(id) {
 
   showEcoTrackToast(`${staff.name} has been restored to the Active Staff directory!`, 'success');
 
-  if (sb) {
-    sb.from('staff').update({
-      status: 'Offline',
-      is_archived: false,
-      is_active: true,
-      is_online: false,
-      online_status: 'offline',
-      archive_reason: null,
-      archive_notes: null,
-      archived_at: null,
-      last_active: staff.lastActive,
-      updated: new Date().toISOString()
-    }).eq('id', staff.id).then(({ error }) => {
-      if (error) {
-        sb.from('staff').update({
-          status: 'Offline',
-          is_online: false,
-          last_active: staff.lastActive,
-          updated: new Date().toISOString()
-        }).eq('id', staff.id).then();
-      }
-    }).catch(console.warn);
-  }
+  return true;
 }
 
 // Supabase Realtime Staff Synchronization
@@ -1709,15 +1860,36 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('addStaffBtn')?.addEventListener('click', addStaff);
 
   // Search Active Staff
-  document.getElementById('staffSearch')?.addEventListener('input', (e) => {
+  const staffSearchInp = document.getElementById('staffSearch');
+  const staffSearchClearBtn = document.getElementById('btnStaffClearSearch');
+  staffSearchInp?.addEventListener('input', (e) => {
     searchQuery = e.target.value;
     currentPage = 1;
+    if (staffSearchClearBtn) staffSearchClearBtn.classList.toggle('hidden', !searchQuery.trim());
+    renderTable();
+  });
+  staffSearchClearBtn?.addEventListener('click', () => {
+    if (staffSearchInp) staffSearchInp.value = '';
+    searchQuery = '';
+    currentPage = 1;
+    staffSearchClearBtn.classList.add('hidden');
     renderTable();
   });
 
   // Search Archived Staff
-  document.getElementById('archivedSearch')?.addEventListener('input', (e) => {
+  const archivedSearchInp = document.getElementById('archivedSearch');
+  const archivedSearchClearBtn = document.getElementById('btnArchivedClearSearch');
+  archivedSearchInp?.addEventListener('input', (e) => {
     archivedSearchQuery = e.target.value;
+    archivedCurrentPage = 1;
+    if (archivedSearchClearBtn) archivedSearchClearBtn.classList.toggle('hidden', !archivedSearchQuery.trim());
+    renderArchivedTable();
+  });
+  archivedSearchClearBtn?.addEventListener('click', () => {
+    if (archivedSearchInp) archivedSearchInp.value = '';
+    archivedSearchQuery = '';
+    archivedCurrentPage = 1;
+    archivedSearchClearBtn.classList.add('hidden');
     renderArchivedTable();
   });
 
@@ -1728,13 +1900,22 @@ document.addEventListener('DOMContentLoaded', () => {
     renderTable();
   });
 
-  // Pagination
+  // Pagination (Active Staff)
   document.getElementById('staffPrevBtn')?.addEventListener('click', () => {
     if (currentPage > 1) { currentPage--; renderTable(); }
   });
   document.getElementById('staffNextBtn')?.addEventListener('click', () => {
     const totalPages = Math.ceil(getFilteredStaff().length / PAGE_SIZE);
     if (currentPage < totalPages) { currentPage++; renderTable(); }
+  });
+
+  // Pagination (Archived Staff)
+  document.getElementById('archivedPrevBtn')?.addEventListener('click', () => {
+    if (archivedCurrentPage > 1) { archivedCurrentPage--; renderArchivedTable(); }
+  });
+  document.getElementById('archivedNextBtn')?.addEventListener('click', () => {
+    const totalPages = Math.ceil(getFilteredArchivedStaff().length / PAGE_SIZE);
+    if (archivedCurrentPage < totalPages) { archivedCurrentPage++; renderArchivedTable(); }
   });
 
   // Archive Modal Listeners
@@ -1748,7 +1929,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // Archived Detail Modal Listeners
   document.getElementById('closeArchivedDetailBtn')?.addEventListener('click', closeArchivedDetailModal);
   document.getElementById('archivedDetailCloseBtn')?.addEventListener('click', closeArchivedDetailModal);
-  document.getElementById('archivedDetailRestoreBtn')?.addEventListener('click', () => restoreStaff());
   document.getElementById('archivedRecordDetailModal')?.addEventListener('click', (e) => {
     if (e.target.id === 'archivedRecordDetailModal') closeArchivedDetailModal();
   });
@@ -1801,6 +1981,20 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+
+  // Global ESC key listener for all staff modals
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeRegisterModal();
+      closeEditStaffModal();
+      closeStaffSuccessModal();
+      closeArchiveModal();
+      const detailModal = document.getElementById('staffDetailModal');
+      if (detailModal) detailModal.classList.add('hidden');
+      closeArchivedDetailModal();
+      if (typeof window.closeDeleteReportModal === 'function') window.closeDeleteReportModal();
+    }
+  });
 
   // Register Staff Photo Uploader
   const regContainer = document.getElementById('registerAvatarContainer');
@@ -1972,6 +2166,8 @@ window.showStaffDetails = showStaffDetails;
 window.renderTable = renderTable;
 window.renderArchivedTable = renderArchivedTable;
 window.loadStaffFromSupabase = loadStaffFromSupabase;
+window.staffList = staffList;
+window.getStaffList = () => staffList;
 
 
 

@@ -1,0 +1,9 @@
+{
+  "public/js/profile.js": "8c3a987ca4e6d0a5bebed24cfc62a8fab63810465e4cb13dd1cea3a73ed327a7",
+  "public/profile.html": "d52a5cc086534ef333dd76cf78d0665be412684100984531a91b9a6fc6b078dc",
+  "public/nodes.html": "5f65700cb2f89ab1acbaf5d18774644674bd014c1efbd73b92719538a700116f",
+  "public/js/hardware-cloud.js": "799531444c3f073f7e79e49e5762f9a14c37620b27ce6b87264d2853a957ddf1",
+  "public/styles.css": "53e8674d57b0ee37f0af617214788f02b8a4b72687cb2cddd54320dd9a49b252",
+  "scripts/test_cloud_hardware_ui.js": "9ed02da293458b50ec4d1bc306d3511fc85d478065ab090dc948ed14f9feed34",
+  "scripts/test_registration_progress.js": "6804335812cc86206dc804bb44e4995d312aaa17d0b852b46384ca06f0bc778b"
+}

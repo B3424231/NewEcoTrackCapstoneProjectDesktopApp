@@ -1,0 +1,272 @@
+{
+  "TCL112AC": {
+    "class": "IRTcl112Ac",
+    "fields": [
+      "power",
+      "temp",
+      "mode",
+      "fan",
+      "turbo",
+      "eco",
+      "display",
+      "filter",
+      "swing_vertical",
+      "swing_horizontal"
+    ],
+    "source": "stdAc::state_t IRTcl112Ac::toCommon(const stdAc::state_t *prev) const {\n  stdAc::state_t result{};\n  // Start with the previous state if given it.\n  if (prev != NULL) result = *prev;\n  result.protocol = decode_type_t::TCL112AC;\n  result.model = getModel();\n  result.quiet = getQuiet(result.quiet);\n  // The rest only get updated if it is a \"normal\" message.\n  if (_.MsgType == kTcl112AcNormal) {\n    result.power = _.Power;\n    result.mode = toCommonMode(_.Mode);\n    result.celsius = true;\n    result.degrees = getTemp();\n    result.fanspeed = toCommonFanSpeed(_.Fan);\n    result.swingv = toCommonSwingV(_.SwingV);\n    result.swingh = _.SwingH ? stdAc::swingh_t::kAuto : stdAc::swingh_t::kOff;\n    result.turbo = _.Turbo;\n    result.filter = _.Health;\n    result.econo = _.Econo;\n    result.light = getLight();\n  }\n  // Not supported.\n  result.clean = false;\n  result.beep = false;\n  result.sleep = -1;\n  result.clock = -1;\n  return result;\n}"
+  },
+  "TEKNOPOINT": {
+    "class": "IRTcl112Ac",
+    "fields": [
+      "power",
+      "temp",
+      "mode",
+      "fan",
+      "turbo",
+      "eco",
+      "display",
+      "filter",
+      "swing_vertical",
+      "swing_horizontal"
+    ],
+    "source": "stdAc::state_t IRTcl112Ac::toCommon(const stdAc::state_t *prev) const {\n  stdAc::state_t result{};\n  // Start with the previous state if given it.\n  if (prev != NULL) result = *prev;\n  result.protocol = decode_type_t::TCL112AC;\n  result.model = getModel();\n  result.quiet = getQuiet(result.quiet);\n  // The rest only get updated if it is a \"normal\" message.\n  if (_.MsgType == kTcl112AcNormal) {\n    result.power = _.Power;\n    result.mode = toCommonMode(_.Mode);\n    result.celsius = true;\n    result.degrees = getTemp();\n    result.fanspeed = toCommonFanSpeed(_.Fan);\n    result.swingv = toCommonSwingV(_.SwingV);\n    result.swingh = _.SwingH ? stdAc::swingh_t::kAuto : stdAc::swingh_t::kOff;\n    result.turbo = _.Turbo;\n    result.filter = _.Health;\n    result.econo = _.Econo;\n    result.light = getLight();\n  }\n  // Not supported.\n  result.clean = false;\n  result.beep = false;\n  result.sleep = -1;\n  result.clock = -1;\n  return result;\n}"
+  },
+  "DAIKIN": {
+    "class": "IRDaikinESP",
+    "fields": [
+      "power",
+      "temp",
+      "mode",
+      "fan",
+      "turbo",
+      "quiet",
+      "eco",
+      "clean",
+      "swing_vertical",
+      "swing_horizontal"
+    ],
+    "source": "stdAc::state_t IRDaikinESP::toCommon(void) const {\n  stdAc::state_t result{};\n  result.protocol = decode_type_t::DAIKIN;\n  result.model = -1;  // No models used.\n  result.power = _.Power;\n  result.mode = toCommonMode(_.Mode);\n  result.celsius = true;\n  result.degrees = getTemp();\n  result.fanspeed = toCommonFanSpeed(getFan());\n  result.swingv = _.SwingV ? stdAc::swingv_t::kAuto :\n                                             stdAc::swingv_t::kOff;\n  result.swingh = _.SwingH ? stdAc::swingh_t::kAuto :\n                                               stdAc::swingh_t::kOff;\n  result.quiet = _.Quiet;\n  result.turbo = _.Powerful;\n  result.clean = _.Mold;\n  result.econo = _.Econo;\n  // Not supported.\n  result.filter = false;\n  result.light = false;\n  result.beep = false;\n  result.sleep = -1;\n  result.clock = -1;\n  return result;\n}"
+  },
+  "DAIKIN2": {
+    "class": "IRDaikin2",
+    "fields": [
+      "power",
+      "temp",
+      "mode",
+      "fan",
+      "turbo",
+      "quiet",
+      "eco",
+      "display",
+      "filter",
+      "clean",
+      "beep",
+      "sleep",
+      "swing_vertical",
+      "swing_horizontal"
+    ],
+    "source": "stdAc::state_t IRDaikin2::toCommon(void) const {\n  stdAc::state_t result{};\n  result.protocol = decode_type_t::DAIKIN2;\n  result.model = -1;  // No models used.\n  result.power = getPower();\n  result.mode = IRDaikinESP::toCommonMode(_.Mode);\n  result.celsius = true;\n  result.degrees = _.Temp;\n  result.fanspeed = IRDaikinESP::toCommonFanSpeed(getFan());\n  result.swingv = toCommonSwingV(_.SwingV);\n  result.swingh = toCommonSwingH(_.SwingH);\n  result.quiet = _.Quiet;\n  result.light = _.Light != 3;  // 3 is Off, everything else is On.\n  result.turbo = _.Powerful;\n  result.clean = _.Mold;\n  result.econo = _.Econo;\n  result.filter = _.Purify;\n  result.beep = _.Beep != 3;  // 3 is Off, everything else is On.\n  result.sleep = _.SleepTimer ? getSleepTime() : -1;\n  // Not supported.\n  result.clock = -1;\n  return result;\n}"
+  },
+  "DAIKIN64": {
+    "class": "IRDaikin64",
+    "fields": [
+      "temp",
+      "mode",
+      "fan",
+      "turbo",
+      "quiet",
+      "sleep",
+      "swing_vertical"
+    ],
+    "source": "stdAc::state_t IRDaikin64::toCommon(const stdAc::state_t *prev) const {\n  stdAc::state_t result{};\n  if (prev != NULL) result = *prev;\n  result.protocol = decode_type_t::DAIKIN64;\n  result.model = -1;  // No models used.\n  result.power ^= _.Power;\n  result.mode = toCommonMode(_.Mode);\n  result.celsius = true;\n  result.degrees = getTemp();\n  result.fanspeed = toCommonFanSpeed(_.Fan);\n  result.swingv = _.SwingV ? stdAc::swingv_t::kAuto : stdAc::swingv_t::kOff;\n  result.turbo = getTurbo();\n  result.quiet = getQuiet();\n  result.sleep = _.Sleep ? 0 : -1;\n  result.clock = getClock();\n  // Not supported.\n  result.swingh = stdAc::swingh_t::kOff;\n  result.clean = false;\n  result.filter = false;\n  result.beep = false;\n  result.econo = false;\n  result.light = false;\n  return result;\n}"
+  },
+  "DAIKIN216": {
+    "class": "IRDaikin216",
+    "fields": [
+      "power",
+      "temp",
+      "mode",
+      "fan",
+      "turbo",
+      "quiet",
+      "swing_vertical",
+      "swing_horizontal"
+    ],
+    "source": "stdAc::state_t IRDaikin216::toCommon(void) const {\n  stdAc::state_t result{};\n  result.protocol = decode_type_t::DAIKIN216;\n  result.model = -1;  // No models used.\n  result.power = _.Power;\n  result.mode = IRDaikinESP::toCommonMode(_.Mode);\n  result.celsius = true;\n  result.degrees = _.Temp;\n  result.fanspeed = IRDaikinESP::toCommonFanSpeed(getFan());\n  result.swingv = _.SwingV ? stdAc::swingv_t::kAuto :\n                              stdAc::swingv_t::kOff;\n  result.swingh = _.SwingH ? stdAc::swingh_t::kAuto :\n                              stdAc::swingh_t::kOff;\n  result.quiet = getQuiet();\n  result.turbo = _.Powerful;\n  // Not supported.\n  result.light = false;\n  result.clean = false;\n  result.econo = false;\n  result.filter = false;\n  result.beep = false;\n  result.sleep = -1;\n  result.clock = -1;\n  return result;\n}"
+  },
+  "GREE": {
+    "class": "IRGreeAC",
+    "fields": [
+      "power",
+      "temp",
+      "mode",
+      "fan",
+      "turbo",
+      "eco",
+      "display",
+      "clean",
+      "sleep",
+      "swing_vertical",
+      "swing_horizontal",
+      "i_feel"
+    ],
+    "source": "stdAc::state_t IRGreeAC::toCommon(void) {\n  stdAc::state_t result{};\n  result.protocol = decode_type_t::GREE;\n  result.model = _model;\n  result.power = _.Power;\n  result.mode = toCommonMode(_.Mode);\n  result.celsius = !_.UseFahrenheit;\n  result.degrees = getTemp();\n  // no support for Sensor temp.\n  result.iFeel = getIFeel();\n  result.fanspeed = toCommonFanSpeed(_.Fan);\n  if (_.SwingAuto)\n    result.swingv = stdAc::swingv_t::kAuto;\n  else\n    result.swingv = toCommonSwingV(_.SwingV);\n  result.swingh = toCommonSwingH(_.SwingH);\n  result.turbo = _.Turbo;\n  result.econo = getEcono();\n  result.light = _.Light;\n  result.clean = _.Xfan;\n  result.sleep = _.Sleep ? 0 : -1;\n  // Not supported.\n  result.quiet = false;\n  result.filter = false;\n  result.beep = false;\n  result.clock = -1;\n  return result;\n}"
+  },
+  "MIDEA": {
+    "class": "IRMideaAC",
+    "fields": [
+      "power",
+      "temp",
+      "mode",
+      "fan",
+      "eco",
+      "sleep",
+      "swing_vertical"
+    ],
+    "source": "stdAc::state_t IRMideaAC::toCommon(const stdAc::state_t *prev) {\n  stdAc::state_t result{};\n  if (prev != NULL) {\n    result = *prev;\n  } else {\n    // Fixed/Not supported/Non-zero defaults.\n    result.protocol = decode_type_t::MIDEA;\n    result.model = -1;  // No models used.\n    result.swingh = stdAc::swingh_t::kOff;\n    result.swingv = stdAc::swingv_t::kOff;\n    result.quiet = false;\n    result.turbo = false;\n    result.econo = false;\n    result.filter = false;\n    result.light = false;\n    result.beep = false;\n    result.sleep = -1;\n    result.clock = -1;\n  }\n  if (isSwingVToggle()) {\n    result.swingv = (result.swingv != stdAc::swingv_t::kOff) ?\n        stdAc::swingv_t::kAuto : stdAc::swingv_t::kOff;\n    return result;\n  }\n  result.power = _.Power;\n  result.mode = toCommonMode(_.Mode);\n  result.celsius = !_.useFahrenheit;\n  result.degrees = getTemp(result.celsius);\n  result.sensorTemperature = getSensorTemp(result.celsius);\n  result.fanspeed = toCommonFanSpeed(_.Fan);\n  result.sleep = _.Sleep ? 0 : -1;\n  result.econo = getEconoToggle();\n  result.clean ^= getCleanToggle();\n  return result;\n}"
+  },
+  "PANASONIC_AC": {
+    "class": "IRPanasonicAc",
+    "fields": [
+      "power",
+      "temp",
+      "mode",
+      "fan",
+      "turbo",
+      "quiet",
+      "filter",
+      "swing_vertical",
+      "swing_horizontal"
+    ],
+    "source": "stdAc::state_t IRPanasonicAc::toCommon(void) {\n  stdAc::state_t result{};\n  result.protocol = decode_type_t::PANASONIC_AC;\n  result.model = getModel();\n  result.power = getPower();\n  result.mode = toCommonMode(getMode());\n  result.celsius = true;\n  result.degrees = getTemp();\n  result.fanspeed = toCommonFanSpeed(getFan());\n  result.swingv = toCommonSwingV(getSwingVertical());\n  result.swingh = toCommonSwingH(getSwingHorizontal());\n  result.quiet = getQuiet();\n  result.turbo = getPowerful();\n  result.filter = getIon();\n  // Not supported.\n  result.econo = false;\n  result.clean = false;\n  result.light = false;\n  result.beep = false;\n  result.sleep = -1;\n  result.clock = -1;\n  return result;\n}"
+  },
+  "SAMSUNG_AC": {
+    "class": "IRSamsungAc",
+    "fields": [
+      "power",
+      "temp",
+      "mode",
+      "fan",
+      "turbo",
+      "quiet",
+      "eco",
+      "display",
+      "filter",
+      "clean",
+      "beep",
+      "sleep",
+      "swing_vertical",
+      "swing_horizontal"
+    ],
+    "source": "stdAc::state_t IRSamsungAc::toCommon(void) const {\n  stdAc::state_t result{};\n  result.protocol = decode_type_t::SAMSUNG_AC;\n  result.model = -1;  // Not supported.\n  result.power = getPower();\n  result.mode = toCommonMode(_.Mode);\n  result.celsius = true;\n  result.degrees = getTemp();\n  result.fanspeed = toCommonFanSpeed(_.Fan);\n  result.swingv = getSwing() ? stdAc::swingv_t::kAuto : stdAc::swingv_t::kOff;\n  result.swingh = getSwingH() ? stdAc::swingh_t::kAuto : stdAc::swingh_t::kOff;\n  result.quiet = getQuiet();\n  result.turbo = getPowerful();\n  result.econo = getEcono();\n  result.clean = getClean();\n  result.beep = _.BeepToggle;\n  result.light = _.Display;\n  result.filter = _.Ion;\n  result.sleep = _Sleep ? getSleepTimer() : -1;\n  // Not supported.\n  result.clock = -1;\n  return result;\n}"
+  },
+  "MITSUBISHI_AC": {
+    "class": "IRMitsubishiAC",
+    "fields": [
+      "power",
+      "temp",
+      "mode",
+      "fan",
+      "quiet",
+      "swing_vertical",
+      "swing_horizontal"
+    ],
+    "source": "stdAc::state_t IRMitsubishiAC::toCommon(void) const {\n  stdAc::state_t result{};\n  result.protocol = decode_type_t::MITSUBISHI_AC;\n  result.model = -1;  // No models used.\n  result.power = _.Power;\n  result.mode = toCommonMode(_.Mode);\n  result.celsius = true;\n  result.degrees = getTemp();\n  result.fanspeed = toCommonFanSpeed(getFan());\n  result.swingv = toCommonSwingV(_.Vane);\n  result.swingh = toCommonSwingH(_.WideVane);\n  result.quiet = getFan() == kMitsubishiAcFanSilent;\n  // Not supported.\n  result.turbo = false;\n  result.clean = false;\n  result.econo = false;\n  result.filter = false;\n  result.light = false;\n  result.beep = false;\n  result.sleep = -1;\n  result.clock = -1;\n  return result;\n}"
+  },
+  "CARRIER_AC64": {
+    "class": "IRCarrierAc64",
+    "fields": [
+      "power",
+      "temp",
+      "mode",
+      "fan",
+      "sleep",
+      "swing_vertical"
+    ],
+    "source": "stdAc::state_t IRCarrierAc64::toCommon(void) const {\n  stdAc::state_t result{};\n  result.protocol = decode_type_t::CARRIER_AC64;\n  result.model = -1;  // No models used.\n  result.power = _.Power;\n  result.mode = toCommonMode(_.Mode);\n  result.celsius = true;\n  result.degrees = getTemp();\n  result.fanspeed = toCommonFanSpeed(_.Fan);\n  result.swingv = _.SwingV ? stdAc::swingv_t::kAuto : stdAc::swingv_t::kOff;\n  result.sleep = _.Sleep ? 0 : -1;\n  // Not supported.\n  result.swingh = stdAc::swingh_t::kOff;\n  result.turbo = false;\n  result.quiet = false;\n  result.clean = false;\n  result.filter = false;\n  result.beep = false;\n  result.econo = false;\n  result.light = false;\n  result.clock = -1;\n  return result;\n}"
+  },
+  "FUJITSU_AC": {
+    "class": "IRFujitsuAC",
+    "fields": [
+      "power",
+      "temp",
+      "mode",
+      "fan",
+      "turbo",
+      "quiet",
+      "eco",
+      "filter",
+      "clean",
+      "swing_vertical",
+      "swing_horizontal"
+    ],
+    "source": "stdAc::state_t IRFujitsuAC::toCommon(const stdAc::state_t *prev) {\n  stdAc::state_t result{};\n  if (prev != NULL) result = *prev;\n  result.protocol = decode_type_t::FUJITSU_AC;\n  checkSum();\n  result.model = _model;\n  result.power = getPower();\n  // Only update these settings if it is a long message, or we have no previous\n  // state info for those settings.\n  if (isLongCode() || prev == NULL) {\n    result.mode = toCommonMode(_.Mode);\n    result.celsius = getCelsius();\n    {\n      const float minHeat = result.celsius ? kFujitsuAcMinHeat\n                                           : kFujitsuAcMinHeatF;\n      result.degrees = get10CHeat() ? minHeat : getTemp();\n    }\n    result.fanspeed = toCommonFanSpeed(_.Fan);\n    uint8_t swing = _.Swing;\n    switch (result.model) {\n      case fujitsu_ac_remote_model_t::ARREB1E:\n      case fujitsu_ac_remote_model_t::ARRAH2E:\n      case fujitsu_ac_remote_model_t::ARRY4:\n        result.clean = _.Clean;\n        result.filter = _.Filter;\n        result.swingv = (swing & kFujitsuAcSwingVert) ? stdAc::swingv_t::kAuto\n                                                      : stdAc::swingv_t::kOff;\n        result.swingh = (swing & kFujitsuAcSwingHoriz) ? stdAc::swingh_t::kAuto\n                                                       : stdAc::swingh_t::kOff;\n        break;\n      case fujitsu_ac_remote_model_t::ARDB1:\n      case fujitsu_ac_remote_model_t::ARJW2:\n      default:\n        result.swingv = stdAc::swingv_t::kOff;\n        result.swingh = stdAc::swingh_t::kOff;\n    }\n  }\n  result.quiet = _.Fan == kFujitsuAcFanQuiet;\n  result.turbo = _cmd == kFujitsuAcCmdPowerful;\n  result.econo = _cmd == kFujitsuAcCmdEcono;\n  // Not supported.\n  result.light = false;\n  result.filter = false;\n  result.clean = false;\n  result.beep = false;\n  result.sleep = -1;\n  result.clock = -1;\n  return result;\n}"
+  },
+  "HAIER_AC": {
+    "class": "IRHaierAC",
+    "fields": [
+      "temp",
+      "mode",
+      "fan",
+      "filter",
+      "sleep",
+      "swing_vertical"
+    ],
+    "source": "stdAc::state_t IRHaierAC::toCommon(void) const {\n  stdAc::state_t result{};\n  result.protocol = decode_type_t::HAIER_AC;\n  result.model = -1;  // No models used.\n  result.power = true;\n  if (_.Command == kHaierAcCmdOff) result.power = false;\n  result.mode = toCommonMode(_.Mode);\n  result.celsius = true;\n  result.degrees = getTemp();\n  result.fanspeed = toCommonFanSpeed(getFan());\n  result.swingv = toCommonSwingV(_.SwingV);\n  result.filter = _.Health;\n  result.sleep = _.Sleep ? 0 : -1;\n  // Not supported.\n  result.swingh = stdAc::swingh_t::kOff;\n  result.quiet = false;\n  result.turbo = false;\n  result.econo = false;\n  result.light = false;\n  result.clean = false;\n  result.beep = true;\n  result.clock = -1;\n  return result;\n}"
+  },
+  "TOSHIBA_AC": {
+    "class": "IRToshibaAC",
+    "fields": [
+      "power",
+      "temp",
+      "mode",
+      "fan",
+      "turbo",
+      "eco",
+      "filter"
+    ],
+    "source": "stdAc::state_t IRToshibaAC::toCommon(const stdAc::state_t *prev) const {\n  stdAc::state_t result{};\n  // Start with the previous state if given it.\n  if (prev != NULL) {\n    result = *prev;\n  } else {\n    // Set defaults for non-zero values that are not implicitly set for when\n    // there is no previous state.\n    // e.g. Any setting that toggles should probably go here.\n    result.swingv = stdAc::swingv_t::kOff;\n  }\n  result.protocol = decode_type_t::TOSHIBA_AC;\n  result.model = -1;  // Not supported.\n  // Do we have enough current state info to override any previous state?\n  // i.e. Was the class just setRaw()'ed with a short \"swing\" message.\n  // This should enables us to also ignore the Swing msg's special 17C setting.\n  if (getStateLength() != kToshibaACStateLengthShort) {\n    result.power = getPower();\n    result.mode = toCommonMode(getMode());\n    result.celsius = true;\n    result.degrees = getTemp();\n    result.fanspeed = toCommonFanSpeed(getFan());\n    result.turbo = getTurbo();\n    result.econo = getEcono();\n    result.filter = getFilter();\n  }\n  switch (getSwing()) {\n    case kToshibaAcSwingOn:\n      result.swingv = stdAc::swingv_t::kAuto;\n      break;\n    case kToshibaAcSwingToggle:\n      if (prev->swingv != stdAc::swingv_t::kOff)\n        result.swingv = stdAc::swingv_t::kOff;\n      else\n        result.swingv = stdAc::swingv_t::kAuto;\n      break;\n    default: result.swingv = stdAc::swingv_t::kOff;\n  }\n  // Not supported.\n  result.light = false;\n  result.swingh = stdAc::swingh_t::kOff;\n  result.quiet = false;\n  result.clean = false;\n  result.beep = false;\n  result.sleep = -1;\n  result.clock = -1;\n  return result;\n}"
+  },
+  "SHARP_AC": {
+    "class": "IRSharpAc",
+    "fields": [
+      "power",
+      "temp",
+      "mode",
+      "fan",
+      "turbo",
+      "eco",
+      "display",
+      "filter",
+      "clean",
+      "swing_vertical"
+    ],
+    "source": "stdAc::state_t IRSharpAc::toCommon(const stdAc::state_t *prev) const {\n  stdAc::state_t result{};\n  // Start with the previous state if given it.\n  if (prev != NULL) result = *prev;\n  result.protocol = decode_type_t::SHARP_AC;\n  result.model = getModel();\n  result.power = getPower();\n  result.mode = toCommonMode(_.Mode);\n  result.celsius = true;\n  result.degrees = getTemp();\n  result.fanspeed = toCommonFanSpeed(_.Fan);\n  result.turbo = getTurbo();\n  if (getSwingV() != kSharpAcSwingVIgnore)\n    result.swingv = toCommonSwingV(getSwingV(), result.mode);\n  result.filter = _.Ion;\n  result.econo = getEconoToggle();\n  result.light = getLightToggle();\n  result.clean = _.Clean;\n  // Not supported.\n  result.swingh = stdAc::swingh_t::kOff;\n  result.quiet = false;\n  result.beep = false;\n  result.sleep = -1;\n  result.clock = -1;\n  return result;\n}"
+  },
+  "HITACHI_AC": {
+    "class": "IRHitachiAc",
+    "fields": [
+      "power",
+      "temp",
+      "mode",
+      "fan",
+      "swing_vertical",
+      "swing_horizontal"
+    ],
+    "source": "stdAc::state_t IRHitachiAc::toCommon(void) const {\n  stdAc::state_t result{};\n  result.protocol = decode_type_t::HITACHI_AC;\n  result.model = -1;  // No models used.\n  result.power = _.Power;\n  result.mode = toCommonMode(getMode());\n  result.celsius = true;\n  result.degrees = getTemp();\n  result.fanspeed = toCommonFanSpeed(getFan());\n  result.swingv = (_.SwingV ? stdAc::swingv_t::kAuto : stdAc::swingv_t::kOff);\n  result.swingh = (_.SwingH ? stdAc::swingh_t::kAuto : stdAc::swingh_t::kOff);\n  // Not supported.\n  result.quiet = false;\n  result.turbo = false;\n  result.clean = false;\n  result.econo = false;\n  result.filter = false;\n  result.light = false;\n  result.beep = false;\n  result.sleep = -1;\n  result.clock = -1;\n  return result;\n}"
+  },
+  "WHIRLPOOL_AC": {
+    "class": "IRWhirlpoolAc",
+    "fields": [
+      "power",
+      "temp",
+      "mode",
+      "fan",
+      "turbo",
+      "display",
+      "sleep",
+      "swing_vertical"
+    ],
+    "source": "stdAc::state_t IRWhirlpoolAc::toCommon(const stdAc::state_t *prev) const {\n  stdAc::state_t result{};\n  // Start with the previous state if given it.\n  if (prev != NULL) {\n    result = *prev;\n  } else {\n    // Set defaults for non-zero values that are not implicitly set for when\n    // there is no previous state.\n    // e.g. Any setting that toggles should probably go here.\n    result.power = false;\n  }\n  result.protocol = decode_type_t::WHIRLPOOL_AC;\n  result.model = getModel();\n  if (_.Power) result.power = !result.power;\n  result.mode = toCommonMode(_.Mode);\n  result.celsius = true;\n  result.degrees = getTemp();\n  result.fanspeed = toCommonFanSpeed(_.Fan);\n  result.swingv = getSwing() ? stdAc::swingv_t::kAuto : stdAc::swingv_t::kOff;\n  result.turbo = getSuper();\n  result.light = getLight();\n  result.sleep = _.Sleep ? 0 : -1;\n  // Not supported.\n  result.swingh = stdAc::swingh_t::kOff;\n  result.quiet = false;\n  result.filter = false;\n  result.econo = false;\n  result.clean = false;\n  result.beep = false;\n  result.clock = -1;\n  return result;\n}"
+  }
+}

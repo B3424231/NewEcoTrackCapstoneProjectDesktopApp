@@ -1,0 +1,33 @@
+from pathlib import Path
+for fn in ['public/control.html','public/ir-library.html','public/ir-profiles.html','public/dashboard.html','public/nodes.html']:
+ p=Path(fn);s=p.read_text(encoding='utf-8')
+ # Embed the verification component after the existing self-contained engine.
+ if 'ac-capability-verification.js' not in s:
+  import re
+  s=re.sub(r'(<script src="./js/aircon-system.js\?v=\d+"></script>)',r'\1\n  <script src="./js/ac-capability-verification.js?v=1"></script>',s, count=1)
+ s=s.replace('aircon-system.js?v=19','aircon-system.js?v=21').replace('aircon-system.js?v=20','aircon-system.js?v=21')
+ if fn.endswith('control.html'):
+  for a,b in [('caps.temperature_min || 16','caps.temperature_min'),('caps.temperature_max || 30','caps.temperature_max'),('caps.temperature_step || 1','caps.temperature_step'),("caps.fans || ['auto', 'low', 'medium', 'high']","caps.fans || []"),("caps.modes : ['cool', 'fan']","caps.modes : []")]:s=s.replace(a,b)
+  s=s.replace("const step = device.capabilities?.temperature_step || 1;","const step = CapabilityEngine.getCapabilities(device).temperature_step;")
+  s=s.replace("Math.min(maxTemp, curTemp + step)","curTemp + step").replace("Math.max(minTemp, curTemp - step)","curTemp - step")
+  s=s.replace("          document.getElementById('cfgCapTimer').checked = !!caps.timer;","          document.getElementById('cfgCapTimer').checked = !!caps.timer;\n          document.querySelectorAll('[id^=cfgCap]').forEach(el=>{if(el.type==='checkbox'){el.disabled=true;el.title='Use Verify AC features to record physical results.';}});")
+  s=s.replace("          button.classList.toggle('opacity-40', button.disabled);","          if(/temp/i.test(button.id) || button.dataset?.cmd==='TEMP')button.disabled ||= !CapabilityEngine.getCapabilities(device).temperature_controllable;\n          button.classList.toggle('opacity-40', button.disabled);")
+ if fn.endswith('ir-library.html'):
+  s=s.replace('CapabilityEngine.getCapabilities(proto)','CapabilityEngine.getCapabilities({...currentDevice,protocol_name:proto,protocol:proto},document.getElementById(\'testModeSelect\')?.value)')
+  s=s.replace("targetTemp > (caps.min_temp || 16)","caps.temperature_controllable && targetTemp - caps.temperature_step >= caps.min_temp").replace("targetTemp < (caps.max_temp || 30)","caps.temperature_controllable && targetTemp + caps.temperature_step <= caps.max_temp").replace('          targetTemp--;','          targetTemp -= caps.temperature_step;').replace('          targetTemp++;','          targetTemp += caps.temperature_step;')
+  s=s.replace('tempTag.textContent = `Range: ${caps.min_temp}°C — ${caps.max_temp}°C`;',"tempTag.textContent = caps.temperature_step ? `Range: ${caps.min_temp}°C — ${caps.max_temp}°C · ${caps.temperature_step}° steps · unverified unless confirmed` : 'Temperature capability unknown';")
+  s=s.replace('        container.appendChild(tempTag);','        container.appendChild(tempTag);\n        if(currentDevice)window.EcoTrackCapabilityVerification?.mount(currentDevice,container);',1)
+  s=s.replace("'testModeSelect')?.addEventListener('change', updateJsonPreview)","'testModeSelect')?.addEventListener('change',()=>{renderCapabilities(document.getElementById('protocolSelect').value);updateJsonPreview();})")
+  s=s.replace("'testPowerSelect')?.addEventListener('change', updateJsonPreview)","'testPowerSelect')?.addEventListener('change', updateJsonPreview)")
+  # Test selects must use the same resolved candidates as the controls.
+  s=s.replace("        // Modes\n","        for(const [id,values] of [['testModeSelect',caps.modes],['testFanSelect',caps.fans]]){const select=document.getElementById(id),chosen=select?.value;if(select){select.replaceChildren(...values.map(value=>new Option(value.toUpperCase(),value)));if(values.includes(chosen))select.value=chosen;select.disabled=!caps.can_transmit;}}\n        // Modes\n",1)
+ if fn.endswith('ir-profiles.html'):
+  s=s.replace('CapabilityEngine.getCapabilities(currentProto)','CapabilityEngine.getCapabilities(ac)')
+  s=s.replace('const caps = CapabilityEngine.getCapabilities(proto);',"const device=AirconProfileManager.getById(deviceId);\n        const caps = CapabilityEngine.getCapabilities({...device,protocol_name:proto,protocol:proto});")
+  s=s.replace('        capsContainer.appendChild(row1);','        capsContainer.appendChild(row1);\n        if(device)window.EcoTrackCapabilityVerification?.mount(device,capsContainer);',1)
+  s=s.replace('<span>${caps.min_temp}&deg;C &ndash; ${caps.max_temp}&deg;C</span>','<span>${caps.temperature_step ? caps.min_temp + "°C – " + caps.max_temp + "°C · " + caps.temperature_step + "° steps" : "Temperature unknown"}</span>')
+ if fn.endswith('nodes.html'):
+  needle="        if (viewModal) viewModal.classList.remove('hidden');"
+  s=s.replace(needle,"        if(remoteProfile)window.EcoTrackCapabilityVerification?.mount(remoteProfile,document.getElementById('viewIrProtocol').closest('.controller-details-row'));\n"+needle)
+ p.write_text(s,encoding='utf-8',newline='\r\n')
+print('Capability views, confidence labels and shared verification integrated.')

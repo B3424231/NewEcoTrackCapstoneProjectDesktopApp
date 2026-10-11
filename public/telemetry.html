@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sensor AC Sensor - EcoTrack</title>
+  <title>AC Control & Monitoring - EcoTrack</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -12,14 +12,17 @@
     }
   </script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <link rel="stylesheet" href="./styles.css?v=51">
+  <link rel="stylesheet" href="./styles.css?v=52">
   <script src="./js/sidebar.js"></script>
-  <script src="./js/sidebar-loader.js?v=5"></script>
+  <script src="./js/sidebar-loader.js?v=7"></script>
+  <script src="./js/eco-network.js"></script>
+  <script src="./js/eco-data-bus.js"></script>
   <script src="./js/skeletons.js?v=1"></script>
   <script src="./js/icons.js"></script>
   <script src="./js/supabase.umd.js"></script>
   <script src="./js/supabase-client.js"></script>
-  <script src="./js/maintenance-modal.js?v=64"></script>
+  <script src="./js/hardware-cloud.js?v=1"></script>
+  <script src="./js/maintenance-modal.js?v=68"></script>
 </head>
 
 <body class="app-shell bg-gray-50 dark:bg-[#0a0f1d] transition-colors duration-200">
@@ -54,7 +57,7 @@
 
               <button id="clearRoomCabinetBtn"
                 class="p-1.5 bg-rose-500/15 hover:bg-rose-500/30 text-rose-500 border border-rose-400/40 rounded-lg transition-colors cursor-pointer"
-                title="Clear all AC sensors" aria-label="Clear all AC sensors">
+                title="Clear all AC controls" aria-label="Clear all AC controls">
                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M3 6h18" />
                   <path d="M8 6V4h8v2" />
@@ -163,13 +166,13 @@
                 onclick="event.stopPropagation();">
             </div>
 
-            <!-- AC Sensor Count Output Form -->
+            <!-- AC Control Count Output Form -->
             <div class="mb-6">
               <div class="flex items-center justify-between mb-2">
-                <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300">AC Sensor Count</label>
+                <label class="block text-sm font-semibold text-gray-700 dark:text-gray-300">AC Control Count</label>
                 <span class="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-500/20">Read-Only</span>
               </div>
-              <div id="roomSensorCountDisplay"
+              <div id="roomControlCountDisplay"
                 class="w-full px-3.5 py-2.5 bg-gray-100/90 dark:bg-slate-950/60 border-[2px] border-gray-200 dark:border-white/10 rounded-lg flex items-center justify-between text-gray-800 dark:text-gray-100 font-semibold select-none shadow-inner transition-colors">
                 <div class="flex items-center gap-2.5">
                   <div class="w-7 h-7 rounded-lg bg-emerald-500/15 dark:bg-emerald-500/20 flex items-center justify-center text-[#10b981]">
@@ -180,8 +183,8 @@
                     </svg>
                   </div>
                   <div class="flex items-baseline gap-1.5">
-                    <span id="roomSensorCountValue" class="text-base font-bold text-gray-900 dark:text-emerald-400">0</span>
-                    <span id="roomSensorCountLabel" class="text-xs font-medium text-gray-500 dark:text-gray-400">sensors assigned</span>
+                    <span id="roomControlCountValue" class="text-base font-bold text-gray-900 dark:text-emerald-400">0</span>
+                    <span id="roomControlCountLabel" class="text-xs font-medium text-gray-500 dark:text-gray-400">controls assigned</span>
                   </div>
                 </div>
               </div>
@@ -191,7 +194,7 @@
                   <line x1="12" y1="16" x2="12" y2="12"></line>
                   <line x1="12" y1="8" x2="12.01" y2="8"></line>
                 </svg>
-                Automatically calculated from sensors placed in this room.
+                Automatically calculated from controls placed in this room.
               </p>
               <input type="hidden" id="nodeLimitInput" value="10">
             </div>
@@ -208,7 +211,7 @@
           </div>
         </div>
 
-        <!-- MODAL: Clear AC Sensors Confirmation -->
+        <!-- MODAL: Clear AC Controls Confirmation -->
         <div id="clearNodesModal"
           class="modal-overlay fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-[100] flex items-center justify-center p-4 transition-opacity duration-200"
           style="display:none;">
@@ -224,7 +227,7 @@
               </svg>
               <h3 class="text-xl font-bold text-yellow-500">Confirm Clear</h3>
             </div>
-            <p class="text-gray-200 text-sm mb-6">Are you sure you want to remove all AC sensors from this room?</p>
+            <p class="text-gray-200 text-sm mb-6">Are you sure you want to remove all AC controls from this room?</p>
             <div class="flex gap-3">
               <button id="confirmClearBtn"
                 class="flex-1 px-4 py-2.5 bg-red-900/40 border border-red-500/50 text-white font-semibold rounded-lg hover:bg-red-900/60 transition-colors"
@@ -252,7 +255,7 @@
               </svg>Confirm Clear All
             </h3>
             <p class="text-gray-700 dark:text-gray-300 text-sm mb-6">Are you sure you want to clear all rooms and their
-              AC sensors from the cabinet?</p>
+              AC controls from the cabinet?</p>
             <div class="flex gap-3">
               <button id="confirmClearRoomsBtn"
                 class="flex-1 px-4 py-2.5 bg-[#18392B] dark:bg-[#10b981] text-white dark:text-[#042f24] rounded-lg text-sm font-bold transition-colors hover:bg-[#10b981] dark:hover:bg-emerald-600 border-0 cursor-pointer"
@@ -304,7 +307,7 @@
           </div>
         </div>
 
-        <!-- CENTER PANEL: Main AC Sensor Interface -->
+        <!-- CENTER PANEL: Main AC Control Interface -->
         <div class="flex-1 glass-surface glass-panel p-4 flex flex-col min-h-0 min-w-0">
           <div class="flex justify-between items-center mb-4">
             <h3 id="nodeInterfaceTitle" class="text-lg font-bold text-cyan-400 flex items-center gap-2"><svg
@@ -313,7 +316,7 @@
                 <rect x="4" y="2" width="16" height="20" rx="2" ry="2" />
                 <path d="M12 2V6" stroke-width="2" />
                 <line x1="2" y1="12" x2="22" y2="12" stroke-width="1" />
-              </svg>AC Sensor Interface</h3>
+              </svg>AC Control Interface</h3>
             <button id="clearNodesBtn"
               class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold transition-colors bg-red-900/40 border border-red-500/50 text-red-300 rounded-lg hover:bg-red-900/60 hover:text-white">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
@@ -326,27 +329,27 @@
           </div>
           <!-- Scrolling Wrapper -->
           <div class="flex-1 overflow-y-auto pr-2 eco-slim-scrollbar">
-            <!-- AC Sensor Interface Grid -->
+            <!-- AC Control Interface Grid -->
             <div id="nodeInterface" class="border-2 border-dashed border-white/15 rounded-lg p-4 w-full"
               style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; justify-items: stretch; align-items: start; width: 100%;">
               <div class="text-center col-span-full flex items-center justify-center pointer-events-none py-8">
                 <div>
-                  <p class="text-gray-500 text-sm mb-2">Drag AC sensors here</p>
-                  <p class="text-gray-600 text-xs">AC Sensors will appear in a grid</p>
+                  <p class="text-gray-500 text-sm mb-2">Drag AC controls here</p>
+                  <p class="text-gray-600 text-xs">AC Controls will appear in a grid</p>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- MODAL: AC Sensor Detail View -->
+        <!-- MODAL: AC Control Detail View -->
         <div id="nodeDetailModal" class="modal-overlay">
           <div
             class="glass-elevated glass-card p-6 w-full max-w-2xl modal-card max-h-[85vh] overflow-y-auto eco-slim-scrollbar">
             <div class="flex items-start justify-between gap-4 mb-5">
               <div>
-                <h3 id="nodeDetailModalTitle" class="text-xl font-bold text-cyan-400">AC Sensor Details</h3>
-                <p id="nodeDetailModalSubtitle" class="text-xs text-gray-400 mt-1">Full sensor information</p>
+                <h3 id="nodeDetailModalTitle" class="text-xl font-bold text-cyan-400">AC Control Details</h3>
+                <p id="nodeDetailModalSubtitle" class="text-xs text-gray-400 mt-1">Full control information</p>
                 <p id="nodeDetailAttachedType" class="text-xs text-emerald-400 font-semibold mt-1.5">Attached Aircon
                   Type: <span id="nodeDetailAttachedTypeName" class="text-gray-300">Not assigned</span></p>
               </div>
@@ -398,15 +401,15 @@
           </div>
         </div>
 
-        <!-- RIGHT PANEL: Available AC Sensors -->
+        <!-- RIGHT PANEL: Available AC Controls -->
         <div class="w-80 glass-surface glass-panel p-6 flex flex-col overflow-hidden">
           <h3 class="text-lg font-bold text-cyan-400 mb-3 flex items-center gap-2"><svg viewBox="0 0 24 24" width="20"
               height="20" fill="none" stroke="currentColor" stroke-width="1.5" class="text-cyan-400">
               <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5z" />
               <path d="M12 12l-8-4.3 8-4.3 8 4.3" />
-            </svg>Available AC Sensors</h3>
+            </svg>Available AC Controls</h3>
           <div id="availableNodesList" class="flex-1 overflow-y-auto space-y-3 eco-slim-scrollbar pr-1">
-            <!-- AC Sensors will be dynamically added here -->
+            <!-- AC Controls will be dynamically added here -->
           </div>
         </div>
       </div>
@@ -443,13 +446,7 @@
     </div>
   </div>
 
-  <!-- Sensor Logs Engine (PocketBase) -->
-  <script src="./js/pocketbase.umd.js"></script>
-  <script>
-    if (!window.PocketBase) {
-      document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/pocketbase/0.26.2/pocketbase.umd.js"><\/script>');
-    }
-  </script>
+
   <!-- Cloud Database Engine (Supabase) -->
   <script src="./js/supabase.umd.js"></script>
   <script>
@@ -457,11 +454,12 @@
       document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"><\/script>');
     }
   </script>
-  <script src="./js/supabase-client.js"></script>
   <script src="./js/node-sync.js"></script>
   <script src="./js/shared.js"></script>
   <script src="./js/global-notifications.js"></script>
   <script src="./js/sidebar.js"></script>
+  <script src="./js/aircon-state.js"></script>
+  <script src="./js/aircon-system.js?v=22"></script>
   <script src="./js/telemetry-new.js"></script>
 </body>
 

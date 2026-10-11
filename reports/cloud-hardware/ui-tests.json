@@ -1,0 +1,29 @@
+{
+  "checks": [
+    "Untrusted renderer cannot authorize BLE selection",
+    "Only actual discovered devices can be selected",
+    "Selection callback can be used once",
+    "Secure pairing validates and forwards a six-digit PIN",
+    "Actual desktop Just Works confirmation pairs without creating or requesting a PIN",
+    "Failed schedule write preserves local saved settings",
+    "Confirmed schedule queue preserves selected units and labels delivery as queued",
+    "Applied label requires a matching hardware receipt",
+    "Mismatched hardware receipt cannot show Applied",
+    "UI rejects invalid clocks before sending",
+    "Changed page inline JavaScript parses"
+  ],
+  "passed": 11,
+  "pages": [
+    "aircons.html",
+    "control.html",
+    "dashboard.html",
+    "ir-library.html",
+    "ir-profiles.html",
+    "logs.html",
+    "nodes.html",
+    "scheduler.html",
+    "staff.html",
+    "telemetry.html"
+  ],
+  "browser_visual_tested": false
+}

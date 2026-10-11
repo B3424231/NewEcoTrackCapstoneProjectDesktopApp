@@ -1,46 +1,179 @@
-﻿// ===================================================================
-// ECOTRACK SUPABASE CLIENT & DUAL-DATABASE ROUTER
-// - Routes sensor logs ('telemetry') -> Native SQLite3 Database (backend/telemetry.db)
-// - Routes all other entities -> Supabase Cloud Database
+// ===================================================================
+// ECOTRACK SUPABASE CLIENT & SQLITE TELEMETRY ADAPTER
+// - Routes control logs ('telemetry') -> Native SQLite3 Database (backend/telemetry.db)
+// - Cloud entities use the Supabase client directly
 // ===================================================================
 
 (function() {
   // 1. CONFIGURATION
-  const DEFAULT_SUPABASE_URL = 'https://your-project.supabase.co';
-  const DEFAULT_ANON_KEY = 'your_supabase_anon_key';
+  const DEFAULT_SUPABASE_URL = 'https://ynopdmfhngooknybyahq.supabase.co';
+  const DEFAULT_ANON_KEY = 'sb_publishable_HNxLHBeGMPsdoEvVtUusWw_CJ-qlHQ-';
   const DEFAULT_BACKEND_URL = 'http://localhost:5000';
+  function isPublicKey(key) {
+    if (typeof key !== 'string') return false;
+    if (key.startsWith('sb_publishable_')) return true;
+    try { return JSON.parse(atob(key.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).role === 'anon'; }
+    catch (_) { return false; }
+  }
 
-  const supabaseUrl = localStorage.getItem('ecoTrack_supabase_url') || window.SUPABASE_URL || DEFAULT_SUPABASE_URL;
-  const supabaseKey = localStorage.getItem('ecoTrack_supabase_anon_key') || window.SUPABASE_KEY || DEFAULT_ANON_KEY;
-  const backendUrl = localStorage.getItem('ecoTrack_backend_url') || window.BACKEND_URL || DEFAULT_BACKEND_URL;
+  // Sanitize stored localStorage if it contains stale placeholder values or secret keys
+  try {
+    const rawStoredUrl = localStorage.getItem('ecoTrack_supabase_url');
+    if (rawStoredUrl && (rawStoredUrl.includes('your-project') || !rawStoredUrl.startsWith('http'))) {
+      localStorage.removeItem('ecoTrack_supabase_url');
+    }
+    const rawStoredKey = localStorage.getItem('ecoTrack_supabase_anon_key');
+    if (rawStoredKey && (rawStoredKey.includes('your_supabase') || rawStoredKey.includes('your-project') || !isPublicKey(rawStoredKey))) {
+      localStorage.removeItem('ecoTrack_supabase_anon_key');
+    }
+    // Remove any secret keys stored in browser localStorage
+    localStorage.removeItem('ecoTrack_supabase_service_role_key');
+  } catch (_) {}
+
+  const electronEnv = (typeof window !== 'undefined' && window.electron && window.electron.env) ? window.electron.env : {};
+  const storedUrl = localStorage.getItem('ecoTrack_supabase_url');
+  const storedKey = localStorage.getItem('ecoTrack_supabase_anon_key');
+
+  const validStoredUrl = (storedUrl && !storedUrl.includes('your-project') && storedUrl.startsWith('http')) ? storedUrl : null;
+  const validStoredKey = (storedKey && !storedKey.includes('your_supabase') && !storedKey.includes('your-project') && isPublicKey(storedKey) && storedKey.length > 10) ? storedKey : null;
+
+  const supabaseUrl = validStoredUrl || window.SUPABASE_URL || electronEnv.SUPABASE_URL || DEFAULT_SUPABASE_URL;
+  let supabaseKey = validStoredKey || window.SUPABASE_KEY || electronEnv.SUPABASE_ANON_KEY || electronEnv.SUPABASE_KEY || DEFAULT_ANON_KEY;
+  // Strictly prevent secret API key in browser client
+  if (!isPublicKey(supabaseKey)) {
+    console.warn('[EcoTrack] Forbidden secret key in browser context; reverting to publishable key.');
+    supabaseKey = DEFAULT_ANON_KEY;
+  }
+  const backendUrl = localStorage.getItem('ecoTrack_backend_url') || window.BACKEND_URL || electronEnv.BACKEND_URL || DEFAULT_BACKEND_URL;
+
+  // Expose globally
+  window.SUPABASE_URL = supabaseUrl;
+  window.SUPABASE_KEY = supabaseKey;
+  window.BACKEND_URL = backendUrl;
 
   window.ECOTRACK_CONFIG = {
     supabaseUrl,
     supabaseKey,
     backendUrl,
     isSupabaseConfigured: () => {
-      return supabaseUrl && !supabaseUrl.includes('your-project-ref') && supabaseKey;
+      return !!(supabaseUrl && !supabaseUrl.includes('your-project') && supabaseKey && !supabaseKey.includes('your_supabase') && !supabaseKey.startsWith('sb_secret_'));
     }
   };
 
-  // 2. INITIALIZE SUPABASE CLIENT
+  // 2. INITIALIZE SUPABASE CLIENT (Browser uses publishable/anon key)
   let sbClient = null;
-  if (typeof supabase !== 'undefined' && typeof supabase.createClient === 'function') {
+  const sbFactory = (typeof window !== 'undefined' && window.supabase && typeof window.supabase.createClient === 'function')
+    ? window.supabase
+    : (typeof globalThis !== 'undefined' && globalThis.supabase && typeof globalThis.supabase.createClient === 'function')
+      ? globalThis.supabase
+      : (typeof supabase !== 'undefined' && typeof supabase.createClient === 'function' ? supabase : null);
+
+  if (sbFactory) {
     try {
-      sbClient = supabase.createClient(supabaseUrl, supabaseKey, {
+      sbClient = sbFactory.createClient(supabaseUrl, supabaseKey, {
         auth: {
           persistSession: true,
           storage: window.localStorage
         }
       });
-      console.log('[EcoTrack] Supabase client initialized.');
+      console.log('[EcoTrack] Supabase client initialized with publishable key.');
     } catch (e) {
       console.warn('[EcoTrack] Could not initialize live Supabase client:', e.message);
     }
   }
 
+  // Active client in the browser is ALWAYS the safe publishable client (sbClient)
   window.supabaseClient = sbClient;
   window.sb = sbClient;
+  window.supabaseAdmin = null;
+
+  if (sbClient && window.electron?.invoke) {
+    const mirror = session => window.electron.invoke('auth-set-session', session ? {
+      access_token: session.access_token, refresh_token: session.refresh_token
+    } : null);
+    window.ecotrackAuthReady = sbClient.auth.getSession().then(async ({ data }) => {
+      let session = data?.session;
+      if (!session && typeof window !== 'undefined' && window.localStorage) {
+        const storedRefresh = localStorage.getItem('ecoTrack_refresh_token');
+        const storedAccess = localStorage.getItem('ecoTrack_auth_token');
+        if (storedRefresh && storedAccess) {
+          try {
+            const restored = await sbClient.auth.setSession({ access_token: storedAccess, refresh_token: storedRefresh });
+            if (restored?.data?.session) session = restored.data.session;
+          } catch (_) {}
+        }
+      }
+      return mirror(session);
+    });
+    sbClient.auth.onAuthStateChange((_event, session) => {
+      // Leave the Auth callback before doing asynchronous IPC work.
+      window.ecotrackAuthReady = Promise.resolve().then(() => mirror(session));
+      window.ecotrackAuthReady.catch(() => {});
+    });
+    window.ecotrackAuthReady.catch(() => {});
+  }
+
+  // Keep synchronous image renderers compatible while signing private references.
+  const storageImages = new Map();
+  const storageReference = raw => typeof raw === 'string' && raw.match(/^storage:\/\/([^/]+)\/(.+)$/);
+
+  const signStorageImage = async raw => {
+    const match = storageReference(raw);
+    if (!match || !sbClient || match[2].split('/').some(part => !part || part === '.' || part === '..') || /[\?#]/.test(match[2])) return null;
+    const cached = storageImages.get(raw);
+    if (cached && cached.expires > Date.now()) return cached.promise;
+    const promise = Promise.resolve(window.ecotrackAuthReady).then(async () => {
+      const { data, error } = await sbClient.storage.from(match[1]).createSignedUrl(match[2], 3600);
+      if (error || !data?.signedUrl) throw error || new Error('Signing failed');
+      return data.signedUrl;
+    });
+    storageImages.set(raw, { promise, expires: Date.now() + 3300000 });
+    const url = await promise.catch(() => null);
+    if (!url) {
+      storageImages.delete(raw);
+      return null;
+    }
+    storageImages.set(raw, { promise, url, expires: Date.now() + 3300000 });
+    if (typeof document !== 'undefined' && document.querySelectorAll) {
+      try {
+        const images = document.querySelectorAll('img[src^="storage://"], img');
+        images.forEach(img => {
+          if (img && typeof img.getAttribute === 'function' && (img.getAttribute('src') === raw || img.src === raw)) {
+            img.setAttribute('src', url);
+          }
+        });
+      } catch (_) {}
+    }
+    return url;
+  };
+
+  window.ecotrackResolveStorageImage = raw => {
+    const match = storageReference(raw);
+    if (!match) return raw;
+    const cached = storageImages.get(raw);
+    return cached?.url || raw;
+  };
+  window.ecotrackSignStorageImage = signStorageImage;
+
+  if (typeof MutationObserver === 'function') {
+    let _hydrating = false;
+    const hydrate = () => {
+      if (_hydrating) return;
+      _hydrating = true;
+      try {
+        document.querySelectorAll('img[src^="storage://"]').forEach(img => {
+          const raw = img.getAttribute('src');
+          if (raw) signStorageImage(raw);
+        });
+      } finally {
+        _hydrating = false;
+      }
+    };
+    const observer = new MutationObserver(hydrate);
+    observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+    hydrate();
+  }
+  sbClient?.auth.onAuthStateChange(() => storageImages.clear());
 
   if (sbClient) {
     try {
@@ -51,405 +184,72 @@
     } catch (_) {}
   }
 
-  // Helper to parse simple PocketBase string filter (e.g., "room_id = 'rm_123'", "date = '2026-08-29'")
-  function applyPbFilterToSupabaseQuery(query, filterStr) {
-    if (!filterStr || typeof filterStr !== 'string') return query;
-
-    const conditions = filterStr.split(/&&|AND/i).map(c => c.trim()).filter(Boolean);
-    for (const cond of conditions) {
-      const eqMatch = cond.match(/^([\w\.]+)\s*=\s*['"]?([^'"]+)['"]?$/);
-      if (eqMatch) {
-        query = query.eq(eqMatch[1], eqMatch[2]);
-        continue;
-      }
-      const gteMatch = cond.match(/^([\w\.]+)\s*>=\s*['"]?([^'"]+)['"]?$/);
-      if (gteMatch) {
-        query = query.gte(gteMatch[1], gteMatch[2]);
-        continue;
-      }
-      const lteMatch = cond.match(/^([\w\.]+)\s*<=\s*['"]?([^'"]+)['"]?$/);
-      if (lteMatch) {
-        query = query.lte(lteMatch[1], lteMatch[2]);
-        continue;
-      }
-      const gtMatch = cond.match(/^([\w\.]+)\s*>\s*['"]?([^'"]+)['"]?$/);
-      if (gtMatch) {
-        query = query.gt(gtMatch[1], gtMatch[2]);
-        continue;
-      }
-      const ltMatch = cond.match(/^([\w\.]+)\s*<\s*['"]?([^'"]+)['"]?$/);
-      if (ltMatch) {
-        query = query.lt(ltMatch[1], ltMatch[2]);
-        continue;
-      }
-    }
-    return query;
-  }
-
   // ===================================================================
-  // 3. NATIVE SQLITE3 TELEMETRY SENSOR LOGS CLIENT
-  // Dedicated strictly to Sensor Logs (telemetry) via SQLite3 API
+  // 3. NATIVE SQLITE3 TELEMETRY CONTROL LOGS CLIENT
+  // Dedicated strictly to Control Logs (telemetry) via SQLite3 API
   // ===================================================================
   class Sqlite3TelemetryCollection {
     constructor() {
       this.table = 'telemetry';
       this.baseUrl = window.ECOTRACK_CONFIG.backendUrl || DEFAULT_BACKEND_URL;
     }
-
-    async getFullList(options = {}) {
-      try {
-        const params = new URLSearchParams();
-        params.append('perPage', '0'); // 0 = all records
-        if (options.sort) params.append('sort', options.sort);
-        if (options.filter) params.append('filter', options.filter);
-        if (options.date) params.append('date', options.date);
-        if (options.node_id) params.append('node_id', options.node_id);
-
-        const res = await fetch(`${this.baseUrl}/api/telemetry?${params.toString()}`);
-        if (res.ok) {
-          const data = await res.json();
-          return data.items || [];
-        }
-      } catch (err) {
-        console.warn('[SQLite3 Telemetry] getFullList failed:', err.message);
-      }
-      return [];
+    async request(path, options) {
+      const response = await fetch(`${this.baseUrl}/api/telemetry${path}`, options);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `Telemetry request failed (HTTP ${response.status})`);
+      return data;
     }
-
+    async getFullList(options = {}) { return (await this.getList(1, 0, options)).items; }
     async getList(page = 1, perPage = 50, options = {}) {
-      try {
-        const params = new URLSearchParams();
-        params.append('page', String(page));
-        params.append('perPage', String(perPage));
-        if (options.sort) params.append('sort', options.sort);
-        if (options.filter) params.append('filter', options.filter);
-        if (options.date) params.append('date', options.date);
-        if (options.node_id) params.append('node_id', options.node_id);
-
-        const res = await fetch(`${this.baseUrl}/api/telemetry?${params.toString()}`);
-        if (res.ok) {
-          const data = await res.json();
-          return {
-            items: data.items || [],
-            page: data.page || page,
-            perPage: data.perPage || perPage,
-            totalItems: data.totalItems || 0,
-            totalPages: data.totalPages || 1
-          };
-        }
-      } catch (err) {
-        console.warn('[SQLite3 Telemetry] getList failed:', err.message);
+      const params = new URLSearchParams({ page: String(page), perPage: String(perPage) });
+      for (const field of ['sort', 'filter', 'date', 'node_id', 'sensor_name', 'start_time', 'end_time']) {
+        if (options[field] != null && options[field] !== '') params.set(field, options[field]);
       }
-      return { items: [], page, perPage, totalItems: 0, totalPages: 1 };
+      return this.request(`?${params}`);
     }
-
     async getFirstListItem(filter, options = {}) {
-      const list = await this.getList(1, 1, { ...options, filter });
-      if (list.items && list.items.length > 0) {
-        return list.items[0];
-      }
-      throw new Error(`Item not found in SQLite3 telemetry`);
+      const result = await this.getList(1, 1, { ...options, filter });
+      if (result.items?.length) return result.items[0];
+      throw new Error('Telemetry item not found');
     }
-
-    async getOne(id) {
-      try {
-        const res = await fetch(`${this.baseUrl}/api/telemetry/${id}`);
-        if (res.ok) return await res.json();
-      } catch (err) {
-        console.warn(`[SQLite3 Telemetry] getOne(${id}) failed:`, err.message);
-      }
-      throw new Error(`Item ${id} not found in SQLite3 telemetry`);
-    }
-
+    async getOne(id) { return this.request(`/${encodeURIComponent(id)}`); }
     async create(data) {
-      try {
-        const res = await fetch(`${this.baseUrl}/api/telemetry`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data)
-        });
-        if (res.ok) return await res.json();
-      } catch (err) {
-        console.warn('[SQLite3 Telemetry] create failed:', err.message);
-      }
-      const fakeId = 'telem_' + Math.random().toString(36).substring(2, 11);
-      return { id: fakeId, ...data, created: new Date().toISOString() };
+      return this.request('', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
     }
-
     async update(id, data) {
-      try {
-        const res = await fetch(`${this.baseUrl}/api/telemetry`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id, ...data })
-        });
-        if (res.ok) return await res.json();
-      } catch (err) {
-        console.warn(`[SQLite3 Telemetry] update(${id}) failed:`, err.message);
-      }
-      return { id, ...data, updated: new Date().toISOString() };
+      return this.request(`/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
     }
-
-    async delete(id) {
-      try {
-        const res = await fetch(`${this.baseUrl}/api/telemetry/${id}`, { method: 'DELETE' });
-        return res.ok;
-      } catch (err) {
-        return true;
-      }
-    }
-
+    async delete(id) { await this.request(`/${encodeURIComponent(id)}`, { method: 'DELETE' }); return true; }
     subscribe(topic, callback) {
-      // Lightweight polling interval for SQLite3 live telemetry updates
-      let isSubscribed = true;
-      let lastCount = -1;
+      let subscribed = true, signature = null, previousCount = null;
       const poll = async () => {
-        if (!isSubscribed) return;
         try {
-          const res = await fetch(`${this.baseUrl}/api/telemetry?page=1&perPage=1&sort=-created`);
-          if (res.ok) {
-            const data = await res.json();
-            if (data.items && data.items.length > 0 && data.totalItems !== lastCount) {
-              lastCount = data.totalItems;
-              if (typeof callback === 'function') {
-                callback({ action: 'create', record: data.items[0] });
-              }
-            }
+          const data = await this.getList(1, 1, { sort: '-updated' });
+          if (!subscribed) return;
+          const record = data.items[0] || null;
+          const next = JSON.stringify([data.totalItems, record]);
+          if (next !== signature) {
+            const action = previousCount !== null && data.totalItems < previousCount ? 'delete' : signature === null ? 'create' : 'update';
+            signature = next; previousCount = data.totalItems;
+            if (typeof callback === 'function') callback({ action, record });
           }
-        } catch (_) {}
+        } catch (_) { /* Failed reads must not masquerade as empty results. */ }
       };
-      const intervalId = setInterval(poll, 2000);
-      return Promise.resolve(() => {
-        isSubscribed = false;
-        clearInterval(intervalId);
-      });
+      const interval = setInterval(poll, 2000);
+      return Promise.resolve(() => { subscribed = false; clearInterval(interval); });
     }
   }
 
-  // ===================================================================
-  // 4. SUPABASE TABLE SERVICE FOR ALL OTHER PAGES & ENTITIES
-  // ===================================================================
-  class SupabaseTableCollection {
-    constructor(tableName) {
-      this.table = tableName;
-    }
-
-    async getFullList(options = {}) {
-      if (sbClient && window.ECOTRACK_CONFIG.isSupabaseConfigured()) {
-        try {
-          let q = sbClient.from(this.table).select('*');
-          if (options.filter) q = applyPbFilterToSupabaseQuery(q, options.filter);
-          if (options.sort) {
-            const isDesc = options.sort.startsWith('-');
-            const col = isDesc ? options.sort.substring(1) : options.sort;
-            q = q.order(col, { ascending: !isDesc });
-          }
-          const { data, error } = await q;
-          if (!error && data) return data;
-          if (error) console.warn(`[Supabase GET ${this.table}] error:`, error.message);
-        } catch (e) {
-          console.warn(`[Supabase GET ${this.table}] exception:`, e.message);
-        }
-      }
-
-      return [];
-    }
-
-    async getList(page = 1, perPage = 50, options = {}) {
-      if (sbClient && window.ECOTRACK_CONFIG.isSupabaseConfigured()) {
-        try {
-          const from = (page - 1) * perPage;
-          const to = from + perPage - 1;
-          let q = sbClient.from(this.table).select('*', { count: 'exact' }).range(from, to);
-          if (options.filter) q = applyPbFilterToSupabaseQuery(q, options.filter);
-          if (options.sort) {
-            const isDesc = options.sort.startsWith('-');
-            const col = isDesc ? options.sort.substring(1) : options.sort;
-            q = q.order(col, { ascending: !isDesc });
-          }
-          const { data, count, error } = await q;
-          if (!error && data) {
-            return {
-              items: data,
-              page,
-              perPage,
-              totalItems: count || data.length,
-              totalPages: Math.ceil((count || data.length) / perPage)
-            };
-          }
-          if (error) console.warn(`[Supabase getList ${this.table}] error:`, error.message);
-        } catch (e) {
-          console.warn(`[Supabase getList ${this.table}] exception:`, e.message);
-        }
-      }
-
-      const full = await this.getFullList(options);
-      const start = (page - 1) * perPage;
-      const items = full.slice(start, start + perPage);
-      return { items, page, perPage, totalItems: full.length, totalPages: Math.ceil(full.length / perPage) };
-    }
-
-    async getFirstListItem(filter, options = {}) {
-      if (sbClient && window.ECOTRACK_CONFIG.isSupabaseConfigured()) {
-        try {
-          let q = sbClient.from(this.table).select('*');
-          q = applyPbFilterToSupabaseQuery(q, filter);
-          const { data, error } = await q.limit(1).single();
-          if (!error && data) return data;
-          if (error && error.code !== 'PGRST116') console.warn(`[Supabase getFirstListItem ${this.table}] error:`, error.message);
-        } catch (e) {
-          console.warn(`[Supabase getFirstListItem ${this.table}] exception:`, e.message);
-        }
-      }
-      throw new Error(`Item not found in ${this.table}`);
-    }
-
-    async getOne(id) {
-      if (sbClient && window.ECOTRACK_CONFIG.isSupabaseConfigured()) {
-        try {
-          const { data, error } = await sbClient.from(this.table).select('*').eq('id', id).single();
-          if (!error && data) return data;
-        } catch (e) {}
-      }
-      throw new Error(`Item ${id} not found in ${this.table}`);
-    }
-
-    async create(data) {
-      if (sbClient && window.ECOTRACK_CONFIG.isSupabaseConfigured()) {
-        try {
-          const { data: record, error } = await sbClient.from(this.table).insert([data]).select().single();
-          if (!error && record) return record;
-          if (error) console.warn(`[Supabase create ${this.table}] error:`, error.message);
-        } catch (e) {
-          console.warn(`[Supabase create ${this.table}] exception:`, e.message);
-        }
-      }
-
-      const fakeId = (this.table.slice(0, 3) + '_' + Math.random().toString(36).substring(2, 11));
-      return { id: fakeId, ...data, created: new Date().toISOString() };
-    }
-
-    async update(id, data) {
-      if (sbClient && window.ECOTRACK_CONFIG.isSupabaseConfigured()) {
-        try {
-          const { data: record, error } = await sbClient.from(this.table).update(data).eq('id', id).select().single();
-          if (!error && record) return record;
-          if (error) console.warn(`[Supabase update ${this.table}] error:`, error.message);
-        } catch (e) {
-          console.warn(`[Supabase update ${this.table}] exception:`, e.message);
-        }
-      }
-      return { id, ...data, updated: new Date().toISOString() };
-    }
-
-    async delete(id) {
-      if (sbClient && window.ECOTRACK_CONFIG.isSupabaseConfigured()) {
-        try {
-          const { error } = await sbClient.from(this.table).delete().eq('id', id);
-          if (!error) return true;
-        } catch (e) {}
-      }
-      return true;
-    }
-
-    async authWithPassword(usernameOrEmail, password) {
-      if (sbClient && window.ECOTRACK_CONFIG.isSupabaseConfigured()) {
-        try {
-          const { data, error } = await sbClient
-            .from('administrators')
-            .select('*')
-            .or(`username.eq.${usernameOrEmail},email.eq.${usernameOrEmail}`)
-            .eq('password', password)
-            .limit(1)
-            .single();
-
-          if (!error && data) {
-            const token = 'sb_token_' + data.id;
-            return {
-              token,
-              record: data
-            };
-          }
-        } catch (e) {
-          console.warn('[Supabase Auth] Login check error:', e.message);
-        }
-      }
-
-      if (usernameOrEmail === 'admin' && (password === 'adminpassword123' || password === 'admin')) {
-        return {
-          token: 'offline_admin_token',
-          record: {
-            id: 'admin_default_01',
-            username: 'admin',
-            email: 'admin@ecotrack.local',
-            role: 'admin',
-            is_active: true,
-            created: '2026-07-03T00:00:00Z'
-          }
-        };
-      }
-      throw new Error('Invalid username or password.');
-    }
-
-    subscribe(topic, callback) {
-      if (sbClient) {
-        try {
-          const channelName = `realtime_${this.table}_${Math.random().toString(36).substring(2, 8)}`;
-          const channel = sbClient.channel(channelName)
-            .on('postgres_changes', { event: '*', schema: 'public', table: this.table }, (payload) => {
-              if (typeof callback === 'function') {
-                callback({ action: payload.eventType.toLowerCase(), record: payload.new });
-              }
-            })
-            .subscribe();
-          return Promise.resolve(() => { sbClient.removeChannel(channel); });
-        } catch (err) {
-          console.warn(`[Supabase Realtime ${this.table}] Subscribe failed:`, err);
-        }
-      }
-      return Promise.resolve(() => {});
-    }
-  }
-
-  // ===================================================================
-  // 5. DUAL-DATABASE ROUTER (SQLite3 for Telemetry, Supabase for Others)
-  // ===================================================================
-  class DualDatabaseClient {
-    constructor(url) {
-      this.url = url;
-      this.authStore = {
-        isValid: true,
-        token: localStorage.getItem('ecoTrack_auth_token') || 'valid-session',
-        model: JSON.parse(localStorage.getItem('ecoTrack_profile_user') || 'null') || {
-          id: 'admin_default_01',
-          username: 'admin',
-          email: 'admin@ecotrack.local',
-          role: 'admin'
-        },
-        clear: () => {
-          localStorage.removeItem('ecoTrack_auth_token');
-          localStorage.removeItem('ecoTrack_profile_user');
-        }
-      };
-    }
-
-    autoCancellation(enable) {}
-
+  // Cloud metadata uses window.supabaseClient.from(table) directly.
+  class TelemetryClient {
     collection(name) {
-      // 1. SENSOR LOGS ROUTE TO NATIVE SQLITE3 DATABASE (backend/telemetry.db)
-      if (name === 'telemetry') {
-        return new Sqlite3TelemetryCollection();
-      }
-
-      // 2. ALL OTHER ENTITIES ROUTE TO SUPABASE CLOUD DATABASE
-      return new SupabaseTableCollection(name);
+      if (name === 'telemetry') return new Sqlite3TelemetryCollection();
+      throw new Error('Use supabaseClient.from(table) for Supabase metadata');
     }
   }
 
-  // Expose router database client
-  window.PocketBase = DualDatabaseClient;
-  window.pb = new DualDatabaseClient();
-
-  console.log('[EcoTrack] Dual-Database Router Active: Sensor Logs (telemetry) route strictly to SQLite3; all other tables route to Supabase.');
+  window.telemetryClient = new TelemetryClient();
+  // Compatibility names for existing telemetry pages; these do not open PocketBase.
+  window.pb = window.telemetryClient;
+  window.PocketBase = TelemetryClient;
 })();
-

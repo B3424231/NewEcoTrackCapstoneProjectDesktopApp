@@ -1,0 +1,11 @@
+{
+  "read_only": true,
+  "checked_at": "2026-10-08T19:05:41.202Z",
+  "counts": {
+    "controllers": 0,
+    "ac_profiles": 0,
+    "cloud_state_records": 0,
+    "rooms": 0
+  },
+  "issues": []
+}

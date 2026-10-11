@@ -1,0 +1,40 @@
+{
+  "verified_at": "2026-10-08T13:31:15.202683+00:00",
+  "maintenance_report_columns": [
+    "id",
+    "aircon_id",
+    "aircon_name",
+    "room_id",
+    "room_name",
+    "type",
+    "priority",
+    "staff_id",
+    "staff_name",
+    "due_date",
+    "created_date",
+    "status",
+    "description",
+    "tasks",
+    "issue",
+    "verification_remarks",
+    "timeline",
+    "admin_id",
+    "created",
+    "updated",
+    "photo_url",
+    "attachment_url",
+    "photos",
+    "aircon_type",
+    "parent_report_id",
+    "linked_repair_id"
+  ],
+  "update_progress_column_exists": false,
+  "maintenance_save_rpc_exists": true,
+  "counts": {
+    "rooms": 0,
+    "nodes": 0,
+    "aircons": 0,
+    "maintenance_reports": 1
+  },
+  "cloud_writes_performed": false
+}

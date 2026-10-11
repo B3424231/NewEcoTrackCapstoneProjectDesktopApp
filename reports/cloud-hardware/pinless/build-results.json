@@ -1,0 +1,40 @@
+{
+  "result": "passed",
+  "board": "esp32:esp32:heltec_wireless_stick_lite_V3",
+  "esp32_core": "3.3.12",
+  "ArduinoJson": "7.4.3",
+  "IRremoteESP8266": "2.9.0",
+  "program_bytes": 1403256,
+  "program_limit": 3342336,
+  "global_variable_bytes": 50196,
+  "source_sha256": "8e50dc7e7e7e5049bb4e7e03f693ec1d92e728b4c85702e0583b7002461768c1",
+  "firmware_version": "cloud-ir-receiver-1.1-pinless",
+  "hardware_flashed": false,
+  "physical_hardware_tested": false,
+  "firmware_directory_edited": false,
+  "bluetooth_pairing": "Just Works; no PIN, encrypted writes, bonding and LE Secure Connections",
+  "ui_ipc_checks_passed": 11,
+  "provisioning_checks_passed": 17,
+  "builds": [
+    {
+      "board": "esp32:esp32:esp32s3:PartitionScheme=huge_app",
+      "result": "passed",
+      "program_bytes": 1403232,
+      "program_limit": 3145728,
+      "global_variable_bytes": 50196,
+      "dynamic_memory_limit": 327680,
+      "physical_hardware_tested": false,
+      "hardware_flashed": false
+    },
+    {
+      "board": "esp32:esp32:heltec_wireless_stick_lite_V3",
+      "result": "passed",
+      "program_bytes": 1403256,
+      "program_limit": 3342336,
+      "global_variable_bytes": 50196,
+      "dynamic_memory_limit": 327680,
+      "physical_hardware_tested": false,
+      "hardware_flashed": false
+    }
+  ]
+}

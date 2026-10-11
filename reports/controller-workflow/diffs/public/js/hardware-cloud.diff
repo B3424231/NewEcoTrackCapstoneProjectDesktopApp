@@ -1,0 +1,107 @@
+--- before/public/js/hardware-cloud.js
++++ public/js/hardware-cloud.js
+@@ -4,7 +4,8 @@
+   const SERVICE = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
+   const INFO = 'beb5483e-36e1-4688-b7f5-ea07361b26a8';
+   const WIFI = '1c95d5e3-d8f7-413a-bf3d-7a2e5d7be87e';
+-  const state = { device: null, info: null, writer: null, identity: null };
++  const CAPTURE = 'b80301f3-639c-4eaf-bcc0-537759229321';
++  const state = { device: null, info: null, writer: null, identity: null, service: null, capture: null };
+   let bluetoothOperation = Promise.resolve();
+   function serializeBluetooth(operation) {
+     const result = bluetoothOperation.then(operation, operation);
+@@ -34,6 +35,25 @@
+     if (!response.data) throw new Error('Supabase returned no confirmation.');
+     return response.data;
+   }
++  const pendingKey = () => 'ecoTrack_controller_drafts:' + (root.ECOTRACK_CONFIG?.supabaseUrl || root.supabaseClient?.supabaseUrl || 'current');
++  function pendingRegistrations() {
++    try {
++      const ids = JSON.parse(root.localStorage?.getItem(pendingKey()) || '[]');
++      return Array.isArray(ids) ? ids.filter(id => typeof id === 'string') : [];
++    } catch (_) { return []; }
++  }
++  function setPendingRegistration(nodeId, pending) {
++    const ids = new Set(pendingRegistrations());
++    if (pending) ids.add(nodeId); else ids.delete(nodeId);
++    try { root.localStorage?.setItem(pendingKey(), JSON.stringify([...ids])); } catch (_) {}
++  }
++  function completeRegistration(nodeId) {
++    setPendingRegistration(nodeId, false);
++    root.EcoDataBus?.invalidate('nodes');
++    root.EcoDataBus?.invalidate('scheduler:data');
++    if (state.device?.gatt?.connected) state.device.gatt.disconnect();
++  }
++
+   function identityMatches(info) {
+     return /^esp32s3-[a-f0-9]{12}$/.test(info?.device_id || '') && info.cloud_protocol === 1;
+   }
+@@ -58,11 +78,12 @@
+       const server = await device.gatt.connect();
+       const service = await server.getPrimaryService(SERVICE);
+       state.device = device;
++      state.service = service; state.capture = null;
+       state.identity = null;
+       state.info = await service.getCharacteristic(INFO);
+       state.writer = await service.getCharacteristic(WIFI);
+       const info = await readInfo();
+-      device.addEventListener?.('gattserverdisconnected', () => { if (state.device === device) { state.info = null; state.writer = null; } });
++      device.addEventListener?.('gattserverdisconnected', () => { if (state.device === device) { state.info = null; state.writer = null; state.service = null; state.capture = null; } });
+       return { ...info, bluetooth_name: device.name || info.device_id };
+     } catch (error) { throw bluetoothFailure(error); }
+   }
+@@ -121,12 +142,13 @@
+     if (!config?.supabaseUrl?.startsWith('https://') || !publicKey(config.supabaseKey)) throw new Error('A Supabase HTTPS URL and publishable key are required.');
+     const registration = await rpc('ecotrack_register_cloud_device', { p_device_id: info.device_id, p_metadata: metadata });
+     if (!registration.node?.id || !/^[a-f0-9]{64}$/.test(registration.device_token || '')) throw new Error('Invalid cloud device registration response.');
++    setPendingRegistration(registration.node.id, true);
+     try {
+       const confirmed = await provision({ ...credentials, supabase_url: config.supabaseUrl, supabase_key: config.supabaseKey,
+         device_token: registration.device_token, device_id: info.device_id }, true);
+       const cloudState = await getStatus(registration.node.id);
+       if (cloudState.device_id !== confirmed.device_id || cloudState.connection_status !== 'online') throw new Error('Device cloud heartbeat was not confirmed.');
+-      state.device.gatt.disconnect();
++      // Keep Bluetooth available for retry if the following metadata/binding save fails.
+       return { node: registration.node, info: confirmed, cloud_state: cloudState };
+     } finally { delete registration.device_token; }
+   }
+@@ -195,6 +217,32 @@
+   async function learn(nodeId) {
+     return request(nodeId, 'learn_ir', {}, { timeoutMs: 30000 });
+   }
++  async function learnNearby(nodeId, options = {}) {
++    const info = await readInfo();
++    if (info.device_id !== nodeId) throw new Error('Reconnect the selected ESP32 before listening.');
++    if (info.capabilities?.ble_ir_monitor !== true || !state.service)
++      throw new Error('This receiver needs the updated sketch for Bluetooth IR detection. You can also Save & Verify Controller first, then detect its remote in Edit through Supabase.');
++    if (!state.capture) state.capture = await state.service.getCharacteristic(CAPTURE);
++    const readCapture = async () => {
++      let value;
++      try { const characteristic = state.capture; value = await serializeBluetooth(() => characteristic.readValue()); }
++      catch (error) { throw bluetoothFailure(error); }
++      if (!state.device?.gatt?.connected) throw new Error('Reconnect the ESP32 through Bluetooth.');
++      return JSON.parse(new TextDecoder().decode(value));
++    };
++    const first = await readCapture();
++    const sequence = Number(first.sequence || 0);
++    const deadline = Date.now() + 6000;
++    options.onListening?.();
++    while (Date.now() < deadline) {
++      await delay(200);
++      const capture = await readCapture();
++      if (Number(capture.sequence) > sequence && Number(capture.raw_count) >= 3 && capture.protocol)
++        return {...capture,success:true,source:'bluetooth'};
++    }
++    throw new Error('No new IR signal received. Point the AC remote at the receiver and press a button while listening.');
++  }
++
+   async function latest(nodeId) {
+     const device = await getStatus(nodeId);
+     if (!device.latest_ir?.raw_data) throw new Error('No actual IR capture has been uploaded by this receiver.');
+@@ -293,5 +341,5 @@
+       root.localStorage.setItem('ecoTrack_nodes', JSON.stringify(nodes));
+     }
+   } catch (_) {}
+-  root.EcoTrackHardwareCloud = { connect, resume, readInfo, provision, register, request, waitForResult, ping, learn, latest, control, getStatus, listStatus, describe, resolveNode };
++  root.EcoTrackHardwareCloud = { connect, resume, readInfo, provision, register, pendingRegistrations, completeRegistration, request, waitForResult, ping, learn, learnNearby, latest, control, getStatus, listStatus, describe, resolveNode };
+ })(typeof window !== 'undefined' ? window : globalThis);

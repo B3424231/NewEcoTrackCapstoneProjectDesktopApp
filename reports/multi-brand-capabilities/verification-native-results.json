@@ -1,0 +1,12 @@
+{
+  "passed": 5,
+  "checks": [
+    "The removed verification component is absent; existing capability data and engine remain available.",
+    "Normal control still queues an actual SQL-validated command without automatically marking physical support.",
+    "Existing backend capability persistence still updates shared controls and preserves the custom name and manufacturer.",
+    "Backend errors remain visible to callers and cannot mutate already saved results.",
+    "Shared controller edit persists distinct controller/AC names atomically, keeps bindings and verification, and rolls back invalid edits."
+  ],
+  "actual_isolated_postgresql": true,
+  "physical_hardware_tested": false
+}

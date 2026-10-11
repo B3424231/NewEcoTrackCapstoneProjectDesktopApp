@@ -1,0 +1,18 @@
+{
+  "passed": 11,
+  "checks": [
+    "A click shows busy feedback, blocks duplicates, and confirms only the actual device reply",
+    "A Bluetooth failure clears the stale address and shows an actionable error",
+    "Disconnected Wi-Fi, empty, zero, and invalid addresses cannot report success",
+    "A reply from a different controller cannot update this setup",
+    "A missing reply times out visibly and releases the retry button",
+    "Resetting or changing the controller invalidates late replies",
+    "Reading without a selected controller gives feedback without contacting hardware",
+    "Supabase-verified admins show Full Access regardless of role spelling",
+    "A cached admin label cannot override an authenticated denial",
+    "Cached profile loads still check actual admin access",
+    "An unavailable permission check does not falsely claim access"
+  ],
+  "live_hardware_tested": false,
+  "live_supabase_permissions_tested": false
+}

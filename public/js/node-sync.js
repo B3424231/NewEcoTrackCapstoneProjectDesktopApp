@@ -1,16 +1,6 @@
-﻿/**
- * EcoTrack Node & Sensor Logs Sync Service
- * Bridges Supabase (master source for relational nodes, rooms, floors, buildings, aircon types)
- * and PocketBase (dedicated sensor logs engine).
- * 
- * Ensures all Supabase nodes and their metadata are automatically saved into:
- * 1. PocketBase `nodes` collection
- * 2. PocketBase `telemetry` collection (Sensor Logs)
- */
+/** Saves controller telemetry to SQLite and live readings to Supabase. */
 
 (function(global) {
-  const DEFAULT_PB_URL = 'http://127.0.0.1:8090';
-
   function getSupabase() {
     if (typeof window !== 'undefined' && (window.supabaseClient || window.sb)) {
       return window.supabaseClient || window.sb;
@@ -27,275 +17,36 @@
     return null;
   }
 
-  function getPocketBase() {
-    if (typeof window !== 'undefined') {
-      if (window.realPocketBase) return window.realPocketBase;
-      if (window.pb && typeof window.pb.collection === 'function') return window.pb;
-      if (typeof PocketBase === 'function') return new PocketBase(DEFAULT_PB_URL);
-    }
-    if (typeof require !== 'undefined') {
-      try {
-        const PocketBase = require('pocketbase/cjs');
-        return new PocketBase(DEFAULT_PB_URL);
-      } catch (_) {}
-    }
-    return null;
-  }
-
-  /**
-   * Synchronize all Supabase nodes, rooms, floors, and buildings into PocketBase
-   * and ensure PocketBase sensor logs (telemetry collection) have complete records.
-   */
-  async function syncSupabaseNodesToPocketBase(options = {}) {
-    const sb = getSupabase();
-    const pb = getPocketBase();
-
-    if (!sb || !pb) {
-      console.warn('[EcoTrack Sync] Missing Supabase or PocketBase client; skipping sync.');
-      return { success: false, reason: 'client_unavailable' };
-    }
-
-    try {
-      console.log('[EcoTrack Sync] Fetching nodes and metadata from Supabase...');
-      const [nodesRes, roomsRes, floorsRes, buildingsRes] = await Promise.all([
-        sb.from('nodes').select('*'),
-        sb.from('rooms').select('*'),
-        sb.from('floors').select('*'),
-        sb.from('buildings').select('*')
-      ]);
-
-      const sbNodes = nodesRes.data || [];
-      const sbRooms = roomsRes.data || [];
-      const sbFloors = floorsRes.data || [];
-      const sbBuildings = buildingsRes.data || [];
-
-      if (!sbNodes.length) {
-        console.log('[EcoTrack Sync] No nodes found in Supabase to sync.');
-        return { success: true, count: 0 };
-      }
-
-      // Build hierarchy lookup maps from Supabase
-      const buildingMap = {};
-      sbBuildings.forEach(b => { buildingMap[b.id] = b.name; });
-
-      const floorMap = {};
-      sbFloors.forEach(f => {
-        floorMap[f.id] = {
-          name: f.name,
-          buildingName: buildingMap[f.building_id] || 'Main Campus Building'
-        };
-      });
-
-      const locationLookup = {};
-      sbRooms.forEach(r => {
-        const fInfo = floorMap[r.floor_id] || { name: 'Floor 1', buildingName: 'Main Campus Building' };
-        locationLookup[r.id] = {
-          roomName: r.name,
-          floorName: fInfo.name,
-          buildingName: fInfo.buildingName
-        };
-      });
-
-      // Get existing PocketBase rooms to properly link relations
-      let pbRooms = [];
-      try {
-        pbRooms = await pb.collection('rooms').getFullList();
-      } catch (_) {}
-
-      const pbRoomByName = {};
-      pbRooms.forEach(pr => {
-        pbRoomByName[pr.name.toLowerCase().trim()] = pr.id;
-      });
-
-      // Ensure every Supabase room exists in PocketBase
-      for (const sr of sbRooms) {
-        const key = sr.name.toLowerCase().trim();
-        if (!pbRoomByName[key]) {
-          try {
-            const createdRoom = await pb.collection('rooms').create({
-              name: sr.name,
-              node_limit: sr.node_limit || 5
-            });
-            pbRoomByName[key] = createdRoom.id;
-          } catch (_) {}
-        }
-      }
-
-      // Get existing PocketBase nodes to avoid duplicates
-      let pbNodes = [];
-      try {
-        pbNodes = await pb.collection('nodes').getFullList();
-      } catch (err) {
-        console.warn('[EcoTrack Sync] Could not fetch PocketBase nodes:', err.message);
-      }
-
-      const pbNodeByName = {};
-      pbNodes.forEach(pn => {
-        pbNodeByName[pn.name] = pn;
-      });
-
-      const syncedNodes = [];
-
-      for (const node of sbNodes) {
-        const nodeName = node.name || node.id;
-        const loc = locationLookup[node.room_id] || {
-          roomName: 'Unassigned',
-          floorName: 'Unassigned',
-          buildingName: 'Main Campus Building'
-        };
-        const airconType = node.aircon_type || 'Split Type (Inverter)';
-
-        let pbNode = pbNodeByName[nodeName];
-        let pbNodeId = pbNode ? pbNode.id : null;
-
-        // Resolve valid PocketBase room ID if available
-        let pbRoomId = '';
-        if (loc.roomName && loc.roomName !== 'Unassigned') {
-          const roomKey = loc.roomName.toLowerCase().trim();
-          pbRoomId = pbRoomByName[roomKey] || '';
-        }
-
-        const pbNodePayload = {
-          name: nodeName,
-          room_id: pbRoomId,
-          aircon_type: airconType,
-          status: node.status || 'online',
-          temp: node.temp ?? 23.5,
-          pressure: node.pressure ?? 0.45,
-          battery: node.battery ?? 4.0,
-          rssi: node.rssi ?? -60,
-          wake_time: node.wake_time || '00:00',
-          sleep_time: node.sleep_time || '00:00',
-          interval_val: node.interval_val || 15,
-          interval_unit: node.interval_unit || 'Minutes'
-        };
-
-        if (pbNodeId) {
-          try {
-            await pb.collection('nodes').update(pbNodeId, pbNodePayload);
-          } catch (err) {
-            // If room_id relation fails, retry with empty room_id
-            if (err.data && err.data.room_id) {
-              pbNodePayload.room_id = '';
-              await pb.collection('nodes').update(pbNodeId, pbNodePayload).catch(() => {});
-            }
-          }
-        } else {
-          try {
-            const created = await pb.collection('nodes').create(pbNodePayload);
-            pbNodeId = created.id;
-            pbNodeByName[nodeName] = created;
-          } catch (err) {
-            // If room_id relation fails, retry without room_id
-            if (pbNodePayload.room_id) {
-              pbNodePayload.room_id = '';
-              try {
-                const created = await pb.collection('nodes').create(pbNodePayload);
-                pbNodeId = created.id;
-                pbNodeByName[nodeName] = created;
-              } catch (retryErr) {
-                console.warn(`[EcoTrack Sync] Could not create node ${nodeName} in PB:`, retryErr.message);
-              }
-            }
-          }
-        }
-
-        // Now save / sync sensor logs in PocketBase telemetry collection
-        if (pbNodeId) {
-          try {
-            let existingLogs = [];
-            try {
-              const res = await pb.collection('telemetry').getList(1, 10, {
-                filter: `node_id='${pbNodeId}' || sensor_name='${nodeName}'`,
-                sort: '-created'
-              });
-              existingLogs = res.items || [];
-            } catch (_) {}
-
-            if (existingLogs.length === 0) {
-              // Create initial sensor log records for this Supabase node
-              const baseTemp = node.temp ?? 23.5;
-              const basePress = node.pressure ?? 0.45;
-              const baseBatt = node.battery ?? 4.0;
-              const baseRssi = node.rssi ?? -60;
-
-              // Generate 5 recent historical readings (spaced by 10 minutes)
-              for (let i = 4; i >= 0; i--) {
-                const tempOffset = (Math.random() - 0.5) * 0.8;
-                const pressOffset = (Math.random() - 0.5) * 0.05;
-
-                await pb.collection('telemetry').create({
-                  node_id: pbNodeId,
-                  sensor_name: nodeName,
-                  room_name: loc.roomName,
-                  floor_name: loc.floorName,
-                  building_name: loc.buildingName,
-                  aircon_type: airconType,
-                  temperature: Math.round(baseTemp + tempOffset),
-                  pressure: parseFloat((basePress + pressOffset).toFixed(2)),
-                  battery: parseFloat(baseBatt.toFixed(1)),
-                  rssi: baseRssi + Math.floor((Math.random() - 0.5) * 4),
-                  status: node.status || 'online'
-                });
-              }
-              console.log(`[EcoTrack Sync] Saved initial sensor logs for ${nodeName} in PocketBase`);
-            } else {
-              // Update any existing logs that have blank sensor/room/building/aircon fields
-              for (const log of existingLogs) {
-                if (!log.sensor_name || !log.room_name || !log.aircon_type || log.room_name === 'Unassigned') {
-                  await pb.collection('telemetry').update(log.id, {
-                    sensor_name: nodeName,
-                    room_name: loc.roomName,
-                    floor_name: loc.floorName,
-                    building_name: loc.buildingName,
-                    aircon_type: airconType
-                  });
-                }
-              }
-            }
-          } catch (telemErr) {
-            console.warn(`[EcoTrack Sync] Telemetry sync error for ${nodeName}:`, telemErr.message);
-          }
-        }
-
-        syncedNodes.push({ name: nodeName, pbId: pbNodeId, location: loc, airconType });
-      }
-
-      console.log(`[EcoTrack Sync] Successfully synced ${syncedNodes.length} nodes to PocketBase sensor logs.`);
-      return { success: true, count: syncedNodes.length, nodes: syncedNodes };
-    } catch (err) {
-      console.error('[EcoTrack Sync] Sync failure:', err);
-      return { success: false, error: err.message };
-    }
-  }
+  const measurement = value => value == null || value === '' || !Number.isFinite(Number(value)) ? null : Number(value);
 
   // In-memory cache for node metadata and save rate-limiting
   const _nodeMetadataCache = {};
   const _lastTelemetrySaveTime = {};
+  const _telemetrySavesInFlight = new Set();
 
   /**
-   * Save a single sensor log telemetry reading into PocketBase with the node's
+   * Save a single control log telemetry reading into SQLite with the node's
    * corresponding Supabase metadata.
    */
-  async function saveNodeTelemetryToPocketBase(packet) {
+  async function saveNodeTelemetryToSqlite(packet) {
     if (!packet || !packet.id) return null;
+    if (['off','offline','disconnected','sleeping','asleep'].includes(String(packet.status || '').toLowerCase())) return null;
     const nodeName = packet.name || packet.id;
     const now = Date.now();
 
     // Rate-limit saves to telemetry to avoid spamming (max once per second per node)
-    if (_lastTelemetrySaveTime[nodeName] && (now - _lastTelemetrySaveTime[nodeName]) < 900) {
+    if (_telemetrySavesInFlight.has(nodeName) || (_lastTelemetrySaveTime[nodeName] && (now - _lastTelemetrySaveTime[nodeName]) < 900)) {
       return null;
     }
-    _lastTelemetrySaveTime[nodeName] = now;
+    _telemetrySavesInFlight.add(nodeName);
 
     const sb = getSupabase();
-    if (!sb) return null;
 
     try {
       let loc = packet.room_name ? {
         roomName: packet.room_name,
-        floorName: packet.floor_name || '2nd Floor - IT Wing',
-        buildingName: packet.building_name || 'Main Campus Building'
+        floorName: packet.floor_name || 'Unassigned',
+        buildingName: packet.building_name || 'Unassigned'
       } : null;
       let airconType = packet.aircon_type || null;
 
@@ -306,16 +57,16 @@
         if (!airconType) airconType = cached.airconType;
       }
 
-      if (!loc || !airconType) {
+      if (sb && (!loc || !airconType)) {
         try {
           const { data: nodeData } = await sb.from('nodes').select('*').eq('name', nodeName).maybeSingle();
           if (nodeData) {
-            airconType = nodeData.aircon_type || 'Split Type (Inverter)';
+            airconType = nodeData.aircon_type || null;
             if (nodeData.room_id) {
               const { data: room } = await sb.from('rooms').select('*').eq('id', nodeData.room_id).maybeSingle();
               if (room) {
-                let floorName = '2nd Floor - IT Wing';
-                let buildingName = 'Main Campus Building';
+                let floorName = 'Unassigned';
+                let buildingName = 'Unassigned';
                 if (room.floor_id) {
                   const { data: floor } = await sb.from('floors').select('*').eq('id', room.floor_id).maybeSingle();
                   if (floor) {
@@ -334,25 +85,56 @@
       }
 
       if (!loc) {
-        loc = { roomName: 'Server Room A', floorName: '2nd Floor - IT Wing', buildingName: 'Main Campus Building' };
-      }
-      if (!airconType) {
-        airconType = 'Split Type (Inverter)';
+        loc = { roomName: 'Unassigned', floorName: 'Unassigned', buildingName: 'Unassigned' };
       }
 
       _nodeMetadataCache[nodeName] = { loc, airconType };
 
+      const reportedAcState = packet.ac_on ?? packet.acOn ?? packet.power_state ?? packet.powerState ?? packet.ac_state ?? packet.acState;
+      const intervalVal = Number(packet.intervalVal ?? packet.interval_val);
+      const intervalUnit = String(packet.intervalUnit ?? packet.interval_unit ?? '').toLowerCase();
+      const secondsMultiplier = intervalUnit.startsWith('sec') ? 1 : intervalUnit.startsWith('min') ? 60 : (intervalUnit.startsWith('hour') || intervalUnit.startsWith('hr')) ? 3600 : 0;
+      const intervalSeconds = Number(packet.interval_seconds ?? packet.intervalSeconds ?? (intervalVal * secondsMultiplier));
+
+      const reported = String(reportedAcState ?? '').toLowerCase().replace(/[_-]/g, ' ');
+      const resolvedAcOn = reportedAcState === true || reportedAcState === 1 || ['on','true','1','active cooling','cooling','fan only','running'].includes(reported) ? true
+        : reportedAcState === false || reportedAcState === 0 || ['off','false','0','standby','idle','stopped'].includes(reported) ? false : null;
+
+      const aircons = window.EcoTrackAirconSystem?.AirconProfileManager.getAll() || [];
+      const matches = aircons.filter(ac => ac.node_id === nodeName || ac.node_id === packet.pb_id);
+      const aircon = matches.length === 1 ? matches[0] : null;
+      const hasPacketSnapshot = Object.prototype.hasOwnProperty.call(packet, 'control_snapshot');
+      let controlSnapshot = hasPacketSnapshot ? packet.control_snapshot : aircon?.control_snapshot;
+      const selectedPower = window.EcoTrackAirconState?.displaySettings?.(controlSnapshot)?.power;
+      if ((selectedPower ?? resolvedAcOn) !== true) return null;
+      // Capture selected settings at ingestion, without treating them as a command or feedback.
+      // A null snapshot on an unbound profile cannot supply historical state.
+      if (!hasPacketSnapshot && aircon?.aircon_id && controlSnapshot &&
+          !controlSnapshot.desired_state && !controlSnapshot.reported_state && aircon.state) {
+        controlSnapshot = {
+          ...controlSnapshot,
+          configured_state: { mode: aircon.state.mode, fan: aircon.state.fan, temp: aircon.state.temperature },
+          configured_at: new Date().toISOString()
+        };
+      }
       const telemPayload = {
+        aircon_id: packet.aircon_id ?? aircon?.aircon_id ?? null,
+        control_snapshot: controlSnapshot ? JSON.parse(JSON.stringify(controlSnapshot)) : null,
+        ac_state: packet.ac_state ?? packet.acState ?? null,
+        ...(packet.telemetry_id ? { id: packet.telemetry_id } : {}),
+        ...(resolvedAcOn !== null ? { ac_on: resolvedAcOn } : {}),
+        ...(Number.isFinite(intervalSeconds) && intervalSeconds > 0 ? { interval_seconds: intervalSeconds } : {}),
+        ...(packet.wake_time ? { wake_time: packet.wake_time } : {}),
+        ...(packet.sleep_time ? { sleep_time: packet.sleep_time } : {}),
         node_id: packet.pb_id || packet.id || nodeName,
         sensor_name: nodeName,
         room_name: loc.roomName,
         floor_name: loc.floorName,
         building_name: loc.buildingName,
         aircon_type: airconType,
-        temperature: Number(packet.temp ?? packet.temperature ?? 24.0),
-        pressure: Number(packet.pressure ?? 0.45),
-        battery: Number(packet.battery ?? 4.0),
-        rssi: Number(packet.rssi ?? -60),
+        temperature: measurement(packet.temp ?? packet.temperature),
+        battery: measurement(packet.battery),
+        rssi: measurement(packet.rssi),
         status: packet.status || 'online',
         created: new Date().toISOString()
       };
@@ -360,30 +142,28 @@
       // 1. Direct save into local SQLite3 database (backend/telemetry.db on port 5000)
       let record = null;
       try {
-        const backendUrl = (window.ECOTRACK_CONFIG && window.ECOTRACK_CONFIG.backendUrl) || 'http://localhost:5000';
+        const backendUrl = global.ECOTRACK_CONFIG?.backendUrl || global.electron?.env?.BACKEND_URL || 'http://localhost:5000';
         const res = await fetch(`${backendUrl}/api/telemetry`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(telemPayload)
         });
-        if (res.ok) {
-          record = await res.json();
+        if (!res.ok) throw new Error(`Telemetry write failed (HTTP ${res.status})`);
+        record = await res.json();
+        if (!record?.id) throw new Error('Telemetry API did not confirm a saved row');
+        _lastTelemetrySaveTime[nodeName] = Date.now();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('ecotrack:telemetry-saved', { detail: telemPayload }));
         }
       } catch (err) {
-        // Fallback to pb collection router if fetch had an error
-        const pb = getPocketBase();
-        if (pb && typeof pb.collection === 'function') {
-          try {
-            record = await pb.collection('telemetry').create(telemPayload);
-          } catch (_) {}
-        }
+        console.warn('[EcoTrack Sync] Local telemetry write failed:', err.message);
+        return null;
       }
 
-      // 2. Also update live sensor readings on Supabase nodes table so all pages reflect real-time values
-      try {
+      // 2. Also update live control readings on Supabase nodes table so all pages reflect real-time values
+      if (sb) try {
         await sb.from('nodes').update({
           temp: telemPayload.temperature,
-          pressure: telemPayload.pressure,
           battery: telemPayload.battery,
           rssi: telemPayload.rssi,
           status: telemPayload.status,
@@ -391,10 +171,12 @@
         }).eq('name', nodeName);
       } catch (_) {}
 
-      return record || telemPayload;
+      return record;
     } catch (e) {
       console.warn('[EcoTrack Sync] Failed to save telemetry to SQLite3:', e.message);
       return null;
+    } finally {
+      _telemetrySavesInFlight.delete(nodeName);
     }
   }
 
@@ -403,6 +185,7 @@
   // when the user is on Daily Logs, Scheduler, or other pages where telemetry.html is not active.
   let _bgCadenceTimer = null;
   const _nodeLastSendTime = {};
+  const _nodeInitialSendAt = {};
   let _assignedNodesCache = null;
   let _assignedNodesCacheTime = 0;
 
@@ -414,8 +197,8 @@
     const sb = getSupabase();
     if (!sb) return [];
     try {
-      const { data: nodes } = await sb.from('nodes').select('*').not('room_id', 'is', null);
-      if (nodes && nodes.length) {
+      const { data: nodes, error } = await sb.from('nodes').select('*').not('room_id', 'is', null);
+      if (!error && Array.isArray(nodes)) {
         _assignedNodesCache = nodes;
         _assignedNodesCacheTime = now;
         return nodes;
@@ -424,16 +207,60 @@
     return _assignedNodesCache || [];
   }
 
+  function isNodeWithinOperatingWindow(node, now = Date.now()) {
+    const minutes = value => {
+      const match = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(String(value ?? ''));
+      return match && Number(match[1]) < 24 && Number(match[2]) < 60 ? Number(match[1]) * 60 + Number(match[2]) : null;
+    };
+    const wake = minutes(node.wake_time ?? node.wakeTime), sleep = minutes(node.sleep_time ?? node.sleepTime);
+    if (wake === null || sleep === null || wake === sleep) return true;
+    // The controller schedules use UTC+8, independently of the computer's timezone.
+    const local = new Date(now + 8 * 3600000), current = local.getUTCHours() * 60 + local.getUTCMinutes();
+    return wake < sleep ? current >= wake && current < sleep : current >= wake || current < sleep;
+  }
+
+  const _commandReceiptChecks = new Map();
+  async function reconcilePendingCommandReceipt(node, now = Date.now()) {
+    if (typeof window === 'undefined') return;
+    const system = window.EcoTrackAirconSystem, sb = getSupabase();
+    const matches = (system?.AirconProfileManager?.getAll?.() || []).filter(ac => ac.node_id === node.id || ac.node_id === node.name);
+    if (matches.length !== 1 || !sb?.from) return;
+    const ac = matches[0], snapshot = ac.control_snapshot;
+    if (!ac.aircon_id || !snapshot?.command_id || snapshot.command_status !== 'queued') return;
+    const previous = _commandReceiptChecks.get(ac.aircon_id);
+    if (previous?.command_id === snapshot.command_id && now - previous.checkedAt < 5000) return;
+    _commandReceiptChecks.set(ac.aircon_id, { command_id: snapshot.command_id, checkedAt: now });
+    try {
+      const { data: command, error } = await sb.from('ecotrack_device_commands').select('id,node_id,kind,payload,status,result')
+        .eq('id', snapshot.command_id).maybeSingle();
+      if (error || command?.id !== snapshot.command_id || command.node_id !== node.id || command.kind !== 'ac_intent' || command.payload?.aircon_id !== ac.aircon_id) return;
+      const current = system.AirconProfileManager.getAll().find(profile => profile.aircon_id === ac.aircon_id);
+      if (current?.control_snapshot?.command_id !== snapshot.command_id || current.control_snapshot.command_status !== 'queued') return;
+      const receipt = command.result;
+      const status = command.status === 'completed' && receipt?.success === true && receipt.command_id === command.id && receipt.delivery_status === 'transmitted' ? 'transmitted' :
+        ['failed','expired'].includes(command.status) ? 'failed' : null;
+      if (status) system.AirconProfileManager.updateState(ac.device_id, {}, { ...current.control_snapshot, command_status: status });
+    } catch (_) { /* Preserve queued status until an authenticated cloud receipt is available. */ }
+  }
+
   async function stepBackgroundTelemetryCadence() {
     const assignedNodes = await getAssignedNodesWithSchedule();
     if (!assignedNodes.length) return;
 
+    // The cloud receiver writes its actual reports. Browser timers must not mint new sensor history from cached node snapshots.
+    if (typeof window !== 'undefined' && window.EcoTrackHardwareCloud) {
+      for (const node of assignedNodes) void reconcilePendingCommandReceipt(node);
+      return;
+    }
+
     const now = Date.now();
 
-    for (const node of assignedNodes) {
+    for (const [index, node] of assignedNodes.entries()) {
+      if (!isNodeWithinOperatingWindow(node, now)) continue;
+      void reconcilePendingCommandReceipt(node, now);
       const val = parseInt(node.interval_val) || 15;
       const unit = (node.interval_unit || 'Minutes').toLowerCase();
-      let intervalMs = 15000;
+      let intervalMs = 15 * 60 * 1000;
 
       if (unit.startsWith('second') || unit.startsWith('sec')) {
         intervalMs = Math.max(1000, val * 1000);
@@ -443,55 +270,46 @@
         intervalMs = Math.max(1000, val * 3600 * 1000);
       }
 
-      const lastSend = _nodeLastSendTime[node.name] || 0;
-      if (now - lastSend >= intervalMs) {
-        _nodeLastSendTime[node.name] = now;
+      const nodeKey = node.name || node.id;
+      if (_nodeInitialSendAt[nodeKey] === undefined) {
+        _nodeInitialSendAt[nodeKey] = now + (index * 250) % intervalMs;
+      }
+      const lastSend = _nodeLastSendTime[nodeKey];
+      const isDue = lastSend === undefined ? now >= _nodeInitialSendAt[nodeKey] : now - lastSend >= intervalMs;
+      if (isDue) {
+        _nodeLastSendTime[nodeKey] = now;
 
-        // Slight realistic fluctuation for sensor data
-        const baseTemp = Number(node.temp) || 24.0;
-        const currentTemp = Math.round(baseTemp + (Math.random() - 0.5) * 0.4);
-        const basePressure = Number(node.pressure) || 0.45;
-        const currentPressure = parseFloat((basePressure + (Math.random() - 0.5) * 0.04).toFixed(2));
-        const currentBattery = Number(node.battery) || 4.0;
-        const currentRssi = Number(node.rssi) || -62;
-
-        const packet = {
-          id: node.name,
-          name: node.name,
+        // Log the last reported node readings at the configured cadence.
+        const actualPacket = {
+          id: node.name || node.id,
+          name: node.name || node.id,
           pb_id: node.id,
-          temp: currentTemp,
-          pressure: currentPressure,
-          battery: currentBattery,
-          rssi: currentRssi,
-          status: node.status || 'online',
+          telemetry_id: `telem_cadence_${node.id}_${Math.floor(now / intervalMs)}`,
+          temp: measurement(node.temp),
+          battery: measurement(node.battery),
+          rssi: measurement(node.rssi),
+          status: node.status || 'offline',
+          ac_on: node.ac_on ?? node.acOn ?? node.power_state,
           intervalVal: val,
           intervalUnit: node.interval_unit || 'Minutes',
+          wake_time: node.wake_time, sleep_time: node.sleep_time,
           room_id: node.room_id || null
         };
-
-        saveNodeTelemetryToPocketBase(packet).then(result => {
-          if (result) {
-            console.log(`[EcoTrack Cadence] Saved ${node.name} telemetry at interval ${val} ${node.interval_unit}`);
-          }
-        }).catch(err => {
-          console.warn(`[EcoTrack Cadence] Failed to save ${node.name}:`, err.message);
-        });
-
-        // Evaluate global threshold rules
         if (typeof window !== 'undefined' && typeof window.evaluateRulesForTelemetry === 'function') {
           try {
-            window.evaluateRulesForTelemetry(packet);
+            Promise.resolve(window.evaluateRulesForTelemetry(actualPacket)).catch(() => {});
           } catch (_) {}
         }
+        saveNodeTelemetryToSqlite(actualPacket).catch(() => {});
       }
     }
   }
 
   function startBackgroundTelemetryCadence() {
     if (_bgCadenceTimer) return;
-    // Step immediately, then tick every 1 second to check node interval cadences
-    setTimeout(stepBackgroundTelemetryCadence, 1000);
-    _bgCadenceTimer = setInterval(stepBackgroundTelemetryCadence, 1000);
+    // Quarter-second checks preserve startup offsets so saves stay within one debounce window.
+    stepBackgroundTelemetryCadence();
+    _bgCadenceTimer = setInterval(stepBackgroundTelemetryCadence, 250);
   }
 
   if (typeof window !== 'undefined') {
@@ -506,8 +324,10 @@
 
   // Export functions
   const EcoTrackNodeSync = {
-    syncSupabaseNodesToPocketBase,
-    saveNodeTelemetryToPocketBase,
+    saveNodeTelemetryToSqlite,
+    isNodeWithinOperatingWindow,
+    reconcilePendingCommandReceipt,
+    stepBackgroundTelemetryCadence,
     startBackgroundTelemetryCadence
   };
 
@@ -516,8 +336,7 @@
   }
   if (typeof global !== 'undefined') {
     global.EcoTrackNodeSync = EcoTrackNodeSync;
-    global.syncSupabaseNodesToPocketBase = syncSupabaseNodesToPocketBase;
-    global.saveNodeTelemetryToPocketBase = saveNodeTelemetryToPocketBase;
+    global.saveNodeTelemetryToSqlite = saveNodeTelemetryToSqlite;
     global.startBackgroundTelemetryCadence = startBackgroundTelemetryCadence;
   }
 })(typeof window !== 'undefined' ? window : global);

@@ -1,0 +1,27 @@
+{
+  "passed": 3,
+  "results": [
+    {
+      "width": 1460,
+      "theme": "light",
+      "recorded_mode_and_fan": true,
+      "updates_without_reload": true,
+      "empty_state_aligned": true
+    },
+    {
+      "width": 1460,
+      "theme": "dark",
+      "recorded_mode_and_fan": true,
+      "updates_without_reload": true,
+      "empty_state_aligned": true
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "recorded_mode_and_fan": true,
+      "updates_without_reload": true,
+      "empty_state_aligned": true
+    }
+  ],
+  "live_hardware_tested": false
+}

@@ -1,0 +1,16 @@
+{
+  "new_checks_passed": 61,
+  "checks": {
+    "database-tests": 28,
+    "client-tests": 17,
+    "ui-tests": 10,
+    "sync-tests": 6
+  },
+  "arduino_build": "passed",
+  "live_migration_applied": false,
+  "physical_hardware_tested": false,
+  "browser_visual_tested": false,
+  "firmware_directory_edited": false,
+  "no_frontend_lan_hardware_routes": true,
+  "setup": "reports/cloud-hardware/SETUP.md"
+}

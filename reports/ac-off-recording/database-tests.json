@@ -1,0 +1,20 @@
+{
+  "engine": "PGlite PostgreSQL",
+  "passed": 13,
+  "checks": [
+    "Migration installs twice on PostgreSQL without deleting history.",
+    "Unknown AC power produces no routine history; the ESP32 heartbeat remains online.",
+    "AC OFF suppresses samples while ping delivery and acknowledgement still complete.",
+    "AC ON saves a timestamped profile snapshot without inventing physical power, temperature or battery.",
+    "A newer physical-remote OFF state stops routine recording and remains available to Realtime.",
+    "A newer physical-remote ON state resumes recording automatically.",
+    "A fresh fan-only frame does not make its older OFF power field override a newer ON setting.",
+    "Invalid future field timestamps fall back to the capture time, matching the live UI power selection.",
+    "Existing profiles bound by database ID, stable ESP32 ID or saved controller name retain ON recording.",
+    "A sleeping ESP32 stores its sleep announcement without generating routine readings.",
+    "An OFF command still completes its IR dispatch audit, without adding an analytics sample.",
+    "RPC reinstall and anonymous credential-scoped access preserve OFF suppression and token checks.",
+    "Per-field timestamp precedence is consistent, and existing ON history survives subsequent OFF changes."
+  ],
+  "live_supabase_modified": false
+}

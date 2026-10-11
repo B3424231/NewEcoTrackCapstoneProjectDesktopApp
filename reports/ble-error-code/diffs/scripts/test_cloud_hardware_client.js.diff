@@ -1,0 +1,43 @@
+--- before/scripts/test_cloud_hardware_client.js
++++ scripts/test_cloud_hardware_client.js
+@@ -136,6 +136,40 @@
+  await assert.rejects(()=>cloud.readInfo(),error=>error.code==='BLE_CONNECTION_FAILED'&&/Reconnect/.test(error.message));
+  infoChar.readValue=originalRead;
+  checkList.push('Raw GATT errors include actionable Bluetooth reconnection guidance');
++ const beforeNumericRpcs=requests.length,beforeNumericWrites=provisioned.length;
++ const nativeNetworkError=new DOMException('GATT operation failed.','NetworkError');
++ assert.equal(typeof nativeNetworkError.code,'number');
++ infoChar.readValue=async()=>{throw nativeNetworkError;};
++ await assert.rejects(()=>cloud.readInfo(),error=>error.code==='BLE_CONNECTION_FAILED'&&/Reconnect/.test(error.message)&&!/startsWith/.test(error.message));
++ infoChar.readValue=originalRead;
++ checkList.push('Native DOMException numeric codes preserve Bluetooth guidance instead of crashing the error handler');
++ for(const numericCode of [0,19]){
++  const numericError=Object.assign(new Error('Bluetooth connection interrupted.'),{name:'NetworkError',code:numericCode});
++  infoChar.readValue=async()=>{throw numericError;};
++  await assert.rejects(()=>cloud.readInfo(),error=>error.code==='BLE_CONNECTION_FAILED');
++ }
++ infoChar.readValue=originalRead;
++ const unrelated=Object.assign(new Error('Unrelated operation failure.'),{code:500});
++ infoChar.readValue=async()=>{throw unrelated;};
++ await assert.rejects(()=>cloud.readInfo(),error=>error===unrelated);
++ infoChar.readValue=originalRead;
++ checkList.push('Zero and nonzero numeric codes are safe; unrelated errors keep their original identity');
++ const originalConnect=device.gatt.connect;
++ device.gatt.connect=async()=>{throw new DOMException('Connection could not be established.','NetworkError');};
++ await assert.rejects(()=>cloud.connect(bluetoothInfo.device_id),error=>error.code==='BLE_CONNECTION_FAILED'&&!/startsWith/.test(error.message));
++ device.gatt.connect=originalConnect;await cloud.connect(bluetoothInfo.device_id);
++ checkList.push('Native numeric connection failures remain recoverable through Connect Nearby ESP32');
++ const originalWrite=writeChar.writeValueWithResponse;
++ writeChar.writeValueWithResponse=async()=>{throw new DOMException('GATT write interrupted.','NetworkError');};
++ await assert.rejects(()=>cloud.provision({ssid:'Campus network',pass:'fixture-network-password'}),error=>error.code==='BLE_CONNECTION_FAILED');
++ writeChar.writeValueWithResponse=originalWrite;
++ assert.equal(provisioned.length,beforeNumericWrites);assert.equal(requests.length,beforeNumericRpcs);
++ checkList.push('Numeric provisioning errors cannot claim success or change cloud credentials');
++ const originalCapture=captureChar.readValue;
++ captureChar.readValue=async()=>{throw new DOMException('GATT read interrupted.','NetworkError');};
++ await assert.rejects(()=>cloud.learnNearby(bluetoothInfo.device_id),error=>error.code==='BLE_CONNECTION_FAILED');
++ captureChar.readValue=originalCapture;
++ checkList.push('Numeric IR capture read failures display Bluetooth recovery guidance');
+  hardwareStatus.last_seen=new Date(now).toISOString();
+  bluetoothInfo.cloud_status='error';
+  const repaired=await cloud.register({}, {ssid:'Campus network',pass:'fixture-network-password'});

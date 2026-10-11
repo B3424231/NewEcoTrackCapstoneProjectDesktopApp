@@ -1,0 +1,123 @@
+--- before/public/js/hardware-cloud.js
++++ public/js/hardware-cloud.js
+@@ -58,22 +58,23 @@
+     return /^esp32s3-[a-f0-9]{12}$/.test(info?.device_id || '') && info.cloud_protocol === 1;
+   }
+   function bluetoothFailure(error) {
++    if (error?.code?.startsWith('BLE_')) return error;
+     if (error?.name === 'NetworkError' || /gatt|bluetooth/i.test(error?.message || '')) {
+       return Object.assign(new Error('Bluetooth connection failed. Reconnect the nearby ESP32 and try again. If Windows keeps reporting a GATT error, remove its old Bluetooth pairing and pair again.'), { code: 'BLE_CONNECTION_FAILED' });
+     }
+     return error;
+   }
+   async function readInfo() {
+-    if (!state.device?.gatt?.connected || !state.info) throw new Error('Reconnect the nearby ESP32 through Bluetooth.');
++    if (!state.device?.gatt?.connected || !state.info) throw Object.assign(new Error('Bluetooth disconnected. Select Reconnect ESP32 to continue with the same controller.'), { code: 'BLE_DISCONNECTED' });
+     let value;
+     try { const characteristic = state.info; value = await serializeBluetooth(() => characteristic.readValue()); } catch (error) { throw bluetoothFailure(error); }
+     const info = JSON.parse(new TextDecoder().decode(value));
+     if (!identityMatches(info)) throw new Error('Install the new EcoTrack cloud receiver sketch on this ESP32 first.');
+-    if (state.identity && state.identity !== info.device_id) throw new Error('Bluetooth device identity does not match this setup.');
++    if (state.identity && state.identity !== info.device_id) throw Object.assign(new Error('Bluetooth device identity does not match this setup. Reconnect the selected ESP32.'), { code: 'BLE_DEVICE_MISMATCH' });
+     state.identity = info.device_id;
+     return info;
+   }
+-  async function attachDevice(device) {
++  async function attachDevice(device, expectedDeviceId) {
+     try {
+       const server = await device.gatt.connect();
+       const service = await server.getPrimaryService(SERVICE);
+@@ -83,15 +84,49 @@
+       state.info = await service.getCharacteristic(INFO);
+       state.writer = await service.getCharacteristic(WIFI);
+       const info = await readInfo();
+-      device.addEventListener?.('gattserverdisconnected', () => { if (state.device === device) { state.info = null; state.writer = null; state.service = null; state.capture = null; } });
++      if (expectedDeviceId && info.device_id !== expectedDeviceId) {
++        device.gatt.disconnect();
++        state.info = null; state.writer = null; state.service = null; state.capture = null;
++        throw Object.assign(new Error('Reconnect the selected ESP32. The Bluetooth device does not match this controller.'), { code: 'BLE_DEVICE_MISMATCH' });
++      }
++      device.addEventListener?.('gattserverdisconnected', () => {
++        if (state.device !== device || state.service !== service) return;
++        state.info = null; state.writer = null; state.service = null; state.capture = null;
++        if (typeof root.CustomEvent === 'function')
++          root.dispatchEvent?.(new root.CustomEvent('ecotrack:bluetooth-disconnected', { detail: { device_id: info.device_id } }));
++      });
+       return { ...info, bluetooth_name: device.name || info.device_id };
+     } catch (error) { throw bluetoothFailure(error); }
+   }
+-  async function connect() {
++  async function connect(expectedDeviceId) {
+     if (!root.navigator?.bluetooth?.requestDevice) throw new Error('Bluetooth provisioning requires EcoTrack desktop with a working Bluetooth adapter.');
+     if (state.device?.gatt?.connected) state.device.gatt.disconnect();
+-    const device = await root.navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'EcoTrack-' }], optionalServices: [SERVICE] });
+-    return attachDevice(device);
++    let device;
++    try { device = await root.navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'EcoTrack-' }], optionalServices: [SERVICE] }); }
++    catch (error) {
++      const message = error?.name === 'NotFoundError'
++        ? 'No ESP32 was selected. Select Reconnect ESP32 and choose the same controller.'
++        : 'Bluetooth selection could not be completed. Check Windows Bluetooth and select Reconnect ESP32.';
++      throw Object.assign(new Error(message), { code: 'BLE_DISCONNECTED' });
++    }
++    return attachDevice(device, expectedDeviceId);
++  }
++  async function reconnect(expectedDeviceId) {
++    if (!/^esp32s3-[a-f0-9]{12}$/.test(expectedDeviceId || ''))
++      throw Object.assign(new Error('Reconnect the selected ESP32 through Bluetooth.'), { code: 'BLE_DEVICE_MISMATCH' });
++    let device = state.device;
++    if (device && state.identity && state.identity !== expectedDeviceId) device = null;
++    if (!device && root.navigator?.bluetooth?.getDevices) {
++      const devices = (await root.navigator.bluetooth.getDevices()).filter(item => item.name === 'EcoTrack-' + expectedDeviceId);
++      if (devices.length === 1) device = devices[0];
++    }
++    if (!device) throw Object.assign(new Error('Select Reconnect ESP32 and choose the same controller. Keep it powered on and nearby.'), { code: 'BLE_DISCONNECTED' });
++    const info = device === state.device && device.gatt?.connected && state.info
++      ? { ...await readInfo(), bluetooth_name: device.name || expectedDeviceId }
++      : await attachDevice(device, expectedDeviceId);
++    if (info.device_id !== expectedDeviceId)
++      throw Object.assign(new Error('Reconnect the selected ESP32. The Bluetooth device does not match this controller.'), { code: 'BLE_DEVICE_MISMATCH' });
++    return info;
+   }
+   async function resume() {
+     // Only resume a previously authorized device; never infer hardware from a saved IP.
+@@ -135,8 +170,10 @@
+     }
+     throw new Error(cloud ? 'Wi-Fi connected, but no Supabase device acknowledgement arrived. Check the migration, internet connection, and Serial Monitor.' : 'ESP32 did not confirm Wi-Fi connection. Check its 2.4 GHz network and password.');
+   }
+-  async function register(metadata, credentials) {
++  async function register(metadata, credentials, expectedDeviceId) {
+     const info = await readInfo();
++    if (expectedDeviceId && info.device_id !== expectedDeviceId)
++      throw Object.assign(new Error('Reconnect the selected ESP32. The Bluetooth device does not match this controller.'), { code: 'BLE_DEVICE_MISMATCH' });
+     validateCredentials(info, credentials || {});
+     const config = root.ECOTRACK_CONFIG;
+     if (!config?.supabaseUrl?.startsWith('https://') || !publicKey(config.supabaseKey)) throw new Error('A Supabase HTTPS URL and publishable key are required.');
+@@ -218,11 +255,18 @@
+     return request(nodeId, 'learn_ir', {}, { timeoutMs: 30000 });
+   }
+   async function learnNearby(nodeId, options = {}) {
+-    const info = await readInfo();
++    const info = await reconnect(nodeId);
+     if (info.device_id !== nodeId) throw new Error('Reconnect the selected ESP32 before listening.');
+     if (info.capabilities?.ble_ir_monitor !== true || !state.service)
+       throw new Error('This receiver needs the updated sketch for Bluetooth IR detection. You can also Save & Verify Controller first, then detect its remote in Edit through Supabase.');
+-    if (!state.capture) state.capture = await state.service.getCharacteristic(CAPTURE);
++    if (!state.capture) {
++      try { state.capture = await serializeBluetooth(() => state.service.getCharacteristic(CAPTURE)); }
++      catch (error) {
++        if (error?.name === 'NotFoundError' || /No Characteristics|matching UUID/i.test(error?.message || ''))
++          throw Object.assign(new Error('Bluetooth IR capture is unavailable on this connection. Upload the complete current EcoTrack sketch, then remove the old Windows Bluetooth pairing and reconnect. Reported firmware: ' + (info.firmware_version || 'unknown') + '.'), { code: 'BLE_CAPTURE_UNAVAILABLE' });
++        throw bluetoothFailure(error);
++      }
++    }
+     const readCapture = async () => {
+       let value;
+       try { const characteristic = state.capture; value = await serializeBluetooth(() => characteristic.readValue()); }
+@@ -341,5 +385,5 @@
+       root.localStorage.setItem('ecoTrack_nodes', JSON.stringify(nodes));
+     }
+   } catch (_) {}
+-  root.EcoTrackHardwareCloud = { connect, resume, readInfo, provision, register, pendingRegistrations, completeRegistration, request, waitForResult, ping, learn, learnNearby, latest, control, getStatus, listStatus, describe, resolveNode };
++  root.EcoTrackHardwareCloud = { connect, reconnect, resume, readInfo, provision, register, pendingRegistrations, completeRegistration, request, waitForResult, ping, learn, learnNearby, latest, control, getStatus, listStatus, describe, resolveNode };
+ })(typeof window !== 'undefined' ? window : globalThis);

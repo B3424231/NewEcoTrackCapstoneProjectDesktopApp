@@ -1,0 +1,851 @@
+--- before/public/js/aircon-system.js
++++ after/public/js/aircon-system.js
+@@ -193,7 +193,7 @@
+       if (!this.events[event]) return;
+       this.events[event] = this.events[event].filter(l => l !== listener);
+     }
+-    emit(event, data) {
++    emit(event, data, broadcast = true) {
+       if (this.events[event]) {
+         this.events[event].forEach(listener => {
+           try { listener(data); } catch (err) { console.error(`Error in event listener for ${event}:`, err); }
+@@ -201,7 +201,7 @@
+       }
+       // Cross-tab / cross-window sync via BroadcastChannel if available
+       try {
+-        if (window.BroadcastChannel) {
++        if (broadcast && window.BroadcastChannel) {
+           if (!this.bc) this.bc = new BroadcastChannel('ecotrack_aircon_channel');
+           this.bc.postMessage({ event, data, sender: 'aircon_system' });
+         }
+@@ -223,6 +223,7 @@
+       const bc = new BroadcastChannel('ecotrack_aircon_channel');
+       bc.onmessage = (msg) => {
+         if (msg.data && msg.data.event && msg.data.sender === 'aircon_system') {
++          if (msg.data.event === 'hardware:updated' && applyHardwareUpdate(msg.data.data?.hardware, false)) return;
+           if (AirconEvents.events[msg.data.event]) {
+             AirconEvents.events[msg.data.event].forEach(l => l(msg.data.data));
+           }
+@@ -421,6 +422,103 @@
+   let databaseSyncTimer = null;
+   let databaseRefreshTimer = null;
+   let scheduledReferenceRefresh = false;
++
++  let registryReady = false;
++  let lastHardwareEventAt = 0;
++  let lastDatabaseSnapshotAt = 0;
++  const hardwareOverlay = new Map();
++  const hardwareEventVersions = new Map();
++  let hardwareRevision = 0;
++  const registeredNodeRows = new Map();
++
++  function hardwareVersion(row) {
++    const value = row?.last_seen || '';
++    const time = Date.parse(value);
++    const submillisecond = typeof value === 'string' ? /\.\d{3}(\d+)(?:Z|[+-])/.exec(value)?.[1] : null;
++    return Number.isFinite(time) ? time + (submillisecond ? Number('0.' + submillisecond) : 0) : 0;
++  }
++  function mergeHardwareState(row, readRevision = Infinity) {
++    const newer = hardwareOverlay.get(row.node_id);
++    const selected = newer && (hardwareEventVersions.get(row.node_id) || 0) > readRevision && hardwareVersion(newer) > hardwareVersion(row) ? newer : row;
++    const hardware = { ...selected, connection_status: window.EcoTrackHardwareCloud?.describe(selected) || selected.connection_status || 'offline' };
++    hardwareOverlay.set(row.node_id, hardware);
++    return hardware;
++  }
++  function profileWithHardware(profile, hardware) {
++    const snapshot = { ...profile.control_snapshot,
++      ...window.EcoTrackAirconState.remoteObservation(hardware.latest_ir, hardware.last_seen, profile.control_snapshot) };
++    const description = window.EcoTrackAirconState.describeAirconState(snapshot);
++    const selected = window.EcoTrackAirconState.selectSettings(snapshot).state;
++    const protocol = snapshot.observed_remote_protocol || profile.configured_protocol || profile.protocol_name;
++    const flag = value => value == null ? null : ['on','true','1'].includes(String(value).toLowerCase()) ? true : ['off','false','0'].includes(String(value).toLowerCase()) ? false : null;
++    return { ...profile, control_snapshot: snapshot, protocol_name: protocol, protocol,
++      detected_protocol: snapshot.observed_remote_protocol || null,
++      capabilities: CapabilityEngine.getCapabilities({ protocol_name: protocol, control_snapshot: snapshot }),
++      hardware_capabilities: hardware.capabilities || {},
++      ir_monitoring: hardware.capabilities?.ir_receiver === true,
++      ir_controlling: hardware.capabilities?.ir_transmitter === true,
++      status: hardware.connection_status === 'online' ? 'online' : 'offline',
++      state: selected ? { ...profile.state, power: flag(selected.power), temperature: selected.temp,
++        mode: selected.mode, fan: selected.fan, swing: flag(selected.swing), turbo: flag(selected.turbo),
++        eco: flag(selected.eco), sleep: flag(selected.sleep) } : profile.state,
++      operational_state: { classification: description.confirmed || description.remoteObserved ? description.label : 'UNCONFIRMED',
++        target_temperature: selected?.temp ?? null, mode: selected?.mode ?? null,
++        last_updated: snapshot.observed_remote_at || snapshot.reported_at || null }
++    };
++  }
++  // Events only update authenticated, registered controllers; they never create assets.
++  function applyHardwareUpdate(row, broadcast = true) {
++    if (!row || typeof row.node_id !== 'string' || !hardwareVersion(row) || !row.capabilities || typeof row.capabilities !== 'object') return false;
++    if (!registryReady || !registeredNodeRows.has(row.node_id)) return false;
++    if (row.device_id !== hardwareOverlay.get(row.node_id)?.device_id) return false;
++    lastHardwareEventAt = Date.now();
++    const previous = hardwareOverlay.get(row.node_id);
++    if (hardwareVersion(previous) >= hardwareVersion(row)) return true;
++    const nodes = JSON.parse(localStorage.getItem('ecoTrack_nodes') || '[]');
++    const aircons = JSON.parse(localStorage.getItem('ecoTrack_aircons') || '[]');
++    const matched = nodes.filter(node => node.db_id === row.node_id);
++    if (matched.length !== 1) return false;
++    const hardware = mergeHardwareState(row);
++    hardwareEventVersions.set(row.node_id, ++hardwareRevision);
++    const node = matched[0], online = hardware.connection_status === 'online';
++    Object.assign(node, { cloud_state: hardware, last_seen: hardware.last_seen,
++      status: hardware.connection_status === 'sleeping' ? 'Sleeping' : online ? 'Connected' : 'Offline',
++      capabilities: hardware.capabilities || {}, firmware: hardware.firmware_version,
++      ir_tx: hardware.capabilities?.ir_transmitter === true, ir_rx: hardware.capabilities?.ir_receiver === true,
++      hardware: hardware.capabilities?.ir_transmitter ? 'ESP32-S3 IR controller' : 'ESP32-S3 IR receiver',
++      controls: hardware.capabilities?.ir_transmitter ? ['IR Control', 'IR Learning'] : ['IR Learning'],
++      ip_address: hardware.ip_address, wifi_ssid: hardware.wifi_ssid, rssi: hardware.rssi });
++    const changed = [];
++    const updated = aircons.map(profile => {
++      if (profile.controller_node_id !== row.node_id) return profile;
++      const next = profileWithHardware(profile, hardware); changed.push(next); return next;
++    });
++    localStorage.setItem('ecoTrack_nodes', JSON.stringify(nodes));
++    localStorage.setItem('ecoTrack_aircons', JSON.stringify(updated));
++    AirconEvents.emit('hardware:updated', { node_id: row.node_id, hardware, nodes: [node], aircons: changed }, broadcast);
++    return true;
++  }
++  function receiveHardwareEvent(payload) {
++    const row = payload?.eventType === 'DELETE' ? null : payload?.new || payload?.payload?.row;
++    try { if (!applyHardwareUpdate(row)) scheduleDatabaseSync(); }
++    catch (_) { scheduleDatabaseSync(); }
++  }
++  function isConnectionOnlyNodeEvent(payload) {
++    const row = payload?.new, previous = registeredNodeRows.get(row?.id);
++    const heartbeatFields = new Set(['status','rssi','ip_address','wifi_ssid','updated']);
++    return payload?.eventType !== 'DELETE' && row && previous &&
++      Object.keys({ ...previous, ...row }).every(key => heartbeatFields.has(key) || JSON.stringify(row[key]) === JSON.stringify(previous[key]));
++  }
++  function receiveNodeEvent(payload) {
++    const row = payload?.new;
++    if (isConnectionOnlyNodeEvent(payload)) {
++      registeredNodeRows.set(row.id, row);
++      return true;
++    }
++    if (payload?.eventType === 'DELETE') { registeredNodeRows.delete(payload.old?.id); hardwareOverlay.delete(payload.old?.id); }
++    scheduleDatabaseSync();
++  }
++
+   function invalidateReferenceData() {
+     referenceEpoch += 1;
+     referenceCache = null;
+@@ -474,6 +572,7 @@
+     try {
+       isDatabaseSyncing = true;
+       const authVersion = databaseAuthVersion;
++      const readRevision = hardwareRevision;
+       await window.ecotrackAuthReady;
+       if (sb.auth?.getSession) {
+         const { data, error } = await sb.auth.getSession();
+@@ -494,7 +593,10 @@
+         hardwareStates = await window.EcoTrackHardwareCloud.listStatus();
+       }
+       if (authVersion !== databaseAuthVersion) return;
+-      const hardwareByNode = new Map(hardwareStates.map(item => [item.node_id, item]));
++      const hardwareByNode = new Map(hardwareStates.map(item => [item.node_id, mergeHardwareState(item, readRevision)]));
++      registeredNodeRows.clear();
++      for (const row of nodesRes.data) registeredNodeRows.set(row.id, row);
++      for (const id of hardwareOverlay.keys()) if (!registeredNodeRows.has(id)) hardwareOverlay.delete(id);
+       const sbNodes = nodesRes.data || [];
+       const sbRooms = roomsRes.data || [];
+       const sbFloors = floorsRes.data || [];
+@@ -674,6 +776,8 @@
+       localStorage.setItem('ecoTrack_nodes', JSON.stringify(realNodes));
+       localStorage.setItem('ecoTrack_aircons', JSON.stringify(finalAircons));
+       localStorage.removeItem('ecoTrack_aircons_cache');
++      registryReady = true;
++      lastDatabaseSnapshotAt = Date.now();
+ 
+       AirconEvents.emit('node:updated', realNodes);
+       AirconEvents.emit('aircon:updated', finalAircons);
+@@ -699,16 +803,15 @@
+       sb.auth?.onAuthStateChange?.(() => {
+         if (databaseRealtimeClient !== sb) return;
+         databaseAuthVersion += 1;
++        registryReady = false; hardwareOverlay.clear(); hardwareEventVersions.clear(); registeredNodeRows.clear(); lastHardwareEventAt = 0;
+         invalidateReferenceData();
+         scheduleDatabaseSync(true);
+       });
+       try {
+         sb.channel('realtime_aircon_nodes')
+-          .on('postgres_changes', { event: '*', schema: 'public', table: 'nodes' }, () => {
+-            scheduleDatabaseSync();
+-          })
++          .on('postgres_changes', { event: '*', schema: 'public', table: 'nodes' }, receiveNodeEvent)
+           .on('postgres_changes', { event: '*', schema: 'public', table: 'aircons' }, () => scheduleDatabaseSync())
+-          .on('postgres_changes', { event: '*', schema: 'public', table: 'ecotrack_device_state' }, () => scheduleDatabaseSync())
++          .on('postgres_changes', { event: '*', schema: 'public', table: 'ecotrack_device_state' }, receiveHardwareEvent)
+           .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => scheduleDatabaseSync(true))
+           .on('postgres_changes', { event: '*', schema: 'public', table: 'floors' }, () => scheduleDatabaseSync(true))
+           .on('postgres_changes', { event: '*', schema: 'public', table: 'buildings' }, () => scheduleDatabaseSync(true))
+@@ -716,10 +819,16 @@
+             if (status === 'SUBSCRIBED') scheduleDatabaseSync();
+           });
+       } catch (_) {}
++      try {
++        sb.channel('ecotrack:hardware', { config: { private: true } })
++          .on('broadcast', { event: 'device_state' }, receiveHardwareEvent)
++          .subscribe(status => { if (status === 'SUBSCRIBED') scheduleDatabaseSync(); });
++      } catch (_) {} // Postgres Changes and the polling recovery path remain available.
+     }
+     if (sb && !databaseRefreshTimer) {
+       databaseRefreshTimer = setInterval(() => {
+         if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
++        if (Date.now() - lastHardwareEventAt < 10000 && Date.now() - lastDatabaseSnapshotAt < 30000) return;
+         void syncWithDatabase(false);
+       }, 5000);
+     }
+@@ -2107,6 +2216,8 @@
+     CentralLogService,
+     AirconEvents,
+     syncWithDatabase,
++    receiveHardwareEvent,
++    isConnectionOnlyNodeEvent,
+     DEFAULT_NODES,
+     DEFAULT_AIRCONS,
+     DEFAULT_IR_COMMANDS
+--- before/public/js/hardware-cloud.js
++++ after/public/js/hardware-cloud.js
+@@ -305,7 +305,7 @@
+ 
+   async function latest(nodeId) {
+     const device = await getStatus(nodeId);
+-    if (!device.latest_ir?.raw_data) throw new Error('No actual IR capture has been uploaded by this receiver.');
++    if (!device.latest_ir?.raw_data && !(device.latest_ir?.state && Number(device.latest_ir?.raw_count) > 0)) throw new Error('No actual IR capture has been uploaded by this receiver.');
+     return { ...device.latest_ir, success: true, source: 'supabase' };
+   }
+   async function control(nodeId, payload) {
+--- before/public/js/scheduler.js
++++ after/public/js/scheduler.js
+@@ -88,6 +88,28 @@
+   if (!['cool','dry','fan','auto','heat'].includes(mode)) return 'No IR mode';
+   const fanLabel = ['low','medium','high','auto','quiet','silent','turbo'].includes(fan) ? fan.toUpperCase() + ' FAN' : 'FAN UNKNOWN';
+   return mode.toUpperCase() + ' / ' + fanLabel + (state.turbo === true ? ' / TURBO' : '') + (source === 'remote' ? ' (remote)' : '');
++}
++
++
++function refreshSchedulerHardware(payload) {
++  const cached = window.EcoTrackAirconSystem?.NodeService?.getDevices?.() || [];
++  const nodes = [...Object.values(savedRooms).flatMap(room => room.nodes || []), ...currentRoomNodes];
++  for (const node of nodes) {
++    const fresh = payload?.nodes?.find(item => item.db_id === node.pb_id || item.node_id === node.id) ||
++      cached.find(item => item.db_id === node.pb_id || item.node_id === node.id);
++    if (!fresh || (payload?.node_id && fresh.db_id !== payload.node_id)) continue;
++    if (Date.parse(fresh.cloud_state?.last_seen || '') < Date.parse(node.cloud_state?.last_seen || '')) continue;
++    node.cloud_state = fresh.cloud_state;
++    node.status = window.EcoTrackHardwareCloud?.describe(fresh.cloud_state) || 'offline';
++    const label = document.getElementById(`status-${node.id}`);
++    if (label) {
++      label.textContent = node.status === 'online' ? 'Online' : node.status === 'sleeping' ? 'Sleeping' : 'Offline';
++      label.className = node.status === 'online' ? 'text-xs font-bold text-emerald-600 dark:text-emerald-400' : 'text-xs font-bold text-slate-600 dark:text-slate-400';
++    }
++    const temperature = document.getElementById(`temperature-${node.id}`);
++    if (temperature) temperature.textContent = getSchedulerTargetTemperature(node);
++  }
++  refreshSchedulerControlModes();
+ }
+ 
+ function refreshSchedulerControlModes() {
+@@ -679,6 +701,7 @@
+ 
+   // In-window AirconSystem events
+   if (window.EcoTrackAirconSystem?.AirconEvents) {
++    window.EcoTrackAirconSystem.AirconEvents.on('hardware:updated', refreshSchedulerHardware);
+     window.EcoTrackAirconSystem.AirconEvents.on('aircon:state_changed', refreshSchedulerControlModes);
+     window.EcoTrackAirconSystem.AirconEvents.on('node:updated', () => loadSchedulerWithSWR(true));
+     window.EcoTrackAirconSystem.AirconEvents.on('devices:synced', () => loadSchedulerWithSWR(true));
+@@ -689,6 +712,10 @@
+   // Local storage changes across browser windows
+   window.addEventListener('storage', (e) => {
+     if (e.key === 'ecoTrack_nodes' || e.key === 'ecoTrack_aircons') {
++      try {
++        const identity = value => JSON.parse(value || '[]').map(row => [row.db_id,row.node_id,row.device_id,row.controller_node_id,row.room_id,row.name,row.brand]);
++        if (JSON.stringify(identity(e.oldValue)) === JSON.stringify(identity(e.newValue))) { refreshSchedulerHardware(); return; }
++      } catch (_) {}
+       loadSchedulerWithSWR(true);
+     }
+   });
+@@ -697,11 +724,11 @@
+   if (sb && typeof sb.channel === 'function') {
+     try {
+       sb.channel('realtime_scheduler_nodes')
+-        .on('postgres_changes', { event: '*', schema: 'public', table: 'nodes' }, () => {
+-          loadSchedulerWithSWR(true);
++        .on('postgres_changes', { event: '*', schema: 'public', table: 'nodes' }, payload => {
++          if (!window.EcoTrackAirconSystem?.isConnectionOnlyNodeEvent(payload)) loadSchedulerWithSWR(true);
+         })
+         .on('postgres_changes', { event: '*', schema: 'public', table: 'aircons' }, () => loadSchedulerWithSWR(true))
+-        .on('postgres_changes', { event: '*', schema: 'public', table: 'ecotrack_device_state' }, () => loadSchedulerWithSWR(true))
++        .on('postgres_changes', { event: '*', schema: 'public', table: 'ecotrack_device_state' }, payload => window.EcoTrackAirconSystem?.receiveHardwareEvent(payload))
+         .on('postgres_changes', { event: '*', schema: 'public', table: 'ecotrack_device_commands' }, payload => reconcileScheduleDelivery(payload.new || {}))
+         .subscribe();
+     } catch (_) {}
+--- before/public/js/eco-data-bus.js
++++ after/public/js/eco-data-bus.js
+@@ -315,6 +315,7 @@
+ 
+           tables.forEach(table => {
+             channel.on('postgres_changes', { event: '*', schema: 'public', table }, (payload) => {
++              if (table === 'nodes' && window.EcoTrackAirconSystem?.isConnectionOnlyNodeEvent(payload)) return;
+               // Automatically invalidate and push update to subscribers
+               this.invalidate(table);
+               this.emit(`data:realtime:${table}`, payload);
+--- before/public/dashboard.html
++++ after/public/dashboard.html
+@@ -25,14 +25,14 @@
+   <link rel="stylesheet" href="./styles.css?v=53">
+   <script src="./js/supabase.umd.js"></script>
+   <script src="./js/supabase-client.js"></script>
+-  <script src="./js/hardware-cloud.js?v=8"></script>
++  <script src="./js/hardware-cloud.js?v=9"></script>
+   <script src="./js/sidebar.js"></script>
+   <script src="./js/sidebar-loader.js?v=7"></script>
+   <script src="./js/icons.js"></script>
+   <script src="./js/eco-network.js"></script>
+   <script src="./js/eco-data-bus.js"></script>
+   <script src="./js/skeletons.js"></script>
+-  <script src="./js/aircon-system.js?v=18"></script>
++  <script src="./js/aircon-system.js?v=19"></script>
+   <script src="./js/aircon-state.js?v=5"></script>
+ </head>
+ 
+@@ -1179,6 +1179,7 @@
+         loadDashboardWithSWR(true);
+       };
+ 
++      AirconEvents.on('hardware:updated', () => renderDashboard());
+       AirconEvents.on('aircon:state_changed', () => refreshDashboard(true));
+       AirconEvents.on('aircon:saved', () => refreshDashboard(true));
+       AirconEvents.on('aircon:deleted', () => refreshDashboard(true));
+--- before/public/control.html
++++ after/public/control.html
+@@ -41,14 +41,14 @@
+   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+   <script src="./js/supabase.umd.js"></script>
+   <script src="./js/supabase-client.js"></script>
+-  <script src="./js/hardware-cloud.js?v=8"></script>
++  <script src="./js/hardware-cloud.js?v=9"></script>
+   <script src="./js/sidebar.js"></script>
+   <script src="./js/sidebar-loader.js?v=7"></script>
+   <script src="./js/icons.js"></script>
+   <script src="./js/eco-network.js"></script>
+   <script src="./js/eco-data-bus.js"></script>
+   <script src="./js/skeletons.js"></script>
+-  <script src="./js/aircon-system.js?v=18"></script>
++  <script src="./js/aircon-system.js?v=19"></script>
+ </head>
+ 
+ <body class="app-shell bg-gray-50 dark:bg-[#0a0f1d] text-slate-800 dark:text-slate-100 transition-colors duration-200">
+@@ -3169,6 +3169,10 @@
+       window.renderDeviceDropdown = renderDeviceDropdown;
+       window.renderDevicePills = renderDeviceDropdown;
+ 
++      AirconEvents.on('hardware:updated', payload => {
++        if (payload?.aircons?.some(profile => profile.device_id === activeDeviceId)) renderControlPanel();
++      });
++
+       // Live events synchronization
+       const onDevicesSynced = () => {
+         renderDeviceDropdown();
+--- before/public/nodes.html
++++ after/public/nodes.html
+@@ -92,7 +92,7 @@
+   </style>
+   <script src="./js/supabase.umd.js"></script>
+   <script src="./js/supabase-client.js"></script>
+-  <script src="./js/hardware-cloud.js?v=8"></script>
++  <script src="./js/hardware-cloud.js?v=9"></script>
+   <script src="./js/controller-locations.js?v=1"></script>
+   <script src="./js/sidebar.js"></script>
+   <script src="./js/sidebar-loader.js?v=7"></script>
+@@ -100,7 +100,7 @@
+   <script src="./js/eco-network.js"></script>
+   <script src="./js/eco-data-bus.js"></script>
+   <script src="./js/skeletons.js"></script>
+-  <script src="./js/aircon-system.js?v=18"></script>
++  <script src="./js/aircon-system.js?v=19"></script>
+ </head>
+ 
+ <body class="app-shell bg-gray-50 dark:bg-[#0a0f1d] text-slate-800 dark:text-slate-100 transition-colors duration-200">
+@@ -3540,6 +3540,7 @@
+         loadNodesWithSWR(true);
+       };
+ 
++      AirconEvents.on('hardware:updated', () => refreshNodes(true));
+       AirconEvents.on('node:updated', () => refreshNodes(true));
+       AirconEvents.on('aircon:updated', () => refreshNodes(true));
+       AirconEvents.on('devices:synced', () => refreshNodes(true));
+--- before/public/aircons.html
++++ after/public/aircons.html
+@@ -26,14 +26,14 @@
+   <link rel="stylesheet" href="./styles.css?v=53">
+   <script src="./js/supabase.umd.js"></script>
+   <script src="./js/supabase-client.js"></script>
+-  <script src="./js/hardware-cloud.js?v=1"></script>
++  <script src="./js/hardware-cloud.js?v=9"></script>
+   <script src="./js/sidebar.js"></script>
+   <script src="./js/sidebar-loader.js?v=7"></script>
+   <script src="./js/icons.js"></script>
+   <script src="./js/eco-network.js"></script>
+   <script src="./js/eco-data-bus.js"></script>
+   <script src="./js/skeletons.js"></script>
+-  <script src="./js/aircon-system.js"></script>
++  <script src="./js/aircon-system.js?v=19"></script>
+   <script src="./js/shared.js"></script>
+   <script src="./js/global-notifications.js"></script>
+   <style>
+@@ -1609,6 +1609,7 @@
+       AirconEvents.on('aircon:updated', () => { window.EcoDataBus?.invalidate('aircons'); loadAirconsWithSWR(true); });
+       AirconEvents.on('devices:synced', () => { window.EcoDataBus?.invalidate('aircons'); loadAirconsWithSWR(true); });
+       AirconEvents.on('node:updated', () => { window.EcoDataBus?.invalidate('aircons'); loadAirconsWithSWR(true); });
++      AirconEvents.on('hardware:updated', () => renderTable());
+       AirconEvents.on('aircon:state_changed', () => renderTable());
+ 
+       loadAirconsWithSWR();
+--- before/public/ir-library.html
++++ after/public/ir-library.html
+@@ -25,13 +25,13 @@
+   <link rel="stylesheet" href="./styles.css?v=54">
+   <script src="./js/supabase.umd.js"></script>
+   <script src="./js/supabase-client.js"></script>
+-  <script src="./js/hardware-cloud.js?v=8"></script>
++  <script src="./js/hardware-cloud.js?v=9"></script>
+   <script src="./js/sidebar.js"></script>
+   <script src="./js/sidebar-loader.js?v=7"></script>
+   <script src="./js/icons.js"></script>
+   <script src="./js/eco-network.js"></script>
+   <script src="./js/eco-data-bus.js"></script>
+-  <script src="./js/aircon-system.js?v=18"></script>
++  <script src="./js/aircon-system.js?v=19"></script>
+ </head>
+ 
+ <body class="app-shell bg-gray-50 dark:bg-[#0a0f1d] text-slate-800 dark:text-slate-100 transition-colors duration-200">
+@@ -483,7 +483,8 @@
+         if (currentDevice?.device_id !== target.device_id) return;
+         if (!frame.success) { showToast(frame.message || 'No captured frame is available.', 'warning'); return; }
+         document.getElementById('learnedFramePanel').classList.remove('hidden');
+-        document.getElementById('learnedFrameRaw').value = frame.raw_data;
++        document.getElementById('learnedFrameRaw').value = frame.raw_data || '';
++        document.getElementById('learnedFrameRaw').placeholder = frame.raw_data ? '' : 'Decoded state received. Use Auto-Detect to capture raw timings for learning.';
+         document.getElementById('learnedFrameSummary').textContent = `Captured ${frame.raw_type || frame.protocol || 'unknown protocol'} remote frame • ${frame.hex || 'raw timings'}`;
+       });
+ 
+@@ -581,7 +582,7 @@
+       });
+ 
+       ['testPowerSelect', 'testModeSelect', 'testFanSelect'].forEach(id => document.getElementById(id)?.addEventListener('change', () => { studioDirty = true; }));
+-      ['aircon:saved', 'aircon:deleted', 'aircon:updated', 'aircons:synced', 'devices:synced', 'node:updated'].forEach(event => AirconEvents?.on(event, initDeviceSelect));
++      ['hardware:updated', 'aircon:saved', 'aircon:deleted', 'aircon:updated', 'aircons:synced', 'devices:synced', 'node:updated'].forEach(event => AirconEvents?.on(event, initDeviceSelect));
+       window.addEventListener('storage', event => { if (['ecoTrack_nodes', 'ecoTrack_aircons'].includes(event.key)) initDeviceSelect(); });
+       initProtocols();
+       initDeviceSelect();
+--- before/public/ir-profiles.html
++++ after/public/ir-profiles.html
+@@ -25,14 +25,14 @@
+   <link rel="stylesheet" href="./styles.css?v=54">
+   <script src="./js/supabase.umd.js"></script>
+   <script src="./js/supabase-client.js"></script>
+-  <script src="./js/hardware-cloud.js?v=8"></script>
++  <script src="./js/hardware-cloud.js?v=9"></script>
+   <script src="./js/sidebar.js"></script>
+   <script src="./js/sidebar-loader.js?v=7"></script>
+   <script src="./js/icons.js"></script>
+   <script src="./js/eco-network.js"></script>
+   <script src="./js/eco-data-bus.js"></script>
+   <script src="./js/skeletons.js"></script>
+-  <script src="./js/aircon-system.js?v=18"></script>
++  <script src="./js/aircon-system.js?v=19"></script>
+ </head>
+ 
+ <body class="app-shell bg-gray-50 dark:bg-[#0a0f1d] text-slate-800 dark:text-slate-100 transition-colors duration-200">
+@@ -484,6 +484,7 @@
+       window.addEventListener('devices:synced', renderProfiles);
+       window.addEventListener('aircon:updated', renderProfiles);
+       if (AirconEvents) {
++        AirconEvents.on('hardware:updated', renderProfiles);
+         AirconEvents.on('devices:synced', renderProfiles);
+         AirconEvents.on('aircon:updated', renderProfiles);
+         AirconEvents.on('aircon:saved', renderProfiles);
+--- before/public/scheduler.html
++++ after/public/scheduler.html
+@@ -0,0 +1,176 @@
++<!DOCTYPE html>
++<html lang="en">
++
++<head>
++  <meta charset="UTF-8">
++  <meta name="viewport" content="width=device-width, initial-scale=1.0">
++  <title>Control Scheduler - EcoTrack</title>
++  <script src="https://cdn.tailwindcss.com"></script>
++  <script>
++    tailwind.config = {
++      darkMode: 'class'
++    }
++  </script>
++  <link rel="stylesheet" href="./styles.css?v=57">
++  <script src="./js/sidebar.js"></script>
++  <script src="./js/sidebar-loader.js?v=7"></script>
++  <script src="./js/icons.js"></script>
++  <script src="./js/eco-network.js"></script>
++  <script src="./js/eco-data-bus.js"></script>
++  <script src="./js/skeletons.js"></script>
++  <script src="./js/maintenance-modal.js?v=68"></script>
++</head>
++
++<body class="app-shell bg-gray-50 dark:bg-[#0a0f1d] transition-colors duration-200">
++  <div class="flex h-screen">
++    <!-- Sidebar will be injected here by sidebar-loader.js -->
++
++    <!-- MAIN CONTENT -->
++    <main class="flex-1 flex flex-col overflow-hidden">
++      <header
++        class="bg-white dark:bg-[#0c1328] border-b border-gray-200 dark:border-white/5 px-6 py-4 flex justify-between items-center z-10 shadow-sm relative">
++        <h2 class="text-2xl font-bold text-[#18392B] dark:text-cyan-400 flex items-center gap-2"><svg viewBox="0 0 24 24" width="24"
++            height="24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-[#10b981]">
++            <circle cx="12" cy="12" r="10" />
++            <polyline points="12 6 12 12 16 14" />
++          </svg>Control Scheduler</h2>
++
++      </header>
++
++      <div class="flex-1 flex overflow-hidden gap-4 p-4">
++
++        <!-- LEFT PANEL: Room Cabinet -->
++        <div class="w-64 glass-surface glass-panel p-6 flex flex-col overflow-hidden">
++          <h3 class="text-lg font-bold text-[#10b981] mb-4 flex items-center gap-2"><svg viewBox="0 0 24 24" width="20" fill="none"
++              stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="text-[#10b981]">
++              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
++              <circle cx="12" cy="10" r="3" />
++            </svg>Location</h3>
++          <div id="roomsList" class="flex-1 overflow-y-auto space-y-3">
++            <!-- Rooms will be added dynamically here -->
++          </div>
++        </div>
++
++        <!-- RIGHT PANEL: Schedule Table -->
++        <div class="flex-1 bg-white dark:bg-[#0c1328]/70 dark:backdrop-blur-md border-[2px] border-[#10b981] dark:border-[#10b981]/25 rounded-2xl shadow-sm p-4 flex flex-col overflow-hidden">
++          <div class="flex justify-between items-center mb-4">
++            <h3 id="tableTitle" class="text-lg font-bold text-cyan-400 flex items-center gap-2"><svg viewBox="0 0 24 24"
++                width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" class="text-cyan-400">
++                <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5z" />
++                <path d="M12 12l-8-4.3 8-4.3 8 4.3" />
++              </svg>AC Control Schedules</h3>
++          </div>
++
++          <!-- Table Wrapper with Scroll -->
++          <div class="flex-1 overflow-auto scheduler-table-scroll">
++            <table class="w-full min-w-[900px]">
++              <thead class="sched-table-header sticky top-0 bg-[#18392B] text-white" style="background-color: #18392B !important; color: #ffffff !important;">
++                <tr class="text-left text-xs font-bold text-white uppercase tracking-widest bg-[#18392B]" style="background-color: #18392B !important; color: #ffffff !important;">
++                  <th class="px-6 py-4 whitespace-nowrap rounded-tl-xl text-white" style="color: #ffffff !important;">AC Control Name</th>
++                  <th class="px-6 py-4 whitespace-nowrap text-white" style="color: #ffffff !important;">Attached Aircon Type</th>
++                  <th class="px-6 py-4 whitespace-nowrap text-white" style="color: #ffffff !important;">Target Temp</th>
++                  <th class="px-6 py-4 whitespace-nowrap text-white" style="color: #ffffff !important;">Control Mode</th>
++                  <th class="px-6 py-4 whitespace-nowrap text-white" style="color: #ffffff !important;">Power Mode</th>
++                  <th class="px-6 py-4 whitespace-nowrap text-white" style="color: #ffffff !important;">Device State</th>
++                  <th class="px-6 py-4 whitespace-nowrap text-white" style="color: #ffffff !important;">Wake Time</th>
++                  <th class="px-6 py-4 whitespace-nowrap text-white" style="color: #ffffff !important;">Sleep Time</th>
++                  <th class="px-6 py-4 whitespace-nowrap text-white" style="color: #ffffff !important;">Send Interval</th>
++                  <th class="px-6 py-4 whitespace-nowrap rounded-tr-xl text-white" style="color: #ffffff !important;">Actions</th>
++                </tr>
++              </thead>
++              <tbody id="schedulerTableBody" class="divide-y divide-gray-200 dark:divide-white/5 bg-white dark:bg-transparent text-gray-800 dark:text-gray-200">
++                <!-- AC Controls will be dynamically inserted here -->
++                <tr class="text-center bg-white dark:bg-transparent">
++                  <td colspan="10" class="px-4 py-16 text-center">
++                    <div class="flex flex-col items-center justify-center max-w-sm mx-auto">
++                      <div class="w-14 h-14 rounded-2xl bg-emerald-500/10 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 flex items-center justify-center mb-3 shadow-xs">
++                        <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8">
++                          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
++                          <line x1="16" y1="2" x2="16" y2="6"/>
++                          <line x1="8" y1="2" x2="8" y2="6"/>
++                          <line x1="3" y1="10" x2="21" y2="10"/>
++                          <circle cx="12" cy="15" r="2"/>
++                        </svg>
++                      </div>
++                      <h4 class="font-bold text-sm text-slate-800 dark:text-white mb-1">Select a Room</h4>
++                      <p class="text-xs text-slate-500 dark:text-gray-400 leading-relaxed">
++                        Choose a campus building, floor, and room from the left sidebar to configure automated sleep/wake schedules.
++                      </p>
++                    </div>
++                  </td>
++                </tr>
++              </tbody>
++            </table>
++          </div>
++
++          <!-- Scheduler Pagination Controls (20 items per page) -->
++          <div class="p-3.5 border-t-[2px] border-[#10b981]/30 dark:border-white/5 flex flex-col sm:flex-row justify-between items-center gap-3 bg-white dark:bg-[#0c1328] text-xs">
++            <span id="schedulerPageInfo" class="font-bold text-gray-600 dark:text-gray-300">Showing 0 of 0 controls</span>
++            <div class="flex items-center gap-2">
++              <button id="schedulerPrevBtn" type="button" disabled class="px-3 py-1 bg-white dark:bg-slate-900 border border-[#10b981]/40 rounded-lg text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-emerald-50 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer">Previous</button>
++              <span id="schedulerPaginationPages" class="font-bold px-1 text-gray-700 dark:text-gray-300">Page 1 of 1</span>
++              <button id="schedulerNextBtn" type="button" disabled class="px-3 py-1 bg-white dark:bg-slate-900 border border-[#10b981]/40 rounded-lg text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-emerald-50 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer">Next</button>
++            </div>
++          </div>
++        </div>
++      </div>
++    </main>
++  </div>
++
++  <!-- GLOBAL NOTIFICATION POPUP -->
++  <div id="globalNotificationDialog"
++    style="display: none; position: fixed; top: 1.25rem; left: 1.25rem; background: transparent !important; background-color: transparent !important; z-index: 99999; pointer-events: none; max-width: 28rem; width: calc(100% - 2.5rem);"
++    class="flex flex-col">
++    <div class="bg-white dark:bg-[#0c1328] border-2 border-[#10b981] dark:border-[#10b981]/50 rounded-2xl p-5 shadow-2xl backdrop-blur-md pointer-events-auto">
++      <div class="flex items-center gap-3 mb-3">
++        <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2"
++          class="text-rose-500">
++          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
++          <path d="M13.73 21a2 2 0 0 1-3.46 0" />
++        </svg>
++        <h3 class="text-xl font-bold text-[#18392B] dark:text-cyan-400">New Notification!</h3>
++      </div>
++      <p id="globalNotificationMessage" class="text-gray-700 dark:text-gray-200 text-sm font-medium mb-5 leading-relaxed">A scheduled message has been triggered.</p>
++      <div class="flex gap-3">
++        <a href="Notification.html"
++          class="flex-1 px-4 py-2 bg-[#10b981] hover:bg-emerald-400 text-white font-bold rounded-xl text-sm transition-colors text-center shadow-md border-0 cursor-pointer">
++          View Notifications
++        </a>
++        <button id="dismissNotificationBtn"
++          class="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-800 dark:text-gray-200 font-bold rounded-xl text-sm transition-colors border-0 cursor-pointer">
++          Dismiss
++        </button>
++      </div>
++    </div>
++  </div>
++
++
++  <!-- Cloud Database Engine (Supabase) -->
++  <script src="./js/supabase.umd.js"></script>
++  <script>
++    if (!window.supabase) {
++      document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"><\/script>');
++    }
++  </script>
++  <script src="./js/supabase-client.js"></script>
++  <script src="./js/hardware-cloud.js?v=9"></script>
++  <script src="./js/aircon-system.js?v=19"></script>
++  <script src="./js/node-sync.js"></script>
++  <script src="./js/shared.js"></script>
++  <script src="./js/global-notifications.js"></script>
++  <script src="./js/sidebar.js"></script>
++  <script src="./js/scheduler.js?v=21"></script>
++</body>
++
++</html>
++
++
++
++
++
++
++
++
++
++
++
+--- before/reports/cloud-hardware/EcoTrackCloudReceiver.ino.txt
++++ after/reports/cloud-hardware/EcoTrackCloudReceiver.ino.txt
+@@ -40,11 +40,11 @@
+ constexpr char SERVICE_UUID[] = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+ constexpr char INFO_UUID[] = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+ constexpr char WIFI_UUID[] = "1c95d5e3-d8f7-413a-bf3d-7a2e5d7be87e";
+-constexpr char VERSION[] = "cloud-ir-controller-1.6-rxtx";
++constexpr char VERSION[] = "cloud-ir-controller-1.7-live";
+ constexpr char CAPTURE_UUID[] = "b80301f3-639c-4eaf-bcc0-537759229321";
+ 
+ constexpr uint16_t IR_CAPTURE_BUFFER = 1024;
+-constexpr bool IR_DEBUG_RAW = true;  // Set false after diagnosing an undecoded OFF packet.
++constexpr bool IR_DEBUG_RAW = false;  // Set false after diagnosing an undecoded OFF packet.
+ IRrecv receiver(IR_RX_PIN, IR_CAPTURE_BUFFER, 50, true);
+ IRac transmitter(IR_TX_PIN, IR_TX_INVERTED);
+ stdAc::state_t lastAcState;
+@@ -79,6 +79,67 @@
+ uint32_t bootCount = 0, reportSequence = 1, lastReportMs = 0, lastSleepCheckMs = 0;
+ uint32_t intervalMs = 5000, lastStatusPrint = 0, captureSequence = 0;
+ 
++
++WiFiClientSecure cloudTls;
++HTTPClient cloudHttp;
++String cloudTransportProject;
++int8_t immediateObservationSupport = 0;  // Probe once; old cloud installations use the original RPC.
++uint32_t observationAttemptMs = 0, observationRetryMs = 0, observationProbeMs = 0;
++
++void closeCloudTransport() {
++  cloudHttp.setReuse(false); cloudHttp.end(); cloudTls.stop(); cloudTransportProject = "";
++}
++int postCloudRpc(const char *rpc, JsonDocument &request, JsonDocument &response) {
++  if (WiFi.status() != WL_CONNECTED || !clockReady() || projectUrl.isEmpty() || !validToken(deviceToken)) return -1;
++  const String uri = String("/rest/v1/rpc/") + rpc;
++  if (cloudTransportProject != projectUrl) {
++    closeCloudTransport();
++    cloudTls.useBuiltinCACertBundle(); cloudTls.setHandshakeTimeout(5);
++    if (!cloudHttp.begin(cloudTls, projectUrl + uri)) return -1;
++    cloudTransportProject = projectUrl;
++  } else if (!cloudHttp.setURL(uri)) return -1;
++  cloudHttp.setReuse(true); cloudHttp.setConnectTimeout(3000); cloudHttp.setTimeout(3000);
++  cloudHttp.addHeader("Content-Type", "application/json"); cloudHttp.addHeader("apikey", publicKey);
++  if (publicKey.startsWith("eyJ")) cloudHttp.addHeader("Authorization", "Bearer " + publicKey);
++  String body; serializeJson(request, body);
++  int code = cloudHttp.POST(body);
++  String result = code > 0 ? cloudHttp.getString() : "";
++  bool parsed = !deserializeJson(response, result);
++  if (code <= 0 || !parsed) { closeCloudTransport(); return code <= 0 ? code : -1; }
++  return code; // Keep the drained HTTPS connection available for the next request.
++}
++// A valid full state is sent immediately, independently of the heartbeat/report interval.
++bool uploadRemoteObservation() {
++  if (!captureDirty || latestDecodedCapture.isEmpty() || immediateObservationSupport < 0 ||
++      WiFi.status() != WL_CONNECTED || !clockReady() || projectUrl.isEmpty() || !validToken(deviceToken) ||
++      millis() - observationAttemptMs < observationRetryMs) return false;
++  observationAttemptMs = millis();
++  JsonDocument observation;
++  if (deserializeJson(observation, latestDecodedCapture)) return false;
++  JsonDocument request, response;
++  request["p_device_id"] = deviceId; request["p_token"] = deviceToken;
++  request["p_observation"].set(observation.as<JsonVariantConst>());
++  int code = postCloudRpc("ecotrack_device_observe", request, response);
++  if (code == 404 && String(response["code"] | "") == "PGRST202") {
++    immediateObservationSupport = -1; observationProbeMs = millis();
++    Serial.println("Install supabase_ir_realtime_migration.sql for compact IR uploads; using the existing cloud exchange.");
++    return false;
++  }
++  if (code != 200 || response["success"] != true) {
++    observationRetryMs = min(max(observationRetryMs * 2, 500UL), 30000UL);
++    cloudStatus = "error";
++    lastError = code == 401 || code == 403 ? "Cloud authentication failed. Reprovision this device." :
++      String("IR observation upload failed (HTTP ") + code + ").";
++    Serial.println(lastError); return false;
++  }
++  immediateObservationSupport = 1; observationRetryMs = 0;
++  captureDirty = false;
++  cloudStatus = "verified"; lastError = ""; registryId = response["node_id"] | "";
++  Serial.printf("Remote state uploaded | capture-to-ack %lu ms\n",
++    (unsigned long)(millis() - (observation["captured_at_ms"] | millis())));
++  return true;
++}
++
+ bool clockReady() { return time(nullptr) > 1700000000; }
+ bool validToken(const String &value) {
+   if (value.length() != 64) return false;
+@@ -531,7 +592,8 @@
+     }
+   }
+   publishCaptureMetadata(frame.as<JsonVariantConst>());
+-  latestCapture = ""; serializeJson(frame, latestCapture); captureDirty = true;
++  latestCapture = ""; serializeJson(frame, latestCapture);
++  captureDirty = captureDirty || String(frame["frame_kind"] | "") == "full_state";
+   Serial.printf("Captured IR: %s, %u timings | seq %lu | bits %u | state %s\n",
+     typeToString(decoded.decode_type).c_str(), decoded.rawlen - 1,
+     (unsigned long)capture.sequence, decoded.bits, String(frame["hex"] | "").c_str());
+@@ -598,25 +660,17 @@
+   status["applied_config"]["wake_time"] = wakeTime; status["applied_config"]["sleep_time"] = sleepTime;
+   if (sleepingUntil.length()) status["sleeping_until"] = sleepingUntil;
+   JsonDocument capture, ack;
+-  if (captureDirty && !deserializeJson(capture, latestCapture)) status["latest_ir"].set(capture.as<JsonVariantConst>());
++  if (captureDirty && immediateObservationSupport < 0 && !deserializeJson(capture, latestCapture)) status["latest_ir"].set(capture.as<JsonVariantConst>());
+   if (pendingAck.length() && !deserializeJson(ack, pendingAck)) request["p_ack"].set(ack.as<JsonVariantConst>());
+-  String body; serializeJson(request, body);
+-  WiFiClientSecure tls; tls.useBuiltinCACertBundle();
+-  HTTPClient http;
+-  if (!http.begin(tls, projectUrl + "/rest/v1/rpc/ecotrack_device_exchange")) return false;
+-  http.setConnectTimeout(5000); http.setTimeout(5000);
+-  http.addHeader("Content-Type", "application/json"); http.addHeader("apikey", publicKey);
+-  if (publicKey.startsWith("eyJ")) http.addHeader("Authorization", "Bearer " + publicKey);
+-  int code = http.POST(body);
+   JsonDocument response;
+-  bool parsed = !deserializeJson(response, http.getString()); http.end();
+-  if (code != 200 || !parsed || response["success"] != true) {
++  int code = postCloudRpc("ecotrack_device_exchange", request, response);
++  if (code != 200 || response["success"] != true) {
+     cloudStatus = "error";
+     lastError = code == 401 || code == 403 ? "Cloud authentication failed. Reprovision this device." : String("Supabase request failed (HTTP ") + code + ").";
+     Serial.println(lastError); return false;
+   }
+   cloudStatus = "verified"; lastError = ""; registryId = response["node_id"] | "";
+-  captureDirty = false;
++  if (immediateObservationSupport < 0) captureDirty = false;
+   if (reportDue) { lastReportMs = millis(); reportSequence++; }
+   if (pendingAck.length()) { pendingAck = ""; prefs.remove("ack"); }
+   applyConfig(response["config"]);
+@@ -643,6 +697,7 @@
+       cloudStatus = "error"; lastError = "Invalid cloud provisioning settings."; return;
+     }
+     while (url.endsWith("/")) url.remove(url.length() - 1);
++    closeCloudTransport(); immediateObservationSupport = 0; observationRetryMs = 0;
+     projectUrl = url; publicKey = key; deviceToken = token;
+     cloudStatus = "connecting"; saveCloudAfterVerify = true;
+     pendingAck = ""; completedCommand = ""; prefs.remove("ack"); prefs.remove("completed");
+@@ -650,7 +705,7 @@
+   ssid = newSSID; password = newPassword;
+   if (WiFi.status() == WL_CONNECTED && WiFi.SSID() == ssid) { wifiStatus = "connected"; }
+   else {
+-    WiFi.disconnect(); WiFi.mode(WIFI_STA); WiFi.begin(ssid.c_str(), password.c_str());
++    closeCloudTransport(); WiFi.disconnect(); WiFi.mode(WIFI_STA); WiFi.setSleep(false); WiFi.begin(ssid.c_str(), password.c_str());
+     wifiStatus = "connecting"; wifiStarted = millis();
+   }
+ }
+@@ -686,7 +741,7 @@
+   uint32_t until = secondsUntilWake(); if (!until || millis() - lastSleepCheckMs < CLOUD_POLL_MS) return;
+   lastSleepCheckMs = millis();
+   uint32_t duration = min(until, RECHECK_SLEEP_SECONDS);
+-  collectIR();
++  collectIR(); uploadRemoteObservation();
+   if (WiFi.status() == WL_CONNECTED && !exchange(isoUtc(time(nullptr) + duration))) return;
+   collectIR();  // Drain any OFF captured while the sleep announcement waited for HTTPS.
+   if (captureDirty && WiFi.status() == WL_CONNECTED) return;
+@@ -702,7 +757,7 @@
+     digitalWrite(IR_TX_PIN,IR_TX_INVERTED ? HIGH : LOW);
+     gpio_hold_en((gpio_num_t)IR_TX_PIN); gpio_deep_sleep_hold_en();
+   }
+-  BLEDevice::deinit(true); WiFi.disconnect(true);
++  closeCloudTransport(); BLEDevice::deinit(true); WiFi.disconnect(true);
+   esp_sleep_enable_timer_wakeup((uint64_t)duration * 1000000ULL); esp_deep_sleep_start();
+ }
+ void setup() {
+@@ -734,7 +789,7 @@
+     Serial.println("IR capture task could not start."); while (true) delay(1000);
+   }
+   beginBluetooth();
+-  WiFi.mode(WIFI_STA); configTime(UTC_OFFSET_SECONDS, 0, "pool.ntp.org", "time.google.com");
++  WiFi.mode(WIFI_STA); WiFi.setSleep(false); configTime(UTC_OFFSET_SECONDS, 0, "pool.ntp.org", "time.google.com");
+   if (ssid.length()) { WiFi.begin(ssid.c_str(), password.c_str()); wifiStatus = "connecting"; wifiStarted = millis(); }
+   if (projectUrl.length()) cloudStatus = "connecting";
+   updateBleInfo();
+@@ -743,7 +798,18 @@
+   processProvisioning(); manageWifi(); collectIR();
+   if (advertiseAgain) { advertiseAgain = false; BLEDevice::startAdvertising(); }
+   if (learningId.length() && (int32_t)(millis() - learningDeadline) >= 0) { setAck(learningId, false, JsonVariantConst(), "No new IR signal received within six seconds."); learningId = ""; }
+-  if (millis() - lastCloudPoll >= min(CLOUD_POLL_MS, intervalMs)) { lastCloudPoll = millis(); exchange(); }
++  if (immediateObservationSupport < 0 && millis() - observationProbeMs >= 60000) immediateObservationSupport = 0;
++  uploadRemoteObservation();
++  const bool legacyIrUpload = captureDirty && immediateObservationSupport < 0 &&
++    millis() - observationAttemptMs >= observationRetryMs;
++  if (legacyIrUpload || millis() - lastCloudPoll >= min(CLOUD_POLL_MS, intervalMs)) {
++    lastCloudPoll = millis();
++    bool sent = exchange();
++    if (legacyIrUpload) {
++      observationAttemptMs = millis();
++      observationRetryMs = sent ? 0 : min(max(observationRetryMs * 2, 500UL), 30000UL);
++    }
++  }
+   if (millis() - lastStatusPrint >= intervalMs) {
+     lastStatusPrint = millis(); Serial.printf("Wi-Fi: %s | Supabase: %s | IR RX GPIO: %u | IR TX GPIO: %u (%s)\n", wifiStatus.c_str(), cloudStatus.c_str(), IR_RX_PIN, IR_TX_PIN, IR_TX_ENABLED ? "enabled" : "disabled");
+   }
+--- before/supabase_ir_realtime_migration.sql
++++ after/supabase_ir_realtime_migration.sql
+@@ -44,6 +44,12 @@
+    coalesce(p_observation->>'captured_at_epoch_ms','') !~ '^[0-9]{13}$') THEN RAISE EXCEPTION 'Invalid IR capture timestamp'; END IF;
+  SELECT * INTO current_state FROM public.ecotrack_device_state WHERE node_id=target AND device_id=p_device_id FOR UPDATE;
+  IF current_state.node_id IS NULL THEN RAISE EXCEPTION 'Register this controller first'; END IF;
++ -- Capture time also rejects an old boot's delayed upload after a newer boot has reported.
++ IF coalesce(current_state.latest_ir->>'captured_at_epoch_ms','') ~ '^[0-9]{13}$'
++  AND coalesce(p_observation->>'captured_at_epoch_ms','') ~ '^[0-9]{13}$'
++  AND (current_state.latest_ir->>'captured_at_epoch_ms')::numeric > (p_observation->>'captured_at_epoch_ms')::numeric THEN
++  RETURN jsonb_build_object('success',true,'node_id',target,'duplicate',true,'server_time',clock_timestamp());
++ END IF;
+  -- Retried or reordered uploads from one boot cannot roll back newer receiver state.
+  IF current_state.latest_ir->>'boot_count'=p_observation->>'boot_count'
+   AND coalesce(current_state.latest_ir->>'sequence','') ~ '^[0-9]{1,10}$'

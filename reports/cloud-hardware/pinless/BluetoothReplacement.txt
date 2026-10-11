@@ -1,0 +1,34 @@
+class SecurityCallbacks : public BLESecurityCallbacks {
+  bool onSecurityRequest() override { return true; }
+  bool onConfirmPIN(uint32_t) override { return false; }
+#if defined(CONFIG_BLUEDROID_ENABLED)
+  void onAuthenticationComplete(esp_ble_auth_cmpl_t result) override {
+    Serial.println(result.success ? "Bluetooth encrypted pairing completed (no PIN)." : "Bluetooth pairing failed.");
+  }
+#else
+  void onAuthenticationComplete(ble_gap_conn_desc *, int status) override {
+    Serial.println(status == 0 ? "Bluetooth encrypted pairing completed (no PIN)." : "Bluetooth pairing failed.");
+  }
+#endif
+};
+void beginBluetooth() {
+  BLEDevice::init("EcoTrack-" + deviceId); BLEDevice::setMTU(247);
+  BLEDevice::setSecurityCallbacks(new SecurityCallbacks());
+  // Bonding + LE Secure Connections, without PIN/MITM authentication.
+  BLESecurity::setAuthenticationMode(true, false, true);
+  BLESecurity::setCapability(ESP_IO_CAP_NONE);
+  BLEServer *server = BLEDevice::createServer(); server->setCallbacks(new ServerCallbacks());
+  BLEService *service = server->createService(SERVICE_UUID);
+  infoCharacteristic = service->createCharacteristic(INFO_UUID, BLECharacteristic::PROPERTY_READ);
+  infoCharacteristic->setCallbacks(new InfoCallbacks());
+  #if defined(CONFIG_BLUEDROID_ENABLED)
+  BLECharacteristic *writer = service->createCharacteristic(WIFI_UUID, BLECharacteristic::PROPERTY_WRITE);
+  writer->setAccessPermissions(ESP_GATT_PERM_WRITE_ENC);
+#else
+  BLECharacteristic *writer = service->createCharacteristic(WIFI_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_ENC);
+#endif
+  writer->setCallbacks(new ProvisionCallbacks());
+  service->start();
+  BLEAdvertising *advertising = BLEDevice::getAdvertising();
+  advertising->addServiceUUID(SERVICE_UUID); advertising->setScanResponse(true); advertising->start();
+}

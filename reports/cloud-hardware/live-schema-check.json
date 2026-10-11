@@ -1,0 +1,12 @@
+{
+  "read_only": true,
+  "live_schema_changes": false,
+  "required_paths": {
+    "/rpc/ecotrack_register_cloud_device": false,
+    "/rpc/ecotrack_cloud_request": false,
+    "/rpc/ecotrack_device_exchange": false,
+    "/ecotrack_device_state": false,
+    "/ecotrack_device_commands": false
+  },
+  "existing_admin_helper": true
+}

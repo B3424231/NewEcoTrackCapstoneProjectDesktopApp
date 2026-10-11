@@ -1,0 +1,119 @@
+{
+  "passed": 32,
+  "isolated_production_components": true,
+  "live_data_modified": false,
+  "results": [
+    {
+      "theme": "light",
+      "width": 1000,
+      "height": 720,
+      "checks": [
+        "Centered responsive confirmation has readable themed text, red action, safe Cancel focus and no deletion on open",
+        "Cancel restores trigger focus without a request",
+        "Backdrop dismisses without deleting",
+        "Explicit confirm alone starts a request; busy state blocks duplicate clicks and dismissal",
+        "HTTP failure stays visible, keeps cached rows/audit, and allows retry",
+        "Supabase failure explains partial deletion and cannot display success",
+        "Both confirmed stores complete before success, audit/cache reset and refresh notification",
+        "Done closes and reopening resets warning and confirmation"
+      ],
+      "initial": {
+        "phase": "success",
+        "title": "Logs cleared",
+        "label": "Done",
+        "rows": 0,
+        "total": 0,
+        "page": 1,
+        "audit": 1,
+        "events": 1,
+        "renders": 1,
+        "buttonDisabled": false,
+        "warningHidden": true
+      }
+    },
+    {
+      "theme": "light",
+      "width": 390,
+      "height": 760,
+      "checks": [
+        "Centered responsive confirmation has readable themed text, red action, safe Cancel focus and no deletion on open",
+        "Cancel restores trigger focus without a request",
+        "Backdrop dismisses without deleting",
+        "Explicit confirm alone starts a request; busy state blocks duplicate clicks and dismissal",
+        "HTTP failure stays visible, keeps cached rows/audit, and allows retry",
+        "Supabase failure explains partial deletion and cannot display success",
+        "Both confirmed stores complete before success, audit/cache reset and refresh notification",
+        "Done closes and reopening resets warning and confirmation"
+      ],
+      "initial": {
+        "phase": "success",
+        "title": "Logs cleared",
+        "label": "Done",
+        "rows": 0,
+        "total": 0,
+        "page": 1,
+        "audit": 1,
+        "events": 1,
+        "renders": 1,
+        "buttonDisabled": false,
+        "warningHidden": true
+      }
+    },
+    {
+      "theme": "dark",
+      "width": 1000,
+      "height": 720,
+      "checks": [
+        "Centered responsive confirmation has readable themed text, red action, safe Cancel focus and no deletion on open",
+        "Cancel restores trigger focus without a request",
+        "Backdrop dismisses without deleting",
+        "Explicit confirm alone starts a request; busy state blocks duplicate clicks and dismissal",
+        "HTTP failure stays visible, keeps cached rows/audit, and allows retry",
+        "Supabase failure explains partial deletion and cannot display success",
+        "Both confirmed stores complete before success, audit/cache reset and refresh notification",
+        "Done closes and reopening resets warning and confirmation"
+      ],
+      "initial": {
+        "phase": "success",
+        "title": "Logs cleared",
+        "label": "Done",
+        "rows": 0,
+        "total": 0,
+        "page": 1,
+        "audit": 1,
+        "events": 1,
+        "renders": 1,
+        "buttonDisabled": false,
+        "warningHidden": true
+      }
+    },
+    {
+      "theme": "dark",
+      "width": 390,
+      "height": 760,
+      "checks": [
+        "Centered responsive confirmation has readable themed text, red action, safe Cancel focus and no deletion on open",
+        "Cancel restores trigger focus without a request",
+        "Backdrop dismisses without deleting",
+        "Explicit confirm alone starts a request; busy state blocks duplicate clicks and dismissal",
+        "HTTP failure stays visible, keeps cached rows/audit, and allows retry",
+        "Supabase failure explains partial deletion and cannot display success",
+        "Both confirmed stores complete before success, audit/cache reset and refresh notification",
+        "Done closes and reopening resets warning and confirmation"
+      ],
+      "initial": {
+        "phase": "success",
+        "title": "Logs cleared",
+        "label": "Done",
+        "rows": 0,
+        "total": 0,
+        "page": 1,
+        "audit": 1,
+        "events": 1,
+        "renders": 1,
+        "buttonDisabled": false,
+        "warningHidden": true
+      }
+    }
+  ]
+}

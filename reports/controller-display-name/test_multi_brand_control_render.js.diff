@@ -1,0 +1,28 @@
+--- before/scripts/test_multi_brand_control_render.js
++++ scripts/test_multi_brand_control_render.js
+@@ -26,10 +26,12 @@
+  'const applySettings = '+html.match(/async function executeCommand\([\s\S]*?\n      \}/)[0]+';'+
+ 
+  section('      // Temperature Clickers','      // Remote Layout Buttons')+'\ntrue;');
+- await win.webContents.executeJavaScript("(async()=>{await EcoTrackAirconSystem.syncWithDatabase();const end=Date.now()+5000;while(!AirconProfileManager.getById('AC-UI')){if(Date.now()>end)throw Error('Fixture sync failed');await new Promise(r=>setTimeout(r,20));}renderControlPanel();return true;})()");
++ await win.webContents.executeJavaScript("(async()=>{await EcoTrackAirconSystem.syncWithDatabase();const end=Date.now()+5000;while(!AirconProfileManager.getById('AC-UI')){if(Date.now()>end)throw Error('Fixture sync failed');await new Promise(r=>setTimeout(r,20));}renderDeviceDropdown();renderControlPanel();return true;})()");
+  const checks=[];
+- let result=await win.webContents.executeJavaScript("({name:unitNameEl.textContent,range:tempRangeHelp.textContent,temp:tempValueDisplay.textContent,fans:[...fanButtonsGroup.children].map(b=>b.textContent),hasHelp:!!document.querySelector('.ac-capability-summary'),canAdjust:!tempPlusBtn.disabled,power:masterPowerText.textContent,side:dispCommandedState.textContent,role:document.getElementById('hardwareRoleMessage').textContent})");
+- assert.equal(result.name,'Matrix');assert(result.range.includes('16°C')&&result.range.includes('31°C')&&result.range.includes('0.5°C')&&!result.range.includes('unverified'));
++ let result=await win.webContents.executeJavaScript("({name:unitNameEl.textContent,selector:selectedAcName.textContent,badgeHidden:unitBrandBadgeEl.classList.contains('hidden'),menu:[...airconDropdownList.querySelectorAll('.ac-controller-name')].map(el=>el.textContent),range:tempRangeHelp.textContent,temp:tempValueDisplay.textContent,fans:[...fanButtonsGroup.children].map(b=>b.textContent),hasHelp:!!document.querySelector('.ac-capability-summary'),canAdjust:!tempPlusBtn.disabled,power:masterPowerText.textContent,side:dispCommandedState.textContent,role:document.getElementById('hardwareRoleMessage').textContent})");
++ assert.equal(result.name,'ESP32 UI');assert.equal(result.selector,'ESP32 UI');assert.deepEqual(result.menu,['ESP32 UI']);assert(result.badgeHidden);
++ assert.equal(await win.webContents.executeJavaScript("AirconProfileManager.getById('AC-UI').brand"),'Matrix');
++ checks.push('Control heading and selector use the controller display name while retaining the persisted AC manufacturer.');assert(result.range.includes('16°C')&&result.range.includes('31°C')&&result.range.includes('0.5°C')&&!result.range.includes('unverified'));
+  assert.equal(result.temp,'24.5');assert(!result.hasHelp&&result.canAdjust&&!result.fans.includes('turbo'));assert.equal(result.power,'ON');assert.equal(result.side,'ON');assert.equal(result.role,'');
+  await win.webContents.executeJavaScript("tempPlusBtn.click();pendingCommand.then(()=>renderControlPanel());true;");
+  await win.webContents.executeJavaScript("pendingCommand");
+@@ -78,6 +80,9 @@
+  result=await cardState();assert.equal(result.title,'ESP32 UI');assert.equal(result.footer,'ESP32 UI');assert.equal(result.type,'Split');assert(!result.text.includes('Matrix')&&!result.text.includes('esp32s3-001122334455'));
+  assert.equal(result.href,'control.html?id=AC-UI');assert.equal(result.device,'AC-UI');assert.equal(await win.webContents.executeJavaScript('fixtureControlTarget'),'esp32s3-001122334455');
+  await win.webContents.executeJavaScript("(async()=>{dbFixture.nodes[0].name='Office <AC>';await EcoTrackAirconSystem.syncWithDatabase();const ac=AirconProfileManager.getById('AC-UI');updateSingleCardDom(document.getElementById('ac-card-AC-UI'),ac,NodeService.getNode(ac.node_id));return true;})()");
++ await win.webContents.executeJavaScript('renderDeviceDropdown();renderControlPanel();true;');
++ const renamedControl=await win.webContents.executeJavaScript('({title:unitNameEl.textContent,selector:selectedAcName.textContent,menu:airconDropdownList.querySelector(".ac-controller-name").textContent,badgeHidden:unitBrandBadgeEl.classList.contains("hidden")})');
++ assert.equal(renamedControl.title,'Office <AC>');assert.equal(renamedControl.selector,'Office <AC>');assert.equal(renamedControl.menu,'Office <AC>');assert(renamedControl.badgeHidden);
+  result=await cardState();assert.equal(result.title,'Office <AC>');assert.equal(result.footer,'Office <AC>');assert.equal(result.device,'AC-UI');assert.equal(result.href,'control.html?id=AC-UI');
+  assert.equal(await win.webContents.executeJavaScript("document.getElementById('ac-card-AC-UI').querySelector('h3').children.length"),0);
+  await win.webContents.executeJavaScript("(async()=>{dbFixture.nodes[0].name=hardwareFixture[0].device_id;await EcoTrackAirconSystem.syncWithDatabase();const ac=AirconProfileManager.getById('AC-UI');updateSingleCardDom(document.getElementById('ac-card-AC-UI'),ac,NodeService.getNode(ac.node_id));return true;})()");

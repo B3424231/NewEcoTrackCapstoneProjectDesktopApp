@@ -1,0 +1,21 @@
+{
+  "path": "C:\\Users\\reygay\\AppData\\Local\\Temp\\ecotrack-cloud-hardware-before-mkbyhz2u",
+  "files": [
+    "public/js/aircon-system.js",
+    "public/js/scheduler.js",
+    "public/nodes.html",
+    "public\\aircons.html",
+    "public\\control.html",
+    "public\\dashboard.html",
+    "public\\ir-library.html",
+    "public\\ir-profiles.html",
+    "public\\logs.html",
+    "public\\nodes.html",
+    "public\\scheduler.html",
+    "public\\staff.html",
+    "public\\telemetry.html",
+    "src/main.js",
+    "src/preload.js",
+    "public/js/node-sync.js"
+  ]
+}

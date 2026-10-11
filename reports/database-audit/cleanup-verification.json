@@ -1,0 +1,170 @@
+[
+  {
+    "name": "public/js/supabase-client.js syntax",
+    "exit_code": 0
+  },
+  {
+    "name": "public/js/node-sync.js syntax",
+    "exit_code": 0
+  },
+  {
+    "name": "public/js/logs.js syntax",
+    "exit_code": 0
+  },
+  {
+    "name": "public/js/telemetry-new.js syntax",
+    "exit_code": 0
+  },
+  {
+    "name": "public/js/aircon-system.js syntax",
+    "exit_code": 0
+  },
+  {
+    "name": "public/js/shared.js syntax",
+    "exit_code": 0
+  },
+  {
+    "name": "src/preload.js syntax",
+    "exit_code": 0
+  },
+  {
+    "name": "public/js/scheduler.js syntax",
+    "exit_code": 0
+  },
+  {
+    "name": "scripts/test_telemetry_cadence.js syntax",
+    "exit_code": 0
+  },
+  {
+    "name": "scripts/verify_supabase_integration.js syntax",
+    "exit_code": 0
+  },
+  {
+    "name": "public/js/analytics.js syntax",
+    "exit_code": 0
+  },
+  {
+    "name": "public/analytics.html inline 0 syntax",
+    "exit_code": 0
+  },
+  {
+    "name": "public/analytics.html inline 1 syntax",
+    "exit_code": 0
+  },
+  {
+    "name": "public/analytics.html inline 2 syntax",
+    "exit_code": 0
+  },
+  {
+    "name": "public/rules.html inline 0 syntax",
+    "exit_code": 0
+  },
+  {
+    "name": "public/rules.html inline 1 syntax",
+    "exit_code": 0
+  },
+  {
+    "name": "public/telemetry.html inline 0 syntax",
+    "exit_code": 0
+  },
+  {
+    "name": "public/telemetry.html inline 1 syntax",
+    "exit_code": 0
+  },
+  {
+    "name": "public/js/maintenance-modal.js syntax",
+    "exit_code": 0
+  },
+  {
+    "name": "scripts/test_database_cleanup.js syntax",
+    "exit_code": 0
+  },
+  {
+    "name": "public/js/notifications.js syntax",
+    "exit_code": 0
+  },
+  {
+    "name": "node scripts/test_database_cleanup.js",
+    "exit_code": 0,
+    "output": "Database cleanup passed: real update requests, filter forwarding, error preservation, empty subscriptions, authenticated cache reconciliation and partial deletions.\n"
+  },
+  {
+    "name": "node scripts/test_telemetry_cadence.js",
+    "exit_code": 0,
+    "output": "Telemetry cadence tests passed: 30-second writes, rule failure isolation, confirmed-save events, assignment removal, and daily/monthly refresh filters.\n[EcoTrack Sync] Local telemetry write failed: Telemetry write failed (HTTP 500)\n"
+  },
+  {
+    "name": "node scripts/test_hardware_control.js",
+    "exit_code": 0,
+    "output": "\u00e2\u0161\u00a1 EcoTrack Universal Aircon Core Control Engine Initialized.\nHardware control passed: full cloud state, exact protocol, LAN acknowledgement, queued fallback, rejected/zero-row writes, real capture, and no node-status mutation.\n"
+  },
+  {
+    "name": "node scripts/test_logs_stability.js",
+    "exit_code": 0,
+    "output": "Logs stability passed: burst debounce, single reload, historical filters, stale predictions, bounded ML requests, partial fallback, valid zero estimates, chart reuse, and stable date options.\n"
+  },
+  {
+    "name": "node scripts/verify_supabase_integration.js",
+    "exit_code": 0,
+    "output": "\u2501\u2501\u2501 1. VERIFY DEPENDENCIES & FILES \u2501\u2501\u2501\n  \u2705 package.json exists\n  \u2705 @supabase/supabase-js in dependencies\n  \u2705 supabase.umd.js exists in public/js\n  \u2705 supabase-client.js exists in public/js\n  \u2705 supabase_schema.sql exists in root\n  \u2705 .env exists in root\n  \u2705 .env exists in backend\n  \u2705 scripts/transfer_supabase_to_sqlite.js exists\n  \u2705 scripts/transfer_supabase_to_sqlite.py exists\n\n\u2501\u2501\u2501 2. VERIFY HTML SCRIPT TAG INTEGRATION \u2501\u2501\u2501\n  \u2705 login.html includes supabase-client.js\n  \u2705 telemetry.html includes supabase-client.js\n  \u2705 analytics.html includes supabase-client.js\n  \u2705 rules.html includes supabase-client.js\n  \u2705 scheduler.html includes supabase-client.js\n  \u2705 staff.html includes supabase-client.js\n  \u2705 profile.html includes supabase-client.js\n  \u2705 Notification.html includes supabase-client.js\n  \u2705 logs.html includes supabase-client.js\n\n\u2501\u2501\u2501 3. VERIFY PYTHON BACKEND SQLITE3 & ML \u2501\u2501\u2501\n  \u2705 backend/app.py has sqlite3 database init\n  \u2705 backend/app.py has /api/telemetry endpoint\n  \u2705 backend/app.py has /api/telemetry/transfer endpoint\n  \u2705 backend/app.py has predict-energy endpoint\n  \u2705 backend/app.py has prediction-features endpoint\n  \u2705 backend/app.py has prediction-metrics endpoint\n  \u2705 backend/app.py has health check endpoint\n  \u2705 backend/app.py has all 3 ML models configured\n\n\u2501\u2501\u2501 4. VERIFY CONTROL LOGS SQLITE3 ROUTING \u2501\u2501\u2501\n  \u2705 supabase-client.js defines Sqlite3TelemetryCollection\n  \u2705 supabase-client.js routes telemetry to SQLite3\n  \u2705 supabase-client.js exposes direct cloud client\n  \u2705 unused cloud collection wrapper removed\n\n\u2501\u2501\u2501 5. VERIFY NODE & CONTROL LOGS SYNC SERVICE \u2501\u2501\u2501\n  \u2705 public/js/node-sync.js exists\n  \u2705 node-sync.js defines saveNodeTelemetryToSqlite\n  \u2705 logs.js has fetchLogsFromDB querying SQLite3\n\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n  VERIFICATION RESULTS: 33 passed, 0 failed\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n\n"
+  },
+  {
+    "name": "node scripts/verify_no_mock_data.js",
+    "exit_code": 0,
+    "output": "\u2501\u2501\u2501 AUDITING CODEBASE: ZERO MOCK DATA INTEGRITY \u2501\u2501\u2501\n\n  \u2705 shared.js: MockDataGenerator injection removed\n  \u2705 shared.js: MockPocketBase class removed\n  \u2705 shared.js: Fake fetch interceptor removed\n  \u2705 login.js: Offline mock admin login removed\n  \u2705 maintenance-modal.js: Hardcoded AIRCONS_DATABASE array removed\n  \u2705 maintenance-modal.js: Hardcoded DEFAULT_STAFF array removed\n  \u2705 maintenance-modal.js: Hardcoded DEFAULT_REPORTS array removed\n  \u2705 telemetry-new.js: EcoTrackDataLayer fallback removed\n  \u2705 analytics.js: EcoTrackDataLayer fallbacks removed\n  \u2705 analytics.js: Random mock compliance scores removed\n  \u2705 notifications.js: EcoTrackDataLayer fallbacks removed\n  \u2705 notifications.js: loadMockMessages renamed to loadNotificationMessages\n  \u2705 supabase-client.js: EcoTrackDataLayer fallbacks removed\n  \u2705 login.html: Does not include data-schemas.js or data-logic.js\n  \u2705 telemetry.html: Does not include data-schemas.js or data-logic.js\n  \u2705 analytics.html: Does not include data-schemas.js or data-logic.js\n  \u2705 scheduler.html: Does not include data-schemas.js or data-logic.js\n  \u2705 rules.html: Does not include data-schemas.js or data-logic.js\n  \u2705 staff.html: Does not include data-schemas.js or data-logic.js\n  \u2705 Notification.html: Does not include data-schemas.js or data-logic.js\n  \u2705 logs.html: Does not include data-schemas.js or data-logic.js\n  \u2705 renderer.js: Cleared of legacy mock data generator\n  \u2705 staff.js: Cleared of Carlos Rivera and mock staff list\n  \u2705 staff.html: Detail modal cleared of Carlos Rivera placeholder\n  \u2705 telemetry-new.js: Visual demo simulator loop removed\n  \u2705 node-sync.js: Fake historical telemetry generation removed\n  \u2705 node-sync.js: Fake background cadence telemetry generation removed\n  \u2705 nodes.html: Hardcoded mock buildings/rooms fallbacks removed\n  \u2705 nodes.html: Simulated Math.random ping latency removed\n  \u2705 control.html: Hardcoded Server Room A AC in error modal removed\n  \u2705 control.html: Simulated Math.random ping latency removed\n  \u2705 staff.js: Fallback mock buildings/rooms removed\n  \u2705 staff.html: Static mock room options removed\n  \u2705 supabase-client.js: Fake ID Math.random generation removed\n\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n  RESULTS: 34 passed, 0 failed\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n\n"
+  },
+  {
+    "name": "venv/Scripts/python.exe scripts/test_database_cleanup.py",
+    "exit_code": 0,
+    "output": "[*] SQLite3 Sensor Logs Database initialized at: C:\\Users\\reygay\\AppData\\Local\\Temp\\ecotrack-db-cleanup-test-v8rch55z\\telemetry.db\n.......\n----------------------------------------------------------------------\nRan 7 tests in 0.294s\n\nOK\n"
+  },
+  {
+    "name": "venv/Scripts/python.exe scripts/test_cloud_telemetry_sync.py",
+    "exit_code": 0,
+    "output": "[*] SQLite3 Sensor Logs Database initialized at: C:\\Users\\reygay\\AppData\\Local\\Temp\\ecotrack-cloud-test-zsmocyhh\\telemetry.db\n[Hardware Schedule] Node node-6: sent\n......\n----------------------------------------------------------------------\nRan 6 tests in 0.165s\n\nOK\n"
+  },
+  {
+    "name": "venv/Scripts/python.exe scripts/test_schedule_pipeline.py",
+    "exit_code": 0,
+    "output": "[*] SQLite3 Sensor Logs Database initialized at: C:\\Users\\reygay\\AppData\\Local\\Temp\\ecotrack-schedule-test-axo68jq1\\telemetry.db\n[Hardware Schedule] Node node-1: sent\n[Hardware Schedule] Node node-1: failed (Controller did not acknowledge the requested interval)\n[Hardware Schedule] Node node-1: pending_ip\n.....\n----------------------------------------------------------------------\nRan 5 tests in 0.172s\n\nOK\n"
+  },
+  {
+    "name": "venv/Scripts/python.exe scripts/test_aircon_state.py",
+    "exit_code": 0,
+    "output": "[*] SQLite3 Sensor Logs Database initialized at: C:\\Users\\reygay\\AppData\\Local\\Temp\\ecotrack-state-test-xgx5o1o0\\telemetry.db\n.\n----------------------------------------------------------------------\nRan 1 test in 0.085s\n\nOK\n"
+  },
+  {
+    "name": "scripts/test_dashboard_workflows.js",
+    "exit_code": 1,
+    "pre_existing_failure": true,
+    "output": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 0.25\n- 0.008333333333333333\n\n    at main (C:\\Users\\reygay\\Desktop\\EcoTrackDesktopDashboardNew-main-control\\scripts\\test_dashboard_workflows.js:75:10)\n    at Object.<anonymous> (C:\\Users\\reygay\\Desktop\\EcoTrackDesktopDashboardNew-main-control\\scripts\\test_dashboard_workflows.js:184:1)\n    at Module._compile (node:internal/modules/cjs/loader:1872:14)\n    at Object..js (node:internal/modules/cjs/loader:2003:10)\n    at Module.load (node:internal/modules/cjs/loader:1594:32)\n    at Module._load (node:internal/modules/cjs/loader:1396:12)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)\n    at node:internal/main/run_main_module:33:47 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: 0.25,\n  expected: 0.008333333333333333,\n  operator: 'strictEqual',\n  diff: 'simple'\n}\n"
+  },
+  {
+    "name": "scripts/test_runtime_engine.js",
+    "exit_code": 1,
+    "pre_existing_failure": true,
+    "output": "AssertionError [ERR_ASSERTION]: Missing cadence defaults to thirty seconds: 0.25 != 0.008333333333333333\n    at near (C:\\Users\\reygay\\Desktop\\EcoTrackDesktopDashboardNew-main-control\\scripts\\test_runtime_engine.js:20:45)\n    at testCadenceAndEvidence (C:\\Users\\reygay\\Desktop\\EcoTrackDesktopDashboardNew-main-control\\scripts\\test_runtime_engine.js:32:3)\n    at main (C:\\Users\\reygay\\Desktop\\EcoTrackDesktopDashboardNew-main-control\\scripts\\test_runtime_engine.js:114:3)\n    at Object.<anonymous> (C:\\Users\\reygay\\Desktop\\EcoTrackDesktopDashboardNew-main-control\\scripts\\test_runtime_engine.js:117:1)\n    at Module._compile (node:internal/modules/cjs/loader:1872:14)\n    at Object..js (node:internal/modules/cjs/loader:2003:10)\n    at Module.load (node:internal/modules/cjs/loader:1594:32)\n    at Module._load (node:internal/modules/cjs/loader:1396:12)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5) {\n  generatedMessage: false,\n  code: 'ERR_ASSERTION',\n  actual: false,\n  expected: true,\n  operator: '==',\n  diff: 'simple'\n}\n"
+  },
+  {
+    "name": "analytics.html HTTP smoke",
+    "http_status": 200
+  },
+  {
+    "name": "rules.html HTTP smoke",
+    "http_status": 200
+  },
+  {
+    "name": "telemetry.html HTTP smoke",
+    "http_status": 200
+  },
+  {
+    "name": "existing SQLite history retained",
+    "telemetry_rows": 539,
+    "distinct_nodes": 12
+  },
+  {
+    "name": "browser UI check",
+    "status": "BLOCKED",
+    "reason": "Browser tool sandbox kernel failed to start: helper_unknown_error: setup refresh had errors"
+  }
+]

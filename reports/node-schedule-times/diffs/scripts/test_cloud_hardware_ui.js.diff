@@ -1,0 +1,12 @@
+--- before/scripts/test_cloud_hardware_ui.js
++++ scripts/test_cloud_hardware_ui.js
+@@ -57,7 +57,8 @@
+  const toast=[];let failed=true,request;
+  const ui=vm.createContext({document:{getElementById:id=>inputs[id]},savedRooms:rooms,scheduleDrafts:new Map(),scheduleDeliveries:new Map(),localStorage:{setItem:()=>{}},CustomEvent:class{constructor(name,options){this.name=name;this.detail=options.detail;}},console,
+   window:{EcoTrackHardwareCloud:{request:async(...args)=>{request=args;if(failed)throw new Error('Database denied request');return {id:'queued-command',status:'queued'};}},EcoTrackAirconSystem:{NodeService:{getNodes:()=>localNodes}},EcoToast:{error:message=>toast.push(message),success:message=>toast.push(message)},dispatchEvent:()=>{}}});
+- vm.runInContext(apply,ui);
++ const timeHelpers=scheduler.slice(scheduler.indexOf('function normalizeScheduleTime('),scheduler.indexOf('function composeTimeValue('));
++ vm.runInContext(timeHelpers+apply,ui);
+  const button={disabled:false,textContent:'Apply'};
+  await ui.applyNodeSchedule('controller',button);assert.equal(localNodes[0].wake_time,'05:00');assert.equal(rooms.room.nodes[0].intervalVal,15);assert.equal(button.textContent,'Apply');checks.push('Failed schedule write preserves local saved settings');
+  failed=false;await ui.applyNodeSchedule('controller',button);assert.equal(request[2].interval_seconds,1800);assert.equal(request[2].interval_val,30);assert.equal(request[2].interval_unit,'Minutes');assert.equal(request[3].wait,false);assert.equal(button.textContent,'Queued');assert.equal(localNodes[0].wake_time,'06:00');checks.push('Confirmed schedule queue preserves selected units and labels delivery as queued');

@@ -1,0 +1,204 @@
+--- before/public/js/aircon-system.js
++++ public/js/aircon-system.js
+@@ -4,6 +4,8 @@
+ Object.defineProperty(exports, "__esModule", { value: true });
+ exports.parseAirconSnapshot = parseAirconSnapshot;
+ exports.describeAirconState = describeAirconState;
++exports.remoteObservation = remoteObservation;
++exports.selectSettings = selectSettings;
+ function parseAirconSnapshot(value) {
+     if (typeof value === 'string') {
+         try {
+@@ -22,10 +24,46 @@
+         return false;
+     return null;
+ }
++function remoteObservation(capture, receivedAt) {
++    const frame = parseAirconSnapshot(capture);
++    const decoded = parseAirconSnapshot(frame?.state);
++    if (!decoded || (!frame.raw_data && !(Number(frame.raw_count) > 0))) return {};
++    const power = powerValue(decoded.power);
++    const temp = decoded.temp !== null && decoded.temp !== undefined && decoded.temp !== '' && Number.isFinite(Number(decoded.temp)) ? Number(decoded.temp) : null;
++    const mode = ['cool','heat','dry','fan','auto'].includes(decoded.mode) ? decoded.mode : null;
++    const fan = ['auto','low','medium','high','quiet','silent','turbo'].includes(decoded.fan) ? decoded.fan : null;
++    if (power === null && temp === null && mode === null && fan === null) return {};
++    const epoch = Number(frame.captured_at_epoch_ms);
++    const observedAt = Number.isFinite(epoch) && epoch > 0 ? new Date(epoch).toISOString() : receivedAt || null;
++    return {observed_remote_state:{power,temp,mode,fan,source:'ir_receiver'}, observed_remote_at:observedAt};
++}
++function selectSettings(value) {
++    const snapshot = parseAirconSnapshot(value) || {};
++    const reportTime = Date.parse(snapshot.reported_at || '');
++    const commandTime = Date.parse(snapshot.commanded_at || '');
++    const remoteTime = Date.parse(snapshot.observed_remote_at || '');
++    const latest = Math.max(Number.isFinite(reportTime) ? reportTime : 0, Number.isFinite(commandTime) ? commandTime : 0);
++    if (snapshot.observed_remote_state && ((!snapshot.desired_state && !snapshot.reported_state) || (Number.isFinite(remoteTime) && remoteTime >= latest)))
++        return {state:snapshot.observed_remote_state,source:'remote'};
++    if (snapshot.reported_state && (!snapshot.desired_state || (Number.isFinite(reportTime) && (!Number.isFinite(commandTime) || reportTime >= commandTime))))
++        return {state:parseAirconSnapshot(snapshot.reported_state),source:'reported'};
++    if (snapshot.desired_state) return {state:parseAirconSnapshot(snapshot.desired_state),source:'requested'};
++    if (snapshot.configured_state) return {state:parseAirconSnapshot(snapshot.configured_state),source:'configured'};
++    return {state:null,source:'unknown'};
++}
++
+ /** Commands describe selected settings; only reported feedback describes operation. */
+ function describeAirconState(value) {
+     const snapshot = parseAirconSnapshot(value);
+     const reported = snapshot?.reported_state;
++    const observed = selectSettings(snapshot);
++    if (observed.source === 'remote') {
++        const state = observed.state;
++        const mode = String(state.mode || '').toUpperCase();
++        const label = state.power === false ? 'REMOTE OFF' : state.power === true ? 'REMOTE ON' + (mode ? ' / ' + mode : '') : 'REMOTE SETTINGS';
++        const fanLabel = state.fan ? String(state.fan).toUpperCase() + ' FAN' : '';
++        return {label,fanLabel,commandStatus:'',confirmed:false,power:null,remoteObserved:true,observedPower:state.power,summary:[label,fanLabel].filter(Boolean).join(' · ')};
++    }
+     if (!snapshot?.desired_state && !reported && snapshot?.configured_state) {
+         const mode = String(snapshot.configured_state.mode || '').trim().toLowerCase();
+         const fan = String(snapshot.configured_state.fan || '').trim().toLowerCase();
+@@ -426,7 +464,8 @@
+       });
+ 
+       // Map real Supabase nodes into AC Controller Devices
+-      const realNodes = sbNodes.map((n, idx) => {
++      const pendingControllers = new Set(window.EcoTrackHardwareCloud?.pendingRegistrations?.() || []);
++      const realNodes = sbNodes.filter(n => !pendingControllers.has(n.id) || sbAircons.some(ac => ac.controller_node_id === n.id || ac.node_id === n.id)).map((n, idx) => {
+         let rInfo = roomMap[n.room_id];
+         if (!rInfo) {
+           rInfo = { name: 'Unassigned', floor: 'Unassigned', building: 'Unassigned' };
+@@ -444,7 +483,7 @@
+ 
+         return {
+           node_id: hardware?.device_id || n.name || n.id,
+-          name: `${n.name} (${rInfo.name})`,
++          name: n.name,
+           status: hardware?.connection_status === 'sleeping' ? 'Sleeping' : isOnline ? 'Connected' : 'Offline',
+           hardware: hardware?.capabilities?.ir_transmitter ? 'ESP32-S3 IR controller' : 'ESP32-S3 IR receiver',
+           firmware: hardware?.firmware_version || null,
+@@ -464,6 +503,8 @@
+           pressure: null,
+           room_id: n.room_id,
+           room_name: rInfo.name,
++          floor_id: sbRooms.find(room => room.id === n.room_id)?.floor_id || null,
++          building_id: sbFloors.find(floor => floor.id === sbRooms.find(room => room.id === n.room_id)?.floor_id)?.building_id || null,
+           floor: rInfo.floor,
+           building: rInfo.building,
+           location: `${rInfo.name} (${rInfo.building} • ${rInfo.floor})`,
+@@ -514,9 +555,11 @@
+ 
+         const isOnline = matchedNode ? hardwareByNode.get(matchedNode.id)?.connection_status === 'online' : false;
+         const proto = ac.protocol_name || ac.protocol || CapabilityEngine.resolveProtocolName(ac.brand);
+-        const snapshot = { desired_state: ac.desired_state, reported_state: ac.reported_state, reported_at: ac.reported_at, commanded_at: ac.commanded_at, command_id: ac.command_id, command_status: ac.command_status };
++        const hardwareState = matchedNode ? hardwareByNode.get(matchedNode.id) : null;
++        const snapshot = { desired_state: ac.desired_state, reported_state: ac.reported_state, reported_at: ac.reported_at, commanded_at: ac.commanded_at, command_id: ac.command_id, command_status: ac.command_status,
++          ...window.EcoTrackAirconState.remoteObservation(hardwareState?.latest_ir, hardwareState?.last_seen) };
+         const description = window.EcoTrackAirconState.describeAirconState(snapshot);
+-        const selectedState = window.EcoTrackAirconState.parseAirconSnapshot(description.confirmed ? ac.reported_state : ac.desired_state);
++        const selectedState = window.EcoTrackAirconState.selectSettings(snapshot).state;
+         const controlState = selectedState ? {
+           ...(existingLocal?.state || {}),
+           power: description.confirmed ? description.power : ['on', 'true', '1'].includes(String(selectedState.power).toLowerCase()) ? true : ['off', 'false', '0'].includes(String(selectedState.power).toLowerCase()) ? false : null,
+@@ -531,6 +574,9 @@
+           controller_node_id: matchedNode?.id || null,
+           room_id: rId || null,
+           control_snapshot: snapshot,
++          hardware_capabilities: hardwareState?.capabilities || {},
++          ir_monitoring: hardwareState?.capabilities?.ir_receiver === true,
++          ir_controlling: hardwareState?.capabilities?.ir_transmitter === true,
+           device_id: tag,
+           name: finalName,
+           brand: ac.brand || 'Unspecified',
+@@ -547,7 +593,7 @@
+           protocol: proto,
+           capabilities: CapabilityEngine.getCapabilities(proto),
+           state: controlState,
+-          operational_state: { classification: description.confirmed ? description.label : 'UNCONFIRMED',
++          operational_state: { classification: description.confirmed || description.remoteObserved ? description.label : 'UNCONFIRMED',
+             target_temperature: selectedState?.temp ?? null, mode: selectedState?.mode ?? null,
+             last_updated: ac.reported_at || null }
+         });
+@@ -645,7 +691,10 @@
+             if (modified) {
+               try { localStorage.setItem('ecoTrack_nodes', JSON.stringify(parsed)); } catch (_) {}
+             }
+-            return parsed;
++            const pending = new Set(window.EcoTrackHardwareCloud?.pendingRegistrations?.() || []);
++            let profiles = [];
++            try { profiles = JSON.parse(localStorage.getItem('ecoTrack_aircons') || '[]'); } catch (_) {}
++            return parsed.filter(node => !pending.has(node.db_id) || profiles.some(ac => ac.controller_node_id === node.db_id || ac.node_id === node.db_id));
+           }
+         }
+         return DEFAULT_NODES;
+@@ -675,13 +724,13 @@
+         if (updatedData[field] !== undefined) payload[field] = updatedData[field];
+       }
+       const { data, error } = await sb.from('nodes').update(payload).eq('id', databaseId).select('*').single();
+-      if (error || data?.id !== databaseId) throw new Error(error?.message || 'Controller changes were not confirmed in Supabase.');
++      if (error || data?.id !== databaseId || Object.entries(payload).some(([field,value]) => field !== 'updated' && data[field] !== value)) throw new Error(error?.message || 'Controller changes were not confirmed in Supabase.');
+       const linked = AirconProfileManager.getAll().filter(ac => ac.controller_node_id === databaseId || ac.node_id === current.node_id);
+       for (const ac of linked) {
+         await AirconProfileManager.save({ ...ac, controller_node_id: databaseId,
+           room_id: data.room_id ?? null, room_name: updatedData.room_name || ac.room_name,
+           location: updatedData.location || ac.location, name: updatedData.room_name ? `${updatedData.room_name} AC (${ac.device_id})` : ac.name,
+-          brand: updatedData.brand || ac.brand, model: updatedData.aircon_type || ac.model,
++          brand: updatedData.brand === null ? 'Unspecified' : updatedData.brand || ac.brand, model: updatedData.aircon_type || ac.model,
+           aircon_type: updatedData.aircon_type || ac.aircon_type,
+           protocol: updatedData.protocol_name || ac.protocol_name, protocol_name: updatedData.protocol_name || ac.protocol_name });
+       }
+@@ -947,8 +996,14 @@
+         }
+       }
+ 
+-      // Cloud registration creates a persisted AC binding shared by every page.
++      // Cloud verification is followed by confirmed controller metadata and one AC binding.
+       if (deviceData.cloud_registered) {
++        const nodePayload = {name:deviceData.name || deviceData.node_id, room_id:effectiveRoomId,
++          brand:deviceData.brand && deviceData.brand !== 'Unassigned Brand' ? deviceData.brand : null,
++          aircon_type:deviceData.aircon_type || null, protocol_name:deviceData.protocol_name || null, updated:new Date().toISOString()};
++        const committed = await sb.from('nodes').update(nodePayload).eq('id',deviceData.db_id).select('*').single();
++        if (committed.error || committed.data?.id !== deviceData.db_id || Object.entries(nodePayload).some(([field,value]) => field !== 'updated' && committed.data[field] !== value))
++          throw new Error(committed.error?.message || 'Controller metadata was not confirmed in Supabase.');
+         let existing = deviceData.aircon_id ? AirconProfileManager.getById(deviceData.aircon_id) :
+           AirconProfileManager.getAll().find(ac => ac.controller_node_id === deviceData.db_id || ac.node_id === deviceData.node_id);
+         if (deviceData.aircon_id) {
+@@ -1465,21 +1520,26 @@
+   // ===== PROTOCOL ADAPTER & IR SERVICE =====
+   class ProtocolAdapter {
+     /** Learn an actual remote capture through Supabase, from any network. */
+-    static async detectRemoteBrand(nodeId) {
++    static decodeRemoteCapture(data) {
++      const protocol = String(data.raw_type || data.protocol || '').trim().toUpperCase();
++      if (!protocol || (!data.raw_data && !(Number(data.raw_count) >= 3)))
++        return {success:false,message:'No valid IR frame was received. Retry while pressing the physical remote.'};
++      const families = [
++        [/^DAIKIN/, 'Daikin'], [/^MIDEA/, 'Midea'], [/^GREE$/, 'Gree'],
++        [/^CARRIER_AC/, 'Carrier'], [/^PANASONIC_AC/, 'Panasonic'], [/^SAMSUNG_AC$/, 'Samsung'],
++        [/^MITSUBISHI/, 'Mitsubishi'], [/^HAIER/, 'Haier'], [/^HITACHI/, 'Hitachi'],
++        [/^TOSHIBA_AC$/, 'Toshiba'], [/^FUJITSU_AC$/, 'Fujitsu'], [/^LG(?:2)?$/, 'LG'],
++        [/^SHARP_AC$/, 'Sharp'], [/^TCL(?:112|96)AC$/, 'TCL'], [/^WHIRLPOOL_AC$/, 'Whirlpool']
++      ];
++      const brand = families.find(([pattern]) => pattern.test(protocol))?.[1] || null;
++      return {...data,success:true,brand,protocol,ambiguous:!brand,
++        message:brand ? 'Recognized ' + brand + ' IR protocol.' : 'IR protocol ' + protocol + ' was captured. Choose the manufacturer manually; this protocol can be shared by multiple brands.'};
++    }
++    static async detectRemoteBrand(nodeId, options = {}) {
+       try {
+-        const data = await window.EcoTrackHardwareCloud.learn(nodeId);
+-        const rawType = String(data.raw_type || data.protocol || '').trim().toUpperCase();
+-        const decoders = [
+-          [/^MIDEA(?:24)?$/, 'midea_ir', 'Midea'], [/^GREE$/, 'gree', 'Gree'],
+-          [/^DAIKIN(?:2|64|128|152|160|176|200|216|312)?$/, 'daikin', 'Daikin'],
+-          [/^CARRIER_AC(?:40|64|84|128)?$/, 'carrier', 'Carrier'],
+-          [/^PANASONIC_AC(?:32)?$/, 'panasonic', 'Panasonic'], [/^SAMSUNG_AC$/, 'samsung', 'Samsung'],
+-          [/^(?:MITSUBISHI_AC|MITSUBISHI112|MITSUBISHI136|MITSUBISHI_HEAVY_88|MITSUBISHI_HEAVY_152)$/, 'mitsubishi', 'Mitsubishi']
+-        ];
+-        const decoded = decoders.find(([pattern]) => pattern.test(rawType));
+-        if (!decoded || !data.raw_data || !data.hex) return { success: false, message: 'No recognizable AC signal captured. Press the remote toward the ESP32 receiver or choose the brand manually.' };
+-        return { success: true, brand: decoded[2], protocol: rawType, raw_data: data.raw_data, hex: data.hex, source: 'supabase' };
+-      } catch (error) { return { success: false, message: error.message, code: error.code }; }
++        const data = options.nearby ? await window.EcoTrackHardwareCloud.learnNearby(nodeId, options) : await window.EcoTrackHardwareCloud.learn(nodeId);
++        return this.decodeRemoteCapture(data);
++      } catch (error) { return {success:false,message:error.message,code:error.code}; }
+     }
+     static getSupportedProtocols() { return CapabilityEngine.getSupportedProtocols(); }
+     static async sniffProtocol(nodeId) {

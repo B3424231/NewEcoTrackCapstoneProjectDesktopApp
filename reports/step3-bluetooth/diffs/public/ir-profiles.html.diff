@@ -1,0 +1,11 @@
+--- before/public/ir-profiles.html
++++ public/ir-profiles.html
+@@ -25,7 +25,7 @@
+   <link rel="stylesheet" href="./styles.css?v=54">
+   <script src="./js/supabase.umd.js"></script>
+   <script src="./js/supabase-client.js"></script>
+-  <script src="./js/hardware-cloud.js?v=5"></script>
++  <script src="./js/hardware-cloud.js?v=6"></script>
+   <script src="./js/sidebar.js"></script>
+   <script src="./js/sidebar-loader.js?v=7"></script>
+   <script src="./js/icons.js"></script>

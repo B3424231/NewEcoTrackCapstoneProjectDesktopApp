@@ -1,6 +1,6 @@
 // ===================================================================
-// ECOTRACK SENSOR LOGS TRANSFER: Supabase -> Native SQLite3
-// Runs the SQLite3 transfer service to copy Supabase sensor logs to backend/telemetry.db
+// ECOTRACK CONTROL LOGS TRANSFER: Supabase -> Native SQLite3
+// Runs the SQLite3 transfer service to copy Supabase control logs to backend/telemetry.db
 //
 // Usage: node scripts/transfer_supabase_to_sqlite.js
 // ===================================================================

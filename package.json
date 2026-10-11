@@ -9,12 +9,13 @@
     "dev": "concurrently \"npm run electron-dev\" \"npm run python-dev\"",
     "electron-dev": "electron . --watch",
     "python-dev": "venv\\Scripts\\python.exe backend/app.py",
-    "test": "node public/js/data-tests.js",
+    "test": "node scripts/verify_no_mock_data.js",
     "transfer:sqlite": "node scripts/transfer_supabase_to_sqlite.js",
     "test:all": "concurrently \"npm run dev\" \"npm run test\"",
     "build": "electron-builder",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "test:database": "node scripts/test_database_cleanup.js && venv\\Scripts\\python.exe scripts/test_database_cleanup.py"
   },
   "keywords": [
     "ecotrack",
@@ -26,14 +27,14 @@
   "license": "MIT",
   "devDependencies": {
     "concurrently": "^7.0.0",
-    "electron": "^29.4.6",
+    "electron": "^44.5.1",
     "electron-builder": "^24.0.0",
     "electron-is-dev": "^2.0.0"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",
     "axios": "^1.4.0",
-    "pocketbase": "^0.26.8"
+    "ws": "^8.22.0"
   },
   "build": {
     "appId": "com.ecotrack.app",

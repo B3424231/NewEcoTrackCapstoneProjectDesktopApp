@@ -1,0 +1,103 @@
+--- before/reports/cloud-hardware/EcoTrackCloudReceiver.ino.txt
+
++++ reports/cloud-hardware/EcoTrackCloudReceiver.ino.txt
+
+@@ -40,7 +40,7 @@
+
+ constexpr char SERVICE_UUID[] = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+ constexpr char INFO_UUID[] = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+ constexpr char WIFI_UUID[] = "1c95d5e3-d8f7-413a-bf3d-7a2e5d7be87e";
+-constexpr char VERSION[] = "cloud-ir-controller-1.5-rxtx";
++constexpr char VERSION[] = "cloud-ir-controller-1.6-rxtx";
+ constexpr char CAPTURE_UUID[] = "b80301f3-639c-4eaf-bcc0-537759229321";
+ 
+ constexpr uint16_t IR_CAPTURE_BUFFER = 1024;
+@@ -250,7 +250,7 @@
+
+     case stdAc::fanspeed_t::kMedium: return "medium";
+     case stdAc::fanspeed_t::kMediumHigh: return "high";
+     case stdAc::fanspeed_t::kHigh: return "high";
+-    case stdAc::fanspeed_t::kMax: return "turbo";
++    case stdAc::fanspeed_t::kMax: return "high"; // Turbo is a separate decoded flag.
+     default: return "";
+   }
+ }
+@@ -299,6 +299,7 @@
+
+   float temperature = state["temp"].as<float>();
+   if (!isfinite(temperature) || temperature < 16 || temperature > 32) { error = "AC temperature must be 16 to 32 degrees C."; return false; }
+   IRac::initState(&desired);
++  if (haveLastAcState && lastAcState.protocol == type) desired = lastAcState;
+   desired.protocol = type;
+   desired.model = haveLastAcState && lastAcState.protocol == type ? lastAcState.model : IR_AC_MODEL;
+   if (!payload["model"].isNull()) {
+@@ -312,7 +313,8 @@
+
+   desired.fanspeed = fan == "quiet" || fan == "silent" ? stdAc::fanspeed_t::kMin :
+     fan == "turbo" ? stdAc::fanspeed_t::kMax : IRac::strToFanspeed(fan.c_str());
+   desired.quiet = fan == "quiet" || fan == "silent";
+-  bool swing = false, turbo = fan == "turbo", eco = false, sleep = false;
++  bool swing = desired.swingv != stdAc::swingv_t::kOff || desired.swingh != stdAc::swingh_t::kOff;
++  bool turbo = fan == "turbo" || desired.turbo, eco = desired.econo, sleep = desired.sleep >= 0;
+   for (const char *field : {"swing", "turbo", "eco", "sleep"}) {
+     bool value;
+     if (state[field].isNull()) continue;
+@@ -322,8 +324,15 @@
+
+     else if (!strcmp(field,"eco")) eco = value;
+     else sleep = value;
+   }
+-  desired.swingv = swing ? stdAc::swingv_t::kAuto : stdAc::swingv_t::kOff;
++  if (!state["swing"].isNull()) {
++    desired.swingv = swing ? stdAc::swingv_t::kAuto : stdAc::swingv_t::kOff;
++    if (!swing) desired.swingh = stdAc::swingh_t::kOff;
++  }
+   desired.turbo = turbo; desired.econo = eco; desired.sleep = sleep ? 0 : -1;
++  if (type == TCL112AC && turbo) {
++    // The TCL encoder's Turbo bit selects High fan and automatic vertical swing.
++    desired.fanspeed = stdAc::fanspeed_t::kMax; desired.swingv = stdAc::swingv_t::kAuto;
++  }
+   return true;
+ }
+ void rememberAcState(const stdAc::state_t &state) {
+@@ -466,6 +475,19 @@
+
+     vTaskDelay(pdMS_TO_TICKS(5) ? pdMS_TO_TICKS(5) : 1);
+   }
+ }
++// Advertise controls implemented by the detected decoder/encoder, independently of the UI brand.
++void addReceiverAcCapabilities(JsonDocument &frame, const stdAc::state_t &state) {
++  if (state.protocol != TCL112AC) return;
++  JsonObject caps = frame["ac_capabilities"].to<JsonObject>();
++  caps["power"] = true; caps["temperature"] = true;
++  caps["min_temp"] = kTcl112AcTempMin; caps["max_temp"] = kTcl112AcTempMax;
++  JsonArray modes = caps["modes"].to<JsonArray>();
++  for (const char *mode : {"cool","dry","fan","auto","heat"}) modes.add(mode);
++  JsonArray fans = caps["fans"].to<JsonArray>();
++  for (const char *fan : {"low","medium","high","auto","quiet"}) fans.add(fan);
++  caps["swing"] = true; caps["turbo"] = true; caps["eco"] = true;
++  caps["sleep"] = false; caps["timer"] = false; // Not sent by IRac::tcl112.
++}
+ void processIrFrame(const IrCapturedFrame &capture) {
+   decoded = capture.packet; decoded.rawbuf = const_cast<uint16_t *>(capture.ticks);
+   JsonDocument frame;
+@@ -490,12 +512,16 @@
+
+     frame["state"]["power"] = acState.power;
+     frame["state"]["temp"] = acState.celsius ? acState.degrees : (acState.degrees - 32.0f) * 5.0f / 9.0f;
+     frame["state"]["mode"] = commonMode(acState.mode); frame["state"]["fan"] = commonFan(acState.fanspeed);
++    frame["state"]["turbo"] = acState.turbo;
++    frame["state"]["swing"] = acState.swingv != stdAc::swingv_t::kOff || acState.swingh != stdAc::swingh_t::kOff;
++    frame["state"]["eco"] = acState.econo; frame["state"]["sleep"] = acState.sleep >= 0;
+     frame["state"]["source"] = "ir_receiver";
++    addReceiverAcCapabilities(frame, acState);
+     JsonDocument lastDecoded; lastDecoded.set(frame.as<JsonVariantConst>()); lastDecoded.remove("raw_data");
+     latestDecodedCapture = ""; serializeJson(lastDecoded, latestDecodedCapture);
+-    Serial.printf("Decoded remote state: power %s | %.1f C | mode %s | fan %s\n",
++    Serial.printf("Decoded remote state: power %s | %.1f C | mode %s | fan %s | turbo %s\n",
+       acState.power ? "on" : "off", frame["state"]["temp"].as<float>(),
+-      commonMode(acState.mode).c_str(), commonFan(acState.fanspeed).c_str());
++      commonMode(acState.mode).c_str(), commonFan(acState.fanspeed).c_str(), acState.turbo ? "on" : "off");
+   } else {
+     if (tclFrame(decoded) && !freshPower)
+       Serial.println("TCL auxiliary frame: no fresh power/temperature/mode; previous power is not a new reading.");

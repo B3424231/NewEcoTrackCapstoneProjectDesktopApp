@@ -1,0 +1,39 @@
+--- before/public/dashboard.html
+
++++ public/dashboard.html
+
+@@ -32,8 +32,8 @@
+
+   <script src="./js/eco-network.js"></script>
+   <script src="./js/eco-data-bus.js"></script>
+   <script src="./js/skeletons.js"></script>
+-  <script src="./js/aircon-system.js?v=17"></script>
+-  <script src="./js/aircon-state.js?v=4"></script>
++  <script src="./js/aircon-system.js?v=18"></script>
++  <script src="./js/aircon-state.js?v=5"></script>
+ </head>
+ 
+ <body class="app-shell bg-gray-50 dark:bg-[#0a0f1d] text-slate-800 dark:text-slate-100 transition-colors duration-200">
+@@ -265,7 +265,10 @@
+
+         const modeVal = card.querySelector('.ac-mode-val');
+         if (modeVal) modeVal.textContent = (ac.state?.mode || '—').toUpperCase();
+         const fanVal = card.querySelector('.ac-fan-val');
+-        if (fanVal) fanVal.textContent = (ac.state?.fan || '—').toUpperCase();
++        if (fanVal) {
++          fanVal.textContent = (ac.state?.fan || '—').toUpperCase() + (ac.state?.turbo === true ? ' · TURBO' : '');
++          fanVal.title = fanVal.textContent;
++        }
+         const swingVal = card.querySelector('.ac-swing-val');
+         if (swingVal) swingVal.textContent = ac.state?.swing === true ? 'ON' : ac.state?.swing === false ? 'OFF' : '—';
+ 
+@@ -589,7 +592,7 @@
+
+                   </div>
+                   <div class="p-2 rounded-lg bg-white/5 border border-white/5 min-w-0">
+                     <span class="text-[9px] text-gray-400 uppercase tracking-wider block truncate">Fan Speed</span>
+-                    <span class="ac-fan-val font-bold text-teal-300 text-[11px] truncate block">${(ac.state?.fan || '—').toUpperCase()}</span>
++                    <span class="ac-fan-val font-bold text-teal-300 text-[11px] truncate block">${(ac.state?.fan || '—').toUpperCase()}${ac.state?.turbo === true ? ' · TURBO' : ''}</span>
+                   </div>
+                   <div class="p-2 rounded-lg bg-white/5 border border-white/5 min-w-0">
+                     <span class="text-[9px] text-gray-400 uppercase tracking-wider block truncate">Swing</span>

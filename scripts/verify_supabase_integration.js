@@ -59,16 +59,17 @@ assert('backend/app.py has prediction-metrics endpoint', appPy.includes('/api/pr
 assert('backend/app.py has health check endpoint', appPy.includes('/api/health'));
 assert('backend/app.py has all 3 ML models configured', appPy.includes("'random_forest'") && appPy.includes("'decision_tree'") && appPy.includes("'xgboost'"));
 
-console.log('\n━━━ 4. VERIFY SENSOR LOGS SQLITE3 ROUTING ━━━');
+console.log('\n━━━ 4. VERIFY CONTROL LOGS SQLITE3 ROUTING ━━━');
 const clientJs = fs.readFileSync('public/js/supabase-client.js', 'utf8');
 assert('supabase-client.js defines Sqlite3TelemetryCollection', clientJs.includes('Sqlite3TelemetryCollection'));
 assert('supabase-client.js routes telemetry to SQLite3', clientJs.includes("name === 'telemetry'") && clientJs.includes('Sqlite3TelemetryCollection'));
-assert('supabase-client.js routes other collections to Supabase', clientJs.includes("new SupabaseTableCollection(name)"));
+assert('supabase-client.js exposes direct cloud client', clientJs.includes('window.supabaseClient = sbClient'));
+assert('unused cloud collection wrapper removed', !clientJs.includes('class SupabaseTableCollection'));
 
-console.log('\n━━━ 5. VERIFY NODE & SENSOR LOGS SYNC SERVICE ━━━');
+console.log('\n━━━ 5. VERIFY NODE & CONTROL LOGS SYNC SERVICE ━━━');
 assert('public/js/node-sync.js exists', fs.existsSync('public/js/node-sync.js'));
 const nodeSyncContent = fs.readFileSync('public/js/node-sync.js', 'utf8');
-assert('node-sync.js defines saveNodeTelemetryToPocketBase / saveNodeTelemetryToSqlite', nodeSyncContent.includes('saveNodeTelemetryToPocketBase') || nodeSyncContent.includes('saveNodeTelemetryToSqlite'));
+assert('node-sync.js defines saveNodeTelemetryToSqlite', nodeSyncContent.includes('saveNodeTelemetryToSqlite'));
 const logsJsContent = fs.readFileSync('public/js/logs.js', 'utf8');
 assert('logs.js has fetchLogsFromDB querying SQLite3', logsJsContent.includes('fetchLogsFromDB') && logsJsContent.includes('/api/telemetry'));
 

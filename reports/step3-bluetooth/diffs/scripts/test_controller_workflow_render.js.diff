@@ -1,0 +1,59 @@
+--- before/scripts/test_controller_workflow_render.js
++++ scripts/test_controller_workflow_render.js
+@@ -1,6 +1,6 @@
+ // Isolated Chromium production-component checks; no account or network.
+ const {app,BrowserWindow}=require('electron'),fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+-const root=path.resolve(__dirname,'..'),out=path.join(root,'reports/controller-workflow');
++const root=path.resolve(__dirname,'..'),out=path.join(root,'reports/step3-bluetooth');
+ app.setPath('userData',path.join(root,'scratch/controller-workflow-electron'));app.disableHardwareAcceleration();app.on('window-all-closed',()=>{});
+ const read=file=>fs.readFileSync(path.join(root,file),'utf8'),html=read('public/nodes.html'),control=read('public/control.html');
+ const section=(source,start,end)=>{const a=source.indexOf(start),b=source.indexOf(end,a);assert(a>=0&&b>a,start);return source.slice(a,b);};
+@@ -11,10 +11,13 @@
+  win.webContents.session.webRequest.onBeforeRequest({urls:['http://*/*','https://*/*']},(_d,done)=>done({cancel:true}));
+  const markup='<!doctype html><html class="'+(theme==='dark'?'dark':'')+'"><head><meta charset="utf-8"><style>'+read('public/styles.css')+'</style><style>.hidden{display:none!important}.qa{padding:24px;margin:auto;max-width:730px;}input,select{padding:8px;max-width:100%}#editNodeModal{margin-top:30px;border-top:1px solid #aaa;}#nodeStep3>div{margin-bottom:12px;}</style></head><body class="app-shell"><main class="qa"><div id="nodeModal">'+form('nodeForm')+'</div><div id="editNodeModal">'+form('editNodeForm')+'<button id="saveEditNodeBtn">Save</button></div><p id="hardwareRoleMessage"></p>'+buttons.map(id=>'<button id="'+id+'"'+(id==='remoteSim'?' class="sim-btn" data-cmd="POWER"':'')+'>fixture command</button>').join('')+'</main></body></html>';
+  await win.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(markup));
++ const tailwindPath=path.join(root,'scratch/step3-qa-tailwind.js'),cachedCss=path.join(out,'qa-tailwind.css');
++ if(fs.existsSync(tailwindPath))await win.webContents.executeJavaScript(read('scratch/step3-qa-tailwind.js')+"\nwindow.tailwind.config={darkMode:'class'};true;");
++ else if(fs.existsSync(cachedCss))await win.webContents.executeJavaScript("const qaStyle=document.createElement('style');qaStyle.textContent="+JSON.stringify(fs.readFileSync(cachedCss,'utf8'))+";document.head.appendChild(qaStyle);true;");
+  const startup=[
+  read('public/js/controller-locations.js'),read('public/js/aircon-state.js'),
+  "let currentModalStep=3,selectedBleDevice={nodeId:'esp32s3-fixture',info:{device_id:'esp32s3-fixture'}},wifiConfirmedFor='Fixture network';",
+- "function renderBrandChips(){} function updateConfigSummary(){} const form=document.getElementById('nodeForm');",
++ "function renderBrandChips(){} function updateConfigSummary(){} function updateNextButtonState(){} function updateDeviceIpResult(){} function setDeviceIpFeedback(){} const modal=document.getElementById('nodeModal'),form=document.getElementById('nodeForm');",
+  section(html,'      const remoteCapture = {','      let nodeCurrentPage = 1;'),
+  section(html,'      // Connection diagnostics and existing Wi-Fi reuse.','      async function scanForBleDevices()'),
+  section(html,'      // Enter in a text field',"      form.addEventListener('submit',"),
+@@ -45,6 +48,22 @@
+  check(!get('registerRemoteBtn').disabled,'Bluetooth detection enabled before registration');
+  let request;window.ProtocolAdapter={detectRemoteBrand:async(id,options)=>{request=options;options.onListening();return {success:true,brand:'Daikin',protocol:'DAIKIN64'};}};
+  await listenForRemote('register');check(request.nearby===true&&get('nodeFormBrand').value==='Daikin'&&!get('registerRemoteBtn').disabled,'Detection result updates brand and releases buttons');
++ const preserved={name:get('nodeFormName').value,room:get('nodeFormRoom').value,brand:get('nodeFormBrand').value,password:get('registrationWifiPassword').value};
++ let resolveReconnect,selectedId;const reply=new Promise(resolve=>resolveReconnect=resolve);
++ window.EcoTrackHardwareCloud={connect:async id=>{selectedId=id;return reply;}};
++ window.dispatchEvent(new CustomEvent('ecotrack:bluetooth-disconnected',{detail:{device_id:'esp32s3-fixture'}}));
++ check(get('registrationCloudStatus').dataset.state==='bluetooth'&&get('registrationCloudTitle').textContent==='Bluetooth: Reconnect required','Live disconnect uses Bluetooth status instead of a Supabase failure');
++ check(get('existingWifiMessage').textContent.startsWith('Previously confirmed'),'Disconnected setup identifies Wi-Fi as previously confirmed');
++ get('reconnectRegistrationBtn').click();
++ check(get('reconnectRegistrationBtn').disabled&&get('reconnectRegistrationBtn').getAttribute('aria-busy')==='true'&&get('saveNodeBtn').disabled,'Reconnect provides immediate busy feedback and guards Save');
++ resolveReconnect({device_id:'esp32s3-fixture',wifi_status:'connected',wifi_ssid:'Fixture network',ip_address:'10.0.0.6'});
++ for(let n=0;n<12;n++)await Promise.resolve();
++ check(selectedId==='esp32s3-fixture'&&get('registrationCloudStatus').dataset.state==='pending'&&get('step3IpBadge').textContent==='10.0.0.6','Reconnect verifies the selected ESP32 and refreshes the reported IP');
++ check(get('nodeFormName').value===preserved.name&&get('nodeFormRoom').value===preserved.room&&get('nodeFormBrand').value===preserved.brand&&get('registrationWifiPassword').value===preserved.password,'Reconnect preserves name, location, brand, and the recovery password');
++ check(!get('reconnectRegistrationBtn').disabled&&get('reconnectRegistrationBtn').getAttribute('aria-busy')==='false'&&!get('saveNodeBtn').disabled&&form.checkValidity(),'Reconnect releases controls and retains native form validity');
++ window.dispatchEvent(new CustomEvent('ecotrack:bluetooth-disconnected',{detail:{device_id:'another-controller'}}));
++ check(get('registrationCloudStatus').dataset.state==='pending','Another controller disconnect cannot change this wizard');
++ window.dispatchEvent(new CustomEvent('ecotrack:bluetooth-disconnected',{detail:{device_id:'esp32s3-fixture'}}));
+  return checks;
+  })()`);
+  const capabilityCode=[
+@@ -59,7 +78,9 @@
+  assert(blocked.every(Boolean));results.push('Every AC command button including simulated remote requires a transmitter');
+  await win.webContents.executeJavaScript("transmitter=true;enforceControllerCapabilities({node_id:'fixture'});true;");
+  assert.equal(await win.webContents.executeJavaScript("document.getElementById('remoteSim').disabled"),false);results.push('Transmitter capability restores power control');
+- await win.webContents.executeJavaScript("document.getElementById('editNodeModal').classList.add('hidden');new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));");
++ await win.webContents.executeJavaScript("document.getElementById('editNodeModal').classList.add('hidden');document.getAnimations().forEach(animation=>animation.finish());new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));");
++ const generatedCss=await win.webContents.executeJavaScript("[...document.querySelectorAll('style')].map(style=>style.textContent).find(css=>css.includes('--tw-translate-x'))||''");
++ if(generatedCss)fs.writeFileSync(path.join(out,'qa-tailwind.css'),generatedCss);
+  const shot=await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true});fs.writeFileSync(path.join(out,'registration-'+theme+'.png'),shot.toPNG());
+  win.destroy();return {theme,checks:results};
+ }

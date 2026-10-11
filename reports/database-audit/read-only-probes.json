@@ -1,0 +1,32 @@
+[
+  {
+    "table": "system_config",
+    "select": "id",
+    "http_status": 404
+  },
+  {
+    "table": "analytics_snapshots",
+    "select": "id",
+    "http_status": 404
+  },
+  {
+    "table": "system_logs",
+    "select": "id",
+    "http_status": 404
+  },
+  {
+    "table": "nodes",
+    "select": "id,name,temp,pressure,status",
+    "http_status": 400
+  },
+  {
+    "table": "administrators",
+    "password_non_null_range": "0-1/2",
+    "http_status": 200
+  },
+  {
+    "table": "staff",
+    "password_non_null_range": "0-2/3",
+    "http_status": 200
+  }
+]

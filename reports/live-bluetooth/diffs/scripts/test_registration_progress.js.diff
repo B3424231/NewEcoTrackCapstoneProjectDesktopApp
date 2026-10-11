@@ -1,0 +1,44 @@
+--- before/scripts/test_registration_progress.js
++++ scripts/test_registration_progress.js
+@@ -104,19 +104,37 @@
+  app=harness();app.window.EcoTrackHardwareCloud.reconnect=async()=>({device_id:deviceId,wifi_status:'connected',wifi_ssid:'Changed network',ip_address:'10.0.0.4'});
+  await app.submit();assert.equal(app.calls.length,0);assert.equal(app.context.wifiConfirmedFor,null);assert.match(app.toasts.at(-1).message,/Wi-Fi connection has changed/);
+  checks.push('Changed Wi-Fi must be verified before any registration write');
+- app=harness();const reconnect=deferred();let selections=0;app.window.EcoTrackHardwareCloud.connect=async id=>{assert.equal(id,deviceId);selections++;return reconnect.promise;};
++ app=harness();const reconnect=deferred();let selections=0;app.window.EcoTrackHardwareCloud.reconnect=async id=>{assert.equal(id,deviceId);selections++;return reconnect.promise;};
++ app.window.EcoTrackHardwareCloud.connect=async()=>{throw Error('Reconnect must not open the picker');};
+  const reconnecting=app.context.reconnectRegistrationController();assert.equal(app.get('saveNodeBtn').disabled,true);assert.equal(app.get('reconnectRegistrationBtn').attributes['aria-busy'],'true');
+  await app.context.reconnectRegistrationController();assert.equal(selections,1);
+  reconnect.resolve({device_id:deviceId,wifi_status:'connected',wifi_ssid:'Fixture network',ip_address:'10.0.0.6'});await reconnecting;
+  assert.equal(app.get('nodeFormName').value,'Receiver lab');assert.equal(app.get('nodeFormRoom').value,'r1');assert.equal(app.get('nodeFormPassword').value,'fixture-password');
+  assert.equal(app.get('registrationCloudStatus').dataset.state,'pending');assert.equal(app.calls.length,0);assert.equal(app.get('saveNodeBtn').disabled,false);
+- checks.push('Step 3 reconnect checks live identity and Wi-Fi, preserves form values, guards duplicates, and never saves automatically');
+- app=harness();app.window.EcoTrackHardwareCloud.connect=async()=>({device_id:deviceId,wifi_status:'connected',wifi_ssid:'Changed network',ip_address:'10.0.0.8'});
++ checks.push('Step 3 reconnect reuses the known device, checks live Wi-Fi, preserves values, guards duplicates, and never saves automatically');
++ app=harness();app.window.EcoTrackHardwareCloud.reconnect=async()=>({device_id:deviceId,wifi_status:'connected',wifi_ssid:'Changed network',ip_address:'10.0.0.8'});
+  await app.context.reconnectRegistrationController();assert.equal(app.get('nodeFormSsid').value,'Changed network');assert.equal(app.get('nodeFormPassword').value,'');assert.equal(app.get('registrationWifiPassword').value,'');
+  checks.push('Reconnecting to a changed SSID discards the old network password');
+- app=harness();const late=deferred();app.window.EcoTrackHardwareCloud.connect=()=>late.promise;const waiting=app.context.reconnectRegistrationController();app.context.closeModal();late.resolve({device_id:deviceId,wifi_status:'connected',wifi_ssid:'New network',ip_address:'10.0.0.7'});await waiting;
++ app=harness();const late=deferred();app.window.EcoTrackHardwareCloud.reconnect=()=>late.promise;const waiting=app.context.reconnectRegistrationController();app.context.closeModal();late.resolve({device_id:deviceId,wifi_status:'connected',wifi_ssid:'New network',ip_address:'10.0.0.7'});await waiting;
+  assert.equal(app.get('nodeFormSsid').value,'Fixture network');assert.equal(app.get('nodeModal').classList.contains('hidden'),true);assert.equal(app.calls.length,0);
+  checks.push('A late reconnect reply cannot repopulate a closed wizard');
++ app=harness();app.context.reportRegistrationFailure(Object.assign(new Error('GATT read failed while the link remains connected.'),{code:'BLE_CONNECTION_FAILED',bluetooth_connected:true}));
++ assert.equal(app.get('registrationCloudStatus').dataset.state,'bluetooth_request');assert.doesNotMatch(app.get('summaryStatusBadge').textContent,/disconnected/);
++ assert.equal(app.get('chooseRegistrationBtn').classList.contains('hidden'),false);
++ checks.push('A connected GATT failure requests a retry without claiming the Bluetooth link disconnected');
++ app.context.acceptLiveBluetoothInfo({device_id:deviceId,wifi_status:'connected',wifi_ssid:'Fixture network',ip_address:'10.0.0.6',cloud_status:'error',firmware_version:'cloud-ir-controller-1.3-rxtx',capabilities:{ir_receiver:true,ir_transmitter:true}});
++ assert.equal(app.get('registrationCloudStatus').dataset.state,'pending');assert.equal(app.get('nodeFormFw').value,'cloud-ir-controller-1.3-rxtx');assert.equal(app.get('nodeFormHw').value,'ESP32-S3 IR receiver + transmitter');
++ assert.equal(app.get('nodeFormIp').value,'10.0.0.6');assert.equal(app.get('nodeFormName').value,'Receiver lab');assert.equal(app.calls.length,0);
++ checks.push('A fresh device reply clears a stale Bluetooth warning and shows actual firmware and hardware capabilities without saving');
++ app.context.setRegistrationCloudStatus('failed','Actual cloud authentication failure');
++ app.context.acceptLiveBluetoothInfo({device_id:deviceId,wifi_status:'connected',wifi_ssid:'Fixture network',ip_address:'10.0.0.6',firmware_version:'actual',capabilities:{}});
++ assert.equal(app.get('registrationCloudStatus').dataset.state,'failed');assert.equal(app.get('registrationCloudMessage').textContent,'Actual cloud authentication failure');
++ checks.push('A Bluetooth reply cannot erase a genuine cloud failure or mark Supabase verified');
++ app=harness();let chooserCalls=0;app.window.EcoTrackHardwareCloud.connect=async id=>{chooserCalls++;return {device_id:id,wifi_status:'connected',wifi_ssid:'Fixture network',ip_address:'10.0.0.4'};};
++ await app.context.reconnectRegistrationController(true);assert.equal(chooserCalls,1);assert.equal(app.calls.length,0);
++ checks.push('Choosing a device again is a separate explicit action and still does not register automatically');
++ assert.match(html,/id="nodeFormFw"[^>]*readonly/);assert.match(html,/id="nodeFormHw"[^>]*readonly/);
++ checks.push('Firmware and hardware capability fields are read-only device reports');
+  for(const script of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi))if(script[1].trim())new vm.Script(script[1]);
+  fs.mkdirSync('reports/controller-workflow',{recursive:true});fs.writeFileSync('reports/controller-workflow/registration-tests.json',JSON.stringify({passed:checks.length,checks,physical_hardware_tested:false},null,2));
+  console.log('Registration progress: '+checks.length+' checks passed.');

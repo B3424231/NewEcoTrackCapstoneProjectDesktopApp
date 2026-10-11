@@ -1,0 +1,45 @@
+--- before/scripts/test_multi_brand_control_render.js
++++ scripts/test_multi_brand_control_render.js
+@@ -14,7 +14,7 @@
+  window.dbFixture={aircons:[{id:'ac-ui',asset_tag:'AC-UI',name:'Matrix',brand:'Matrix',protocol_name:'TCL112AC',node_id:'node-ui',controller_node_id:'node-ui',model:'Split Type (Inverter)'}],nodes:[{id:'node-ui',name:'ESP32 UI',room_id:null}],rooms:[],floors:[],buildings:[]};
+  window.hardwareFixture=[{node_id:'node-ui',device_id:'esp32s3-001122334455',last_seen:new Date().toISOString(),capabilities:{ir_receiver:true,ir_transmitter:true},connection_status:'online',latest_ir:{protocol:'TCL112AC',raw_count:227,frame_kind:'full_state',sequence:1,received_at:new Date().toISOString(),state:{power:true,temp:24.5,mode:'cool',fan:'high',turbo:false,source:'ir_receiver'}}}];
+  window.supabaseClient={from(table){fixtureReads++;let key,value;const q={select(){return q},order(){return q},eq(k,v){key=k;value=v;return q},async maybeSingle(){return {data:dbFixture[table].find(r=>!key||r[key]===value),error:null}},then(a,b){return Promise.resolve({data:dbFixture[table]||[],error:null}).then(a,b)}};return q;}};
+- window.EcoTrackHardwareCloud={listStatus:async()=>structuredClone(hardwareFixture),describe:()=> 'online',control:async(_node,payload)=>{if(window.fixtureControlFail)throw Error('Controller connection unavailable');fixtureWrites.push(structuredClone(payload));return {command_id:'fixture-queued',commanded_at:new Date().toISOString()};}};
++ window.EcoTrackHardwareCloud={listStatus:async()=>structuredClone(hardwareFixture),describe:()=> 'online',control:async(_node,payload)=>{window.fixtureControlTarget=_node;if(window.fixtureControlFail)throw Error('Controller connection unavailable');fixtureWrites.push(structuredClone(payload));return {command_id:'fixture-queued',commanded_at:new Date().toISOString()};}};
+  `+read('public/js/aircon-system.js')+`
+  const {AirconProfileManager,CapabilityEngine,CommandManager,NodeService}=EcoTrackAirconSystem;let activeDeviceId='AC-UI';
+  function executeCommand(command,value){window.pendingCommand=applySettings(command,value);return pendingCommand;}
+@@ -59,18 +59,30 @@
+  assert.equal(await win.webContents.executeJavaScript('masterPowerText.textContent'),'—');
+  checks.push('A different unknown AC on the same controller does not inherit the previous profile or fabricate controls.');
+  const dashboard=read('public/dashboard.html'),cut=(a,b)=>dashboard.slice(dashboard.indexOf(a),dashboard.indexOf(b,dashboard.indexOf(a)));
+- await win.webContents.executeJavaScript(cut('      function updateSingleCardDom(','      function wireCardListeners(')+cut('      function getDashboardPowerState(','      function renderDashboard(')+cut('      function wireCardListeners(','      function getDashboardPowerState(')+'\ntrue;');
++ const cardStart=dashboard.indexOf('            filtered.forEach(ac => {',dashboard.indexOf("          grid.innerHTML = '';"));
++ const renderCards=dashboard.slice(cardStart,dashboard.indexOf('          wireCardListeners(grid);',cardStart));
++ await win.webContents.executeJavaScript(cut('      function updateSingleCardDom(','      function wireCardListeners(')+cut('      function getDashboardPowerState(','      function renderDashboard(')+cut('      function wireCardListeners(','      function getDashboardPowerState(')+'\nfunction renderDashboardCards(filtered, grid) {\n'+renderCards+'\n}\ntrue;');
+  await win.webContents.executeJavaScript(`(async()=>{
+  dbFixture.aircons=[{id:'ac-ui',asset_tag:'AC-UI',name:'Matrix',brand:'Matrix',protocol_name:'FUJITSU_AC',node_id:'node-ui',controller_node_id:'node-ui',model:'Split'}];
+  hardwareFixture[0].last_seen=new Date().toISOString();hardwareFixture[0].latest_ir={protocol:'FUJITSU_AC',remote_model:3,frame_kind:'full_state',raw_count:260,sequence:5,received_at:new Date().toISOString(),state:{power:true,temp:24.25,mode:'cool',fan:'low',source:'ir_receiver'}};
+  await EcoTrackAirconSystem.syncWithDatabase();
+- const container=document.createElement('div');container.id='ac-card-AC-UI';container.innerHTML='<button class="temp-step-btn" data-device-id="AC-UI" data-action="up">+</button><b class="target-temp-val"></b><span class="ac-status-badge"></span><b class="ac-mode-val"></b><b class="ac-fan-val"></b><b class="ac-swing-val"></b><b class="ac-proto-val"></b><span class="ac-node-status-dot"></span><span class="ac-node-status-text"></span>';
+- document.body.appendChild(container);wireCardListeners(container);container.querySelector('button').click();return true;
++ const container=document.createElement('div');container.id='dashboard-name-fixture';
++ renderDashboardCards([AirconProfileManager.getById('AC-UI')],container);
++ document.body.appendChild(container);wireCardListeners(container);container.querySelector('.temp-step-btn[data-action="up"]').click();return true;
+  })()`);
+  await win.webContents.executeJavaScript("new Promise(r=>setTimeout(r,120))");
+  result=await win.webContents.executeJavaScript("fixtureWrites.at(-1)");
+  assert.equal(result.protocol,'FUJITSU_AC');assert.equal(result.state.temp,24.5);assert.equal(result.model,3);
+  checks.push('Production dashboard quick adjustment uses the exact model and quarter-degree step, without rounding the existing setpoint.');
++ const cardState = () => win.webContents.executeJavaScript("(()=>{const card=document.getElementById('ac-card-AC-UI');return {title:card.querySelector('h3').textContent,type:card.querySelector('h3 + p').textContent,footer:card.querySelector('.ac-node-name').textContent,text:card.textContent,href:card.querySelector('a').getAttribute('href'),device:card.dataset.deviceId};})()");
++ result=await cardState();assert.equal(result.title,'ESP32 UI');assert.equal(result.footer,'ESP32 UI');assert.equal(result.type,'Split');assert(!result.text.includes('Matrix')&&!result.text.includes('esp32s3-001122334455'));
++ assert.equal(result.href,'control.html?id=AC-UI');assert.equal(result.device,'AC-UI');assert.equal(await win.webContents.executeJavaScript('fixtureControlTarget'),'esp32s3-001122334455');
++ await win.webContents.executeJavaScript("(async()=>{dbFixture.nodes[0].name='Office <AC>';await EcoTrackAirconSystem.syncWithDatabase();const ac=AirconProfileManager.getById('AC-UI');updateSingleCardDom(document.getElementById('ac-card-AC-UI'),ac,NodeService.getNode(ac.node_id));return true;})()");
++ result=await cardState();assert.equal(result.title,'Office <AC>');assert.equal(result.footer,'Office <AC>');assert.equal(result.device,'AC-UI');assert.equal(result.href,'control.html?id=AC-UI');
++ assert.equal(await win.webContents.executeJavaScript("document.getElementById('ac-card-AC-UI').querySelector('h3').children.length"),0);
++ await win.webContents.executeJavaScript("(async()=>{dbFixture.nodes[0].name=hardwareFixture[0].device_id;await EcoTrackAirconSystem.syncWithDatabase();const ac=AirconProfileManager.getById('AC-UI');updateSingleCardDom(document.getElementById('ac-card-AC-UI'),ac,NodeService.getNode(ac.node_id));return true;})()");
++ result=await cardState();assert.equal(result.title,'AC Controller');assert.equal(result.footer,'AC Controller');assert(!result.text.includes('esp32s3-001122334455'));
++ checks.push('Initial dashboard cards and in-place name edits use the saved controller display name, hide manufacturer/raw IDs, escape custom text, and retain stable command targets.');
+ 
+  assert.deepEqual(errors,[]);fs.writeFileSync(path.join(out,'control-native-results.json'),JSON.stringify({passed:checks.length,checks,physical_hardware_tested:false},null,2));win.destroy();console.log('Dynamic production controls: '+checks.length+' native scenario groups passed.');app.exit(0);
+ }).catch(e=>{console.error(e);app.exit(1);});

@@ -1,0 +1,13 @@
+{
+  "board": "esp32:esp32:heltec_wireless_stick_lite_V3",
+  "esp32_core": "3.3.12",
+  "irremoteesp8266": "2.9.0",
+  "source": "reports\\cloud-hardware\\EcoTrackCloudReceiver.ino.txt",
+  "sha256": "ad1241cd86b49b1678ea90e16de87a43526205b1899540e0e9bb654d6c32435d",
+  "compiled": true,
+  "uploaded": false,
+  "program_bytes": 1575060,
+  "program_max_bytes": 3342336,
+  "static_ram_bytes": 57764,
+  "static_ram_max_bytes": 327680
+}

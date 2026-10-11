@@ -152,9 +152,70 @@ test(
 );
 
 test(
-  'maintenance-modal.js: Cleared of Carlos Rivera default staffName',
-  !maintCode.includes("staffName: 'Carlos Rivera'"),
-  'Still contains Carlos Rivera in maintenance-modal.js'
+  'telemetry-new.js: Visual demo simulator loop removed',
+  !telemCode.includes('UI_CADENCE_MS') && !telemCode.includes('lastUIUpdateMap'),
+  'Still contains fake telemetry generator loop'
+);
+
+// 5. node-sync.js
+const syncPath = path.join(__dirname, '../public/js/node-sync.js');
+const syncCode = fs.readFileSync(syncPath, 'utf8');
+test(
+  'node-sync.js: Fake historical telemetry generation removed',
+  !syncCode.includes('tempOffset = (Math.random()'),
+  'Still generates fake historical telemetry'
+);
+test(
+  'node-sync.js: Fake background cadence telemetry generation removed',
+  !syncCode.includes('Math.round(baseTemp + (Math.random()'),
+  'Still generates fake cadence telemetry'
+);
+
+// 6. nodes.html
+const nodesPath = path.join(__dirname, '../public/nodes.html');
+const nodesCode = fs.readFileSync(nodesPath, 'utf8');
+test(
+  'nodes.html: Hardcoded mock buildings/rooms fallbacks removed',
+  !nodesCode.includes('Science & Research Wing') && !nodesCode.includes('Clean Room Alpha'),
+  'Still contains mock buildings or rooms'
+);
+test(
+  'nodes.html: Simulated Math.random ping latency removed',
+  !nodesCode.includes('baseLatency = Math.floor(Math.random()'),
+  'Still uses Math.random() for ping latency'
+);
+
+// 7. control.html
+const controlPath = path.join(__dirname, '../public/control.html');
+const controlCode = fs.readFileSync(controlPath, 'utf8');
+test(
+  'control.html: Hardcoded Server Room A AC in error modal removed',
+  !controlCode.includes('Server Room A AC'),
+  'Still contains hardcoded Server Room A AC'
+);
+test(
+  'control.html: Simulated Math.random ping latency removed',
+  !controlCode.includes('latencyMs = Math.floor(Math.random()'),
+  'Still uses Math.random() for ping latency'
+);
+
+// 8. staff.js and staff.html
+test(
+  'staff.js: Fallback mock buildings/rooms removed',
+  !staffJsCode.includes('Main Office Area'),
+  'Still contains Main Office Area fallback'
+);
+test(
+  'staff.html: Static mock room options removed',
+  !staffHtmlCode.includes('Main Office Area'),
+  'Still contains static Main Office Area options'
+);
+
+// 9. supabase-client.js
+test(
+  'supabase-client.js: Fake ID Math.random generation removed',
+  !sbCode.includes("fakeId = 'telem_' + Math.random()") && !sbCode.includes("Math.random().toString(36).substring(2, 11)"),
+  'Still fabricates fake IDs on database failure'
 );
 
 console.log('\n══════════════════════════════════════════════════');

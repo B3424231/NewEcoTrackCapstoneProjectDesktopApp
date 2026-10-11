@@ -1,0 +1,9 @@
+{
+  "bodyText": "EcoTrack\nWelcome back! Please login to your account.\nPHONE, EMAIL, OR USERNAME\nPASSWORD\nRemember me\nForgot Password?\nLOGIN",
+  "errors": [],
+  "viewport": {
+    "width": 378,
+    "height": 762
+  },
+  "authenticatedDeviceFlows": "Not exercised; no phone or admin credentials supplied"
+}

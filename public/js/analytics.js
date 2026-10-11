@@ -657,12 +657,12 @@ async function exportPDF() {
     const roomMap = {};
     roomsList.forEach(r => roomMap[r.id] = r.name);
 
-    // ── Resolve the currently selected sensor ──────────────────────────────
+    // ── Resolve the currently selected control ──────────────────────────────
     const isFiltered = selectedNodeId && selectedNodeId !== 'all';
     const selectedNode = isFiltered ? nodesData[selectedNodeId] : null;
-    const sensorLabel = isFiltered && selectedNode
+    const controlLabel = isFiltered && selectedNode
       ? selectedNode.name
-      : 'All AC Sensor Nodes';
+      : 'All AC Control Nodes';
 
     // Filter the node list for the directory page
     const exportNodes = isFiltered
@@ -701,7 +701,7 @@ async function exportPDF() {
       doc.setDrawColor(...P.bdr); doc.setLineWidth(0.3);
       doc.line(M, H - 14, W - M, H - 14);
       doc.setFontSize(8); doc.setTextColor(...P.gr); doc.setFont('helvetica', 'normal');
-      doc.text('EcoTrack Analytics Report  |  Sensor: ' + sensorLabel, M, H - 9);
+      doc.text('EcoTrack Analytics Report  |  Control: ' + controlLabel, M, H - 9);
       doc.text('Page ' + pn + ' of ' + tot, W - M, H - 9, { align: 'right' });
     }
 
@@ -715,9 +715,9 @@ async function exportPDF() {
       doc.text('Generated: ' + new Date().toLocaleString(), W - M, 12, { align: 'right' });
       doc.text('Period: ' + selectedDate, W - M, 18, { align: 'right' });
 
-      // Sensor filter badge — highlighted green if a specific sensor is selected
+      // Control filter badge — highlighted green if a specific control is selected
       if (isFiltered) {
-        const badge = 'Sensor: ' + sensorLabel;
+        const badge = 'Control: ' + controlLabel;
         doc.setFontSize(9); doc.setFont('helvetica', 'bold');
         const badgeW = doc.getTextWidth(badge) + 8;
         doc.setFillColor(16, 185, 129);
@@ -727,7 +727,7 @@ async function exportPDF() {
       } else {
         doc.setFontSize(9); doc.setFont('helvetica', 'normal');
         doc.setTextColor(...P.gr);
-        doc.text('Sensor: All AC Sensor Nodes', M, 26);
+        doc.text('Control: All AC Control Nodes', M, 26);
       }
 
       doc.setDrawColor(...P.cyan); doc.setLineWidth(0.4);
@@ -815,20 +815,20 @@ async function exportPDF() {
     var tsi = getChart('tempStabilityChart');
     if (tsi) doc.addImage(tsi, 'PNG', M + hw + 8, y, hw, 80);
 
-    // ═══ PAGE 4: Node Directory (filtered to selected sensor) ═══
+    // ═══ PAGE 4: Node Directory (filtered to selected control) ═══
     doc.addPage(); drawBg();
     const dirTitle = isFiltered
-      ? 'AC Sensor: ' + sensorLabel
-      : 'AC Sensor Node Directory';
+      ? 'AC Control: ' + controlLabel
+      : 'AC Control Node Directory';
     y = drawHeader(dirTitle);
 
     var assignedNodes = exportNodes.filter(function (n) { return !!n.room_id; });
     var onl = assignedNodes.filter(function (n) { return n.status === 'online' || n.status === 'active'; }).length;
     doc.setFontSize(10); doc.setTextColor(...P.gr); doc.setFont('helvetica', 'normal');
 
-    // Show sensor scope note
+    // Show control scope note
     const scopeNote = isFiltered
-      ? 'Showing data for sensor: ' + sensorLabel
+      ? 'Showing data for control: ' + controlLabel
       : onl + ' of ' + assignedNodes.length + ' nodes online';
     doc.text(scopeNote, M, y);
     y += 6;
@@ -858,7 +858,7 @@ async function exportPDF() {
 
     doc.autoTable({
       startY: y,
-      head: [['AC Sensor Node', 'Room', 'Status', 'Temperature', 'Airflow Pressure', 'Battery', 'Signal']],
+      head: [['AC Control Node', 'Room', 'Status', 'Temperature', 'Airflow Pressure', 'Battery', 'Signal']],
       body: tbl,
       margin: { left: M, right: M },
       theme: 'plain',
@@ -889,12 +889,12 @@ async function exportPDF() {
     var tot = doc.internal.getNumberOfPages();
     for (var p = 1; p <= tot; p++) { doc.setPage(p); drawFooter(p, tot); }
 
-    // Filename includes the sensor name when filtered
-    const safeSensorName = isFiltered
-      ? '_' + sensorLabel.replace(/[^a-zA-Z0-9-_]/g, '_')
+    // Filename includes the control name when filtered
+    const safeControlName = isFiltered
+      ? '_' + controlLabel.replace(/[^a-zA-Z0-9-_]/g, '_')
       : '';
-    doc.save('EcoTrack_Analytics' + safeSensorName + '_' + new Date().toISOString().slice(0, 10) + '.pdf');
-    addLog('Analytics PDF Report exported successfully' + (isFiltered ? ' for ' + sensorLabel : ''));
+    doc.save('EcoTrack_Analytics' + safeControlName + '_' + new Date().toISOString().slice(0, 10) + '.pdf');
+    addLog('Analytics PDF Report exported successfully' + (isFiltered ? ' for ' + controlLabel : ''));
 
   } catch (error) {
     console.error('Could not export PDF:', error);
@@ -998,68 +998,8 @@ function initNodeSelector() {
     activeNodesCountEl.textContent = `Monitoring ${activeNodes} nodes`;
   }
 
-  const saveBtn = document.getElementById('saveSnapshotBtn');
-  if (saveBtn) {
-    saveBtn.addEventListener('click', async () => {
-      saveBtn.disabled = true;
-      saveBtn.textContent = 'Saving...';
-      try {
-        const dateKey = document.getElementById('dateRangeSelect').value || new Date().toISOString().split('T')[0];
-        const res = await fetch(`http://127.0.0.1:5000/api/analytics/snapshot?date=${dateKey}`, { method: 'POST' });
-        if (res.ok) {
-          if (typeof showNotification === 'function') showNotification('Snapshot saved successfully!');
-          await loadAnalyticsSnapshot(dateKey);
-        }
-      } catch (e) {
-        console.error(e);
-        if (typeof showNotification === 'function') showNotification('Failed to save snapshot', 'error');
-      }
-      saveBtn.disabled = false;
-      saveBtn.textContent = 'Save Snapshot';
-    });
-  }
-
   // Initialize Date Selector
   initDateSelector();
-}
-
-async function loadAnalyticsSnapshot(dateKey) {
-  try {
-    let items = [];
-    if (sb) {
-      const { data, error } = await sb.from('analytics_snapshots').select('*').eq('date', dateKey).limit(50);
-      if (!error && data) items = data;
-    }
-
-    const metricsEl = document.getElementById('snapshotMetrics');
-    if (metricsEl) {
-      if (items.length > 0) {
-        metricsEl.classList.remove('hidden');
-
-        let avgT = 0, avgP = 0, avgB = 0, alerts = 0, health = 0, compliance = 0;
-        items.forEach(item => {
-          avgT += item.avg_temp || 0;
-          avgP += item.avg_pressure || 0;
-          avgB += item.avg_battery || 0;
-          alerts += item.alerts_count || 0;
-          health += item.health_score || 0;
-          compliance += item.compliance_rate || 0;
-        });
-
-        const c = items.length;
-        document.getElementById('snapAvgTemp').textContent = (avgT / c).toFixed(1) + '°C';
-        document.getElementById('snapAvgPress').textContent = (avgP / c).toFixed(1) + 'kPa';
-        document.getElementById('snapAvgBat').textContent = Math.round(((avgB / c) / 4.2) * 100) + '%';
-        document.getElementById('snapAlerts').textContent = alerts;
-        document.getElementById('snapHealth').textContent = Math.round(health / c) + '/100';
-        document.getElementById('snapCompliance').textContent = Math.round(compliance / c) + '%';
-      } else {
-        metricsEl.classList.add('hidden');
-      }
-    }
-  } catch (e) {
-    console.warn('Failed to load snapshot:', e);
-  }
 }
 
 function initDateSelector() {
@@ -1120,18 +1060,7 @@ function initDateSelector() {
     await updateMultiNodeData();
     await initAnalytics();
 
-    // Load snapshot for the selected date (skip for 'all')
-    const dateKey = document.getElementById('dateRangeSelect').value;
-    if (dateKey && dateKey !== 'all') {
-      loadAnalyticsSnapshot(dateKey);
-    }
   });
-
-  // Load snapshot on initial load only for a specific date, not 'all'
-  const initialVal = dateSelect.value;
-  if (initialVal && initialVal !== 'all') {
-    loadAnalyticsSnapshot(initialVal);
-  }
 }
 
 function updateMultiNodeSummary() {
@@ -1175,9 +1104,9 @@ function updateMultiNodeSummary() {
     criticalAlertsEl.textContent = criticalCount;
   }
 
-  const activeSensorsBadge = document.getElementById('activeSensorsBadge');
-  if (activeSensorsBadge) {
-    activeSensorsBadge.textContent = activeNodes.length;
+  const activeControlsBadge = document.getElementById('activeControlsBadge');
+  if (activeControlsBadge) {
+    activeControlsBadge.textContent = activeNodes.length;
   }
 
   const activeUnitsStatusEl = document.getElementById('activeUnitsStatus');
@@ -1322,7 +1251,7 @@ function updateNodeDetails() {
   // Update the node name label (if it exists in the DOM)
   const nodeName = document.getElementById('currentNodeName');
   if (nodeName) {
-    nodeName.textContent = selectedNodeId === 'all' ? 'All AC Sensor Nodes' : node.name;
+    nodeName.textContent = selectedNodeId === 'all' ? 'All AC Control Nodes' : node.name;
   }
 
   // KPI stats — use the selected node's latest values
@@ -1500,7 +1429,28 @@ async function initRuleComplianceBenchmarking() {
 
     let notificationsResult = [];
 
-    if (sb) {
+    if (window.electron && typeof window.electron.invoke === 'function') {
+      try {
+        const [rData, notifRes] = await Promise.all([
+          window.electron.invoke('rules-fetch-data'),
+          window.electron.invoke('notifications-fetch-all')
+        ]);
+        if (rData && rData.success) {
+          roomsResult = rData.rooms || [];
+          rulesResult = rData.rules || [];
+          nodesResult = rData.nodes || [];
+          floorsResult = rData.floors || [];
+          buildingsResult = rData.buildings || [];
+        }
+        if (notifRes && notifRes.success) {
+          notificationsResult = notifRes.data || [];
+        }
+      } catch (ipcErr) {
+        console.warn('IPC fetch error in analytics.js, fallback to sb:', ipcErr);
+      }
+    }
+
+    if (!rulesResult.length && sb) {
       const [rRes, rulRes, nRes, fRes, bRes, notifRes] = await Promise.all([
         sb.from('rooms').select('*').order('created', { ascending: false }),
         sb.from('rules').select('*').order('created', { ascending: false }),
@@ -1605,35 +1555,16 @@ function formatTitleCase(str) {
     return;
   }
 
-  // Use ALL rules (including disabled) for violation tracking/chart so
-  // historical violation data is preserved for transparency and auditability.
-  // Disabling a rule only stops future alert triggers, not historical counts.
-  const enabledRules = rules;
-  // Build latestByNode: always overwrite so the LAST entry (latest timestamp
-  // when items are sorted ascending) wins for each node.
-  const latestByNode = {};
-  telemetryItems.forEach(item => {
-    if (item.node_id) latestByNode[item.node_id] = item;
-  });
-
-  // Fallback to Supabase live nodes table data
-  allNodes.forEach(n => {
-    const currentReading = {
-      node_id: n.name || n.id,
-      temperature: n.temp ?? n.temperature ?? 0,
-      temp: n.temp ?? n.temperature ?? 0,
-      battery: n.battery ?? 100,
-      pressure: n.pressure ?? 0,
-      status: n.status || 'online'
-    };
-    if (n.name && !latestByNode[n.name]) latestByNode[n.name] = currentReading;
-    if (n.id && !latestByNode[n.id]) latestByNode[n.id] = currentReading;
-  });
+  // Filter ONLY actively enabled rules!
+  // A rule that is disabled in the rules modal must NEVER evaluate violations,
+  // count breaches against live telemetry, or trigger violation records.
+  const activeEnabledRules = rules.filter(r => isRuleActiveAndEnabled(r));
+  const disabledRuleIds = new Set(rules.filter(r => !isRuleActiveAndEnabled(r)).map(r => String(r.id)));
 
   // Environmental / compliance violation rules (temperature threshold alerts)
   // Note: Battery rules are device notifications only, NOT room violations.
-  const complianceViolationRules = enabledRules.filter(r => r.type !== 'battery');
-  const batteryRuleIds = new Set(enabledRules.filter(r => r.type === 'battery').map(r => String(r.id)));
+  const complianceViolationRules = activeEnabledRules.filter(r => r.type !== 'battery');
+  const batteryRuleIds = new Set(rules.filter(r => r.type === 'battery').map(r => String(r.id)));
 
   const roomLabels = [];
   const complianceValues = [];
@@ -1654,7 +1585,8 @@ function formatTitleCase(str) {
     let nodesViolating = 0;
     const violatingNodeKeys = new Set();
 
-    // Collect rule IDs and node identifiers for this room (only environmental compliance rules)
+    // Collect all configured rule IDs (active and historical) and node identifiers for this room
+    const allRoomRuleIds = new Set(rules.filter(r => r.room_id === room.id || r.room === room.id).map(r => String(r.id)));
     const roomRuleIds = new Set(complianceViolationRules.filter(r => r.room_id === room.id || r.room === room.id).map(r => String(r.id)));
     const roomNodeKeys = new Set();
     parsedNodes.forEach(node => {
@@ -1685,35 +1617,57 @@ function formatTitleCase(str) {
     });
 
     // Count all triggered notifications for this room (each notification = 1 violation)
-    // Note: Battery alerts and schedule notices are notifications only, NOT violations
+    // Note: Battery alerts and routine schedule notices (wake/sleep) are NOT room violations.
+    // Historical violations must be preserved even if the specific rule is currently disabled.
     const roomTriggeredNotifs = notificationsList.filter(notif => {
       if (notif.triggered === false) return false;
 
       // Battery alerts are device notifications only, NOT room violations
       if (isBatteryNotification(notif, batteryRuleIds)) return false;
 
-      // Routine schedule alerts are notifications only, NOT room violations
+      // Routine schedule alerts (wake up, sleep time, schedules) are NOT room violations
       if (isRoutineScheduleNotification(notif)) return false;
 
-      // 1. Direct room ID match
-      if (notif.room_id && String(notif.room_id) === String(room.id)) return true;
-      if (notif.roomId && String(notif.roomId) === String(room.id)) return true;
-      if (notif.room && String(notif.room) === String(room.id)) return true;
+      // Must match this room
+      const matchesRoom = (
+        (notif.room_id && String(notif.room_id) === String(room.id)) ||
+        (notif.roomId && String(notif.roomId) === String(room.id)) ||
+        (notif.room && String(notif.room) === String(room.id))
+      );
 
-      // 2. Rule ID match (only environmental compliance rules)
-      if (notif.rule_id && roomRuleIds.has(String(notif.rule_id))) return true;
+      // 1. Direct rule ID match (environmental compliance rules)
+      if (notif.rule_id && allRoomRuleIds.has(String(notif.rule_id))) return true;
 
-      // 3. Node ID match
-      const notifNode = notif.node_id || notif.node || notif.sensor;
-      if (notifNode && roomNodeKeys.has(String(notifNode).toLowerCase())) return true;
-
-      // 4. Content text match for node name or room name
-      const text = String(notif.content || notif.message || '').toLowerCase();
-      for (const nKey of roomNodeKeys) {
-        if (nKey && text.includes(nKey)) return true;
+      // 2. Direct room match: ONLY if content is an environmental threshold breach
+      if (matchesRoom) {
+        const text = String(notif.content || notif.message || '').toLowerCase();
+        const isViolationContent = (
+          text.includes('temperature') ||
+          text.includes('temp ') ||
+          text.includes('threshold') ||
+          text.includes('breach') ||
+          text.includes('went above') ||
+          text.includes('went below') ||
+          text.includes('condition:')
+        );
+        if (isViolationContent) return true;
       }
-      if (room.name && text.includes(String(room.name).toLowerCase())) return true;
-      if (room.roomName && text.includes(String(room.roomName).toLowerCase())) return true;
+
+      // 3. Node ID match (only if explicit violation content)
+      const notifNode = notif.node_id || notif.node || notif.control;
+      if (notifNode && roomNodeKeys.has(String(notifNode).toLowerCase())) {
+        const text = String(notif.content || notif.message || '').toLowerCase();
+        const isViolationContent = (
+          text.includes('temperature') ||
+          text.includes('temp ') ||
+          text.includes('threshold') ||
+          text.includes('breach') ||
+          text.includes('went above') ||
+          text.includes('went below') ||
+          text.includes('condition:')
+        );
+        if (isViolationContent) return true;
+      }
 
       return false;
     });
@@ -1728,7 +1682,7 @@ function formatTitleCase(str) {
           violatingNodeKeys.add(nKey);
         }
       }
-      const notifNode = notif.node_id || notif.node || notif.sensor;
+      const notifNode = notif.node_id || notif.node || notif.control;
       if (notifNode && roomNodeKeys.has(String(notifNode).toLowerCase())) {
         violatingNodeKeys.add(String(notifNode).toLowerCase());
       }
@@ -1976,8 +1930,18 @@ function getApplicableRules(rules, roomId, nodeId, nodePbId = null) {
   });
 }
 
+function isRuleActiveAndEnabled(rule) {
+  if (!rule) return false;
+  if (rule.enabled === false || rule.enabled === 'false' || rule.enabled === 0) return false;
+  if (rule.active === false || rule.active === 'false' || rule.active === 0) return false;
+  if (rule.status === 'disabled' || rule.status === 'inactive') return false;
+  return true;
+}
+
 function isRuleViolated(rule, telemetry) {
   if (!telemetry || !rule) return false;
+  // A rule that is disabled in the rules modal must NEVER evaluate violations
+  if (!isRuleActiveAndEnabled(rule)) return false;
 
   // Battery rules are device notifications only, NOT compliance violations
   if (rule.type === 'battery') return false;
@@ -1995,15 +1959,29 @@ function isRuleViolated(rule, telemetry) {
 }
 
 function isBatteryNotification(notif, batteryRuleIds = new Set()) {
+  if (!notif) return false;
   if (notif.rule_id && batteryRuleIds.has(String(notif.rule_id))) return true;
-  const text = String(notif.content || notif.message || '').toLowerCase();
+  const text = String(notif.content || notif.message || notif.title || '').toLowerCase();
   if (text.includes('battery')) return true;
   return false;
 }
 
 function isRoutineScheduleNotification(notif) {
-  const text = String(notif.content || notif.message || '').toLowerCase();
-  return text.includes('sensor wake up') || text.includes('sensor sleep') || text.includes('schedule applied');
+  if (!notif) return false;
+  if (notif.type === 'schedule' || notif.category === 'schedule' || notif.is_schedule) return true;
+  if (notif.type === 'wake' || notif.type === 'sleep' || notif.type === 'system') return true;
+
+  const text = String(notif.content || notif.message || notif.title || '').toLowerCase();
+  return (
+    text.includes('wake') ||
+    text.includes('sleep') ||
+    text.includes('schedule') ||
+    text.includes('scheduled') ||
+    text.includes('scheduler') ||
+    text.includes('interval') ||
+    text.includes('cycle') ||
+    text.includes('routine')
+  );
 }
 
 function normalizeTemperatureRuleValue(value, unit) {

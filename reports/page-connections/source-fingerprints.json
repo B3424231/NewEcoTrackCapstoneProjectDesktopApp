@@ -1,0 +1,42 @@
+{
+  "public/js/aircon-system.js": {
+    "added": 203,
+    "removed": 486,
+    "sha256": "b343aeec34badf8078cbaae488f59457f27ae0ecc7c2f22115eb10b674ba3b8c"
+  },
+  "public/js/scheduler.js": {
+    "added": 100,
+    "removed": 146,
+    "sha256": "b82d1e56e32b5aa42fc8a2bf5cc45f16e0e930b54a94680a60f3ddf6fedd995b"
+  },
+  "public/nodes.html": {
+    "added": 161,
+    "removed": 129,
+    "sha256": "4262a8bff79b2e0af102b81f6817538e4e887b11bfe8275b64631b49e4937a9a"
+  },
+  "public/control.html": {
+    "added": 28,
+    "removed": 12,
+    "sha256": "3bdf9ab942a564e14a1567044c47826314db41d2f3d1176ca4ac4adfbdd69f0a"
+  },
+  "public/dashboard.html": {
+    "added": 14,
+    "removed": 14,
+    "sha256": "6f560fe8dee58f5102d118c47080970df3ebaa863e36f26789fa4d6198eefab9"
+  },
+  "public/ir-profiles.html": {
+    "added": 17,
+    "removed": 9,
+    "sha256": "a2f82c1c669b212bdf4c9fd195d8c8b950a60dc763200502e6c1a3b0d00b008c"
+  },
+  "public/ir-library.html": {
+    "added": 81,
+    "removed": 33,
+    "sha256": "ecd28310d718457de1da2962cf03ef47a2c92a9149706ade3b4c91925842f0ea"
+  },
+  "public/aircons.html": {
+    "added": 3,
+    "removed": 2,
+    "sha256": "f1beb2387688dccd2eac3849db7c5d24e58c7a031ce88f01db0d005eaa9f8457"
+  }
+}

@@ -1,0 +1,110 @@
+--- before/public/js/logs.js
++++ public/js/logs.js
+@@ -443,6 +443,29 @@
+ }
+ 
+ // Setup event listeners
++async function clearAllTelemetryHistory() {
++  const client = window.supabaseClient || window.sb;
++  if (!client || typeof client.from !== 'function') throw new Error('Connect to Supabase before clearing history.');
++  const backendUrl = window.ECOTRACK_CONFIG?.backendUrl || 'http://localhost:5000';
++  let response;
++  try { response = await fetch(backendUrl + '/api/telemetry', {method:'DELETE'}); }
++  catch (_) { throw new Error('Could not reach the telemetry service. Check its connection and try again.'); }
++  if (!response.ok) throw new Error('The telemetry service could not confirm deletion (HTTP ' + response.status + ').');
++  const result = await response.json();
++  if (result?.success !== true) throw new Error(result?.error || 'The telemetry service could not confirm deletion.');
++  try {
++    const cloud = await client.from('telemetry').delete().neq('id','___none___');
++    if (cloud.error) throw cloud.error;
++  } catch (error) {
++    throw new Error('Local history was cleared, but cloud history could not be cleared. ' + (error?.message || 'Check the connection and retry.'));
++  }
++  window.EcoTrackAirconSystem?.CentralLogService?.clearLogs?.();
++  nodeDataLogs = []; lastTelemetryTotalItems = 0; currentPage = 1;
++  render();
++  window.EcoDataBus?.invalidate('telemetry');
++  window.dispatchEvent(new CustomEvent('ecotrack:telemetry-saved', {detail:{cleared:true}}));
++}
++
+ function setupEventListeners() {
+   // Centralized period switcher that syncs throughout entire page
+   window.setPeriod = function(period) {
+@@ -630,72 +653,12 @@
+     });
+   }
+ 
+-  // Clear All Logs button handler
++  // Clear All Logs uses an in-app confirmation with progress and error states.
+   const clearAllLogsBtn = document.getElementById('clearAllLogsBtn');
+-  if (clearAllLogsBtn) {
+-    clearAllLogsBtn.addEventListener('click', async () => {
+-      const confirmed = confirm('Are you sure you want to permanently clear all telemetry and daily logs? This will erase historical records and reset the analytics audit.');
+-      if (!confirmed) return;
+-
+-      clearAllLogsBtn.disabled = true;
+-      const btnText = document.getElementById('clearAllLogsBtnText');
+-      const origText = btnText ? btnText.textContent : 'Clear All Logs';
+-      if (btnText) btnText.textContent = 'Clearing...';
+-
+-      try {
+-        const backendUrl = window.ECOTRACK_CONFIG?.backendUrl || 'http://localhost:5000';
+-
+-        // 1. Clear local SQLite telemetry backend
+-        try {
+-          await fetch(`${backendUrl}/api/telemetry`, { method: 'DELETE' });
+-        } catch (e) {
+-          console.warn('Backend SQLite telemetry reset notice:', e);
+-        }
+-
+-        // 2. Clear Supabase telemetry table
+-        const sb = window.supabaseClient || window.sb;
+-        if (sb && typeof sb.from === 'function') {
+-          try {
+-            await sb.from('telemetry').delete().neq('id', '___none___');
+-          } catch (e) {
+-            console.warn('Supabase telemetry deletion notice:', e);
+-          }
+-        }
+-
+-        // 3. Clear CentralLogService logs
+-        if (window.EcoTrackAirconSystem?.CentralLogService?.clearLogs) {
+-          window.EcoTrackAirconSystem.CentralLogService.clearLogs();
+-        }
+-
+-        // 4. Reset in-memory state
+-        nodeDataLogs = [];
+-        lastTelemetryTotalItems = 0;
+-        currentPage = 1;
+-
+-        // 5. Re-render UI and invalidate bus caches
+-        render();
+-        if (window.EcoDataBus) {
+-          window.EcoDataBus.invalidate('telemetry');
+-        }
+-        window.dispatchEvent(new CustomEvent('ecotrack:telemetry-saved', { detail: { cleared: true } }));
+-
+-        if (window.EcoToast) {
+-          window.EcoToast.show('All telemetry and daily logs were permanently cleared.', 'success');
+-        } else {
+-          alert('All telemetry and daily logs were permanently cleared.');
+-        }
+-      } catch (err) {
+-        console.error('Error clearing logs:', err);
+-        if (window.EcoToast) {
+-          window.EcoToast.show('Failed to clear logs: ' + err.message, 'error');
+-        } else {
+-          alert('Failed to clear logs: ' + err.message);
+-        }
+-      } finally {
+-        clearAllLogsBtn.disabled = false;
+-        if (btnText) btnText.textContent = origText;
+-      }
+-    });
++  if (clearAllLogsBtn && window.EcoTrackClearLogsDialog) {
++    window.EcoTrackClearLogsDialog.attach(clearAllLogsBtn, clearAllTelemetryHistory);
++  } else if (clearAllLogsBtn) {
++    clearAllLogsBtn.disabled = true;
+   }
+ 
+   let downloadProgressInterval = null;

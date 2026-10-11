@@ -1,0 +1,18 @@
+{
+  "engine": "PGlite PostgreSQL",
+  "passed": 10,
+  "checks": [
+    "Migration executes twice on PostgreSQL and registers one named five-minute cleanup job in the cron fixture.",
+    "Fresh transmission receipts survive cleanup so UI reads, acknowledgement retries and request retries remain valid.",
+    "All four old terminal statuses are deleted while the AC result, desired OFF, latest remote OFF and controller registration stay intact.",
+    "A late ACK after cleanup keeps a valid ESP32 connected without recreating a command; cross-device and missing-ID ACKs remain denied.",
+    "Valid queued and claimed commands survive cleanup, including an old-created row whose expiry is still in the future.",
+    "Offline overdue commands become expired with a readable failure receipt and matching queued AC requests become Failed.",
+    "Expiry of an older command cannot fail a newer AC request.",
+    "Anonymous devices and browser users cannot call the owner-only cleanup routine.",
+    "Only old completed runs for this cleanup job are pruned; unrelated and running cron jobs stay intact.",
+    "Large backlogs drain in bounded batches and repeated cleanup remains safe."
+  ],
+  "cron_execution": "Catalog/schedule fixture; real pg_cron deployment still required",
+  "live_supabase_modified": false
+}

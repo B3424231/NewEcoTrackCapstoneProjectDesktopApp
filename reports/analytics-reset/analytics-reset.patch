@@ -1,0 +1,1588 @@
+--- before/backend/app.py
++++ after/backend/app.py
+@@ -80,6 +80,9 @@
+             conn.execute('''CREATE TABLE IF NOT EXISTS cloud_sync_state (
+                 source TEXT PRIMARY KEY, cursor_created TEXT NOT NULL, cursor_id TEXT NOT NULL
+             )''')
++            conn.execute('''CREATE TABLE IF NOT EXISTS telemetry_local_reset (
++                id INTEGER PRIMARY KEY CHECK (id = 1), deleted_through TEXT NOT NULL
++            )''')
+         print(f"[*] SQLite3 Sensor Logs Database initialized at: {SQLITE_DB_PATH}")
+     finally:
+         conn.close()
+@@ -292,19 +295,54 @@
+     return json.dumps(value, separators=(',', ':'))
+ 
+ 
++def normalize_telemetry_timestamp(value):
++    # Store comparable UTC timestamps; malformed timestamps are not telemetry.
++    logged = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
++    if logged.tzinfo is None:
++        logged = logged.replace(tzinfo=timezone.utc)
++    return logged.astimezone(timezone.utc).isoformat()
++
++
++def telemetry_reset_at(conn):
++    row = conn.execute('SELECT deleted_through FROM telemetry_local_reset WHERE id=1').fetchone()
++    return normalize_telemetry_timestamp(row[0]) if row else None
++
++
++def reset_local_telemetry():
++    # Clear analytics history and persist the boundary against old cloud imports.
++    with _telemetry_sync_lock:
++        conn = get_db_connection()
++        try:
++            with conn:
++                conn.execute('BEGIN IMMEDIATE')
++                cutoff = datetime.now(timezone.utc).isoformat()
++                previous = telemetry_reset_at(conn)
++                if previous and previous > cutoff:
++                    cutoff = previous
++                removed = conn.execute('DELETE FROM telemetry').rowcount
++                conn.execute('''INSERT INTO telemetry_local_reset (id,deleted_through) VALUES (1,?)
++                    ON CONFLICT(id) DO UPDATE SET deleted_through=excluded.deleted_through''', (cutoff,))
++                conn.execute('''INSERT INTO cloud_sync_state VALUES ('telemetry',?,'')
++                    ON CONFLICT(source) DO UPDATE SET cursor_created=excluded.cursor_created,cursor_id=excluded.cursor_id''', (cutoff,))
++            return {'success': True, 'deleted_count': removed, 'reset_at': cutoff}
++        finally:
++            conn.close()
++
++
+ def import_cloud_telemetry(records, checkpoint=None):
+     """Idempotent import of real cloud rows, preserving missing measurements and AC state."""
+     conn = get_db_connection()
+     inserted = 0
+     try:
+         with conn:
++            conn.execute('BEGIN IMMEDIATE')
++            cutoff = telemetry_reset_at(conn)
+             for item in records:
+                 if not isinstance(item, dict) or not item.get('id') or not item.get('created'):
+                     raise ValueError('Cloud telemetry must have an id and created timestamp')
+-                created = datetime.fromisoformat(str(item['created']).replace('Z', '+00:00'))
+-                if created.tzinfo is None:
+-                    created = created.replace(tzinfo=timezone.utc)
+-                created = created.astimezone(timezone.utc).isoformat()
++                created = normalize_telemetry_timestamp(item['created'])
++                if cutoff and created <= cutoff:
++                    continue
+                 def measurement(field):
+                     value = item.get(field)
+                     if value is None:
+@@ -326,7 +364,7 @@
+                     item.get('room_name') or 'Unassigned', item.get('floor_name') or 'Unassigned',
+                     item.get('building_name') or 'Unassigned', item.get('aircon_type'),
+                     measurement('temperature'), measurement('pressure'), measurement('battery'),
+-                    measurement('rssi'), item.get('status') or 'online', created, item.get('updated') or created,
++                    measurement('rssi'), item.get('status') or 'unknown', created, item.get('updated') or created,
+                     normalize_logged_ac_state(item), cadence, item.get('event_type'),
+                     item.get('wake_time'), item.get('sleep_time'), item.get('aircon_id'),
+                     serialize_control_snapshot(item.get('control_snapshot')), item.get('ac_state')))
+@@ -355,9 +393,12 @@
+         conn = get_db_connection()
+         try:
+             checkpoint = conn.execute("SELECT * FROM cloud_sync_state WHERE source='telemetry'").fetchone()
++            cutoff = telemetry_reset_at(conn)
+         finally:
+             conn.close()
+         params = {'select': '*', 'order': 'created.asc,id.asc', 'limit': '500'}
++        if cutoff:
++            params['created'] = f'gt.{cutoff}'
+         if checkpoint:
+             created = checkpoint['cursor_created']
+             record_id = checkpoint['cursor_id'].replace('\\', '\\\\').replace('"', '\\"')
+@@ -576,6 +617,7 @@
+             return {
+                 "items": items,
+                 "totalItems": total_items,
++                "reset_at": telemetry_reset_at(conn),
+                 "page": page,
+                 "perPage": per_page,
+                 "totalPages": total_pages
+@@ -595,29 +637,35 @@
+         else:
+             items_to_insert = [payload]
+ 
+-        now_iso = datetime.now().isoformat()
++        now_iso = datetime.now(timezone.utc).isoformat()
+         inserted_items = []
+ 
+         conn = get_db_connection()
+         try:
+             with conn:
++                conn.execute('BEGIN IMMEDIATE')
++                cutoff = telemetry_reset_at(conn)
+                 for item in items_to_insert:
+                     if not isinstance(item, dict) or not item:
+                         raise ValueError('Each telemetry record must be an object')
+                     record_id = item.get('id') or f"telem_{uuid.uuid4().hex[:12]}"
+-                    node_id = item.get('node_id') or item.get('id') or 'node-1'
++                    node_id = item.get('node_id') or item.get('sensor_name')
++                    if not node_id:
++                        raise ValueError('Telemetry must identify a node')
+                     sensor_name = item.get('sensor_name') or item.get('name') or node_id
+                     room_name = item.get('room_name') or 'Unassigned'
+                     floor_name = item.get('floor_name') or 'Unassigned'
+-                    building_name = item.get('building_name') or 'Main Campus Building'
+-                    aircon_type = item.get('aircon_type') or 'Split Type (Inverter)'
++                    building_name = item.get('building_name') or 'Unassigned'
++                    aircon_type = item.get('aircon_type')
+                     temperature = telemetry_measurement(item, 'temperature', 'temp')
+                     pressure = telemetry_measurement(item, 'pressure')
+                     battery = telemetry_measurement(item, 'battery')
+                     rssi = telemetry_measurement(item, 'rssi')
+-                    status = item.get('status', 'online')
+-                    created = item.get('created') or now_iso
+-                    updated = item.get('updated') or now_iso
++                    status = item.get('status') or 'unknown'
++                    created = normalize_telemetry_timestamp(item.get('created') or now_iso)
++                    if cutoff and created <= cutoff:
++                        raise ValueError('Telemetry timestamp is at or before the analytics reset')
++                    updated = normalize_telemetry_timestamp(item.get('updated') or now_iso)
+                     ac_on = normalize_logged_ac_state(item)
+                     try:
+                         interval_seconds = float(item.get('interval_seconds'))
+@@ -674,6 +722,11 @@
+     def delete(self):
+         """Clear all or filtered telemetry sensor logs."""
+         node_id = request.args.get('node_id')
++        if not node_id:
++            try:
++                return reset_local_telemetry(), 200
++            except Exception as error:
++                return {'error': str(error)}, 500
+         conn = get_db_connection()
+         try:
+             with conn:
+--- before/public/js/logs.js
++++ after/public/js/logs.js
+@@ -1,8 +1,8 @@
+-// Initialize Database Clients (telemetry -> PocketBase, metadata -> Supabase)
++// Initialize metadata (Supabase) and local telemetry clients.
+ const sb = window.supabaseClient || window.sb;
+ const pb = window.pb || (typeof PocketBase === 'function' ? new PocketBase() : null);
+ 
+-// Real telemetry logs from PocketBase
++// Real telemetry logs from the local backend.
+ let nodeDataLogs = [];
+ let currentPeriod = 'daily';
+ let currentNodeFilter = '';
+@@ -24,6 +24,8 @@
+ let telemetryRefreshRunning = false;
+ let telemetryRefreshTimer = null;
+ let telemetryMetadataPending = false;
++let telemetryResetPending = false;
++let lastTelemetryResetAt = null;
+ let lastTelemetryTotalItems = null;
+ let followLatestLogPeriod = true;
+ let lastTelemetryRevision = null;
+@@ -33,30 +35,34 @@
+   return followLatestLogPeriod || !selectedDateKey || selectedDateKey === getPeriodDateKey(new Date(), currentPeriod);
+ }
+ 
+-function onTelemetrySavedDebounced() {
+-  if (!isCurrentLogPeriod()) return;
++function onTelemetrySavedDebounced(force = false) {
++  if (force === true) telemetryResetPending = true;
++  if (!isCurrentLogPeriod() && !telemetryResetPending) return;
+   clearTimeout(telemetryRefreshTimer);
+   telemetryRefreshTimer = setTimeout(() => {
+     telemetryRefreshTimer = null;
+-    refreshLogsAfterTelemetrySaved();
++    refreshLogsAfterTelemetrySaved(telemetryResetPending);
+   }, 800);
+ }
+ 
+ // Coalesce saves from several controllers and preserve historical date filters.
+-async function refreshLogsAfterTelemetrySaved() {
+-  if (!isCurrentLogPeriod()) return;
++async function refreshLogsAfterTelemetrySaved(force = false) {
++  if (force) telemetryResetPending = true;
++  if (!isCurrentLogPeriod() && !telemetryResetPending) return;
+   telemetryRefreshPending = true;
+   if (telemetryRefreshRunning) return;
+   telemetryRefreshRunning = true;
+   try {
+     while (telemetryRefreshPending) {
+       telemetryRefreshPending = false;
++      const resetRefresh = telemetryResetPending;
++      telemetryResetPending = false;
+       if (telemetryMetadataPending) {
+         telemetryMetadataPending = false;
+         await loadRoomMap();
+       }
+       await fetchLogsFromDB(true);
+-      if (isCurrentLogPeriod()) render({ preserveScroll: true });
++      if (isCurrentLogPeriod() || resetRefresh) render({ preserveScroll: true });
+     }
+   } catch (error) {
+     console.warn('[Daily Logs] Telemetry refresh failed:', error.message);
+@@ -69,18 +75,21 @@
+ 
+ function getTelemetryRevision(data) {
+   const latest = data.items?.[0];
+-  return JSON.stringify([data.totalItems, latest?.id, latest?.created, latest?.updated]);
++  return JSON.stringify([data.totalItems, latest?.id, latest?.created, latest?.updated, data.reset_at]);
+ }
+ 
+ async function pollLatestTelemetry() {
+-  if (telemetryPollRunning || !isCurrentLogPeriod()) return;
++  if (telemetryPollRunning) return;
+   telemetryPollRunning = true;
+   try {
+     const backendUrl = window.ECOTRACK_CONFIG?.backendUrl || 'http://localhost:5000';
+     const response = await fetch(`${backendUrl}/api/telemetry?perPage=1&sort=-created`, { cache: 'no-store' });
+     if (!response.ok) return;
+     const data = await response.json();
+-    if (getTelemetryRevision(data) !== lastTelemetryRevision) onTelemetrySavedDebounced();
++    if (getTelemetryRevision(data) !== lastTelemetryRevision) {
++      const resetChanged = data.reset_at !== undefined && (data.reset_at || null) !== lastTelemetryResetAt;
++      onTelemetrySavedDebounced(resetChanged || data.totalItems === 0);
++    }
+   } catch (_) {} finally {
+     telemetryPollRunning = false;
+   }
+@@ -91,9 +100,9 @@
+   try {
+     if (window.EcoTrackAirconSystem?.AirconProfileManager?.getAll) {
+       const list = window.EcoTrackAirconSystem.AirconProfileManager.getAll();
+-      if (Array.isArray(list) && list.length > 0) {
+-        const online = list.filter(a => (a.status || 'online').toLowerCase() !== 'offline').length;
+-        return { total: list.length, online: online || list.length };
++      if (Array.isArray(list)) {
++        const online = list.filter(a => String(a.status || '').toLowerCase() === 'online').length;
++        return { total: list.length, online };
+       }
+     }
+   } catch (_) {}
+@@ -102,17 +111,17 @@
+     const raw = localStorage.getItem('ecoTrack_aircons');
+     if (raw) {
+       const list = JSON.parse(raw);
+-      if (Array.isArray(list) && list.length > 0) {
+-        const online = list.filter(a => (a.status || 'online').toLowerCase() !== 'offline').length;
+-        return { total: list.length, online: online || list.length };
++      if (Array.isArray(list)) {
++        const online = list.filter(a => String(a.status || '').toLowerCase() === 'online').length;
++        return { total: list.length, online };
+       }
+     }
+   } catch (_) {}
+ 
+   try {
+     if (Array.isArray(globalNodeRecords) && globalNodeRecords.length > 0) {
+-      const online = globalNodeRecords.filter(n => (n.status || 'online').toLowerCase() !== 'offline').length;
+-      return { total: globalNodeRecords.length, online: online || globalNodeRecords.length };
++      const online = globalNodeRecords.filter(n => String(n.status || '').toLowerCase() === 'online').length;
++      return { total: globalNodeRecords.length, online };
+     }
+   } catch (_) {}
+ 
+@@ -347,7 +356,7 @@
+       controlNameMap[node.id] = nodeIdStr; // e.g. "AC-SRV-01"
+       if (node.name) controlNameMap[node.name] = node.name;
+ 
+-      const airconType = node.aircon_type || 'Split Type (Inverter)';
++      const airconType = node.aircon_type || 'Unknown';
+       globalAirconMap[node.id] = airconType;
+       globalAirconMap[nodeIdStr] = airconType;
+ 
+@@ -742,41 +751,15 @@
+     });
+   }
+   try {
+-    let records = [];
+-
+-    // 1. Primary Control Logs Source: Native SQLite3 API (port 5000)
+-    try {
+-      const backendUrl = (window.ECOTRACK_CONFIG && window.ECOTRACK_CONFIG.backendUrl) || 'http://localhost:5000';
+-      const res = await fetch(`${backendUrl}/api/telemetry?perPage=0&sort=-created`, { cache: 'no-store' });
+-      if (res.ok) {
+-        const data = await res.json();
+-        records = data.items || [];
+-        lastTelemetryTotalItems = data.totalItems ?? records.length;
+-        lastTelemetryRevision = getTelemetryRevision(data);
+-      }
+-    } catch (_) {}
+-
+-    // Fallback to pb collection router if needed
+-    if (!records.length && pb && typeof pb.collection === 'function') {
+-      try {
+-        records = await pb.collection('telemetry').getFullList({ sort: '-created' });
+-      } catch (_) {}
+-    }
+-
+-    // 2. Secondary fallback to Supabase if SQLite3 is empty or initializing
+-    if (!records.length) {
+-      const sbClient = window.supabaseClient || window.sb;
+-      if (sbClient) {
+-        try {
+-          const { data, error } = await sbClient.from('telemetry').select('*').order('created', { ascending: false });
+-          if (!error && data && data.length) {
+-            records = data;
+-          }
+-        } catch (_) {}
+-      }
+-    }
+-
+-    if (!records || records.length === 0) return;
++    const backendUrl = window.ECOTRACK_CONFIG?.backendUrl || 'http://localhost:5000';
++    const res = await fetch(`${backendUrl}/api/telemetry?perPage=0&sort=-created`, { cache: 'no-store' });
++    if (!res.ok) throw new Error(`Telemetry request failed (HTTP ${res.status})`);
++    const data = await res.json();
++    if (!Array.isArray(data.items)) throw new Error('Telemetry response must contain an items array');
++    const records = data.items;
++    lastTelemetryTotalItems = data.totalItems ?? records.length;
++    lastTelemetryRevision = getTelemetryRevision(data);
++    lastTelemetryResetAt = data.reset_at || null;
+ 
+     nodeDataLogs = records.map((r, i) => {
+       // 1. Direct fields saved in PocketBase telemetry collection
+@@ -810,7 +793,7 @@
+       if (!roomName && locationMap[r.node_id]) roomName = locationMap[r.node_id].roomName;
+       if (!floorName && locationMap[r.node_id]) floorName = locationMap[r.node_id].floorName;
+       if (!buildingName && locationMap[r.node_id]) buildingName = locationMap[r.node_id].buildingName;
+-      if (!airconType) airconType = globalAirconMap[r.node_id] || 'Split Type (Inverter)';
++      if (!airconType) airconType = globalAirconMap[r.node_id] || null;
+ 
+       // Cache back into maps for quick UI lookup
+       controlNameMap[r.node_id] = controlName;
+@@ -831,12 +814,12 @@
+         floorName: floorName || 'Unassigned',
+         buildingName: buildingName || 'Unassigned',
+         airconType: airconType,
+-        timestamp: new Date(r.created || (Date.now() - i * 60000)),
++        timestamp: new Date(r.created),
+         temperature: r.temperature,
+         pressure: r.pressure,
+         battery: r.battery,
+         rssi: r.rssi,
+-        status: r.status || 'online',
++        status: r.status || 'unknown',
+         eventType: r.event_type,
+         intervalSeconds: r.interval_seconds,
+         intervalVal: r.interval_val,
+@@ -854,7 +837,10 @@
+       };
+     });
+ 
+-    // Populate dropdown filter options with all historical controls from PocketBase
++    // Clear stale analytics immediately; abort predictions based on deleted rows.
++    if (!records.length) predictEnergyConsumption({ totalRecords: 0 }, []);
++
++    // Populate filter options with real controls and historical records.
+     const nodeFilter = document.getElementById('nodeFilter');
+     if (nodeFilter) {
+       const addedValues = new Set();
+@@ -882,7 +868,7 @@
+       });
+     }
+   } catch(e) {
+-    console.error('PocketBase load error (telemetry):', e);
++    console.error('Local telemetry load error:', e);
+   }
+ }
+ 
+@@ -955,8 +941,8 @@
+   }
+   
+   // Calculate averages
+-  const temps = filtered.map(l => parseFloat(l.temperature));
+-  const avgTemp = Math.round(temps.reduce((a, b) => a + b, 0) / temps.length);
++  const temps = filtered.map(l => parseFloat(l.temperature)).filter(Number.isFinite);
++  const avgTemp = temps.length ? Math.round(temps.reduce((a, b) => a + b, 0) / temps.length) : '--';
+   
+   // Count online nodes
+   const activeNodes = new Set();
+@@ -971,7 +957,7 @@
+ 
+   const fleet = getAirconFleetCount();
+   const totalFleetUnits = currentNodeFilter ? 1 : Math.max(fleet.total, activeNodes.size);
+-  const onlineFleetUnits = currentNodeFilter ? (filtered.length > 0 ? 1 : 0) : Math.max(fleet.online, onlineActiveNodes.size);
++  const onlineFleetUnits = currentNodeFilter ? Math.min(1, onlineActiveNodes.size) : Math.max(fleet.online, onlineActiveNodes.size);
+   
+   return {
+     totalRecords: filtered.length,
+@@ -985,55 +971,42 @@
+ // ─── DYNAMIC ELECTRICITY TARIFF & BUDGET MANAGEMENT ───────────────────
+ function getActiveTariffRate() {
+   const stored = parseFloat(localStorage.getItem('ecoTrack_tariff_rate'));
+-  return (stored && !isNaN(stored) && stored > 0) ? stored : 10.35;
++  return Number.isFinite(stored) && stored > 0 ? stored : null;
+ }
+ 
+ function getTargetBudget() {
+   const stored = parseFloat(localStorage.getItem('ecoTrack_target_budget'));
+-  return (stored && !isNaN(stored) && stored > 0) ? stored : 300.0;
++  return Number.isFinite(stored) && stored > 0 ? stored : null;
+ }
+ 
+ function getUtilityProvider() {
+-  return localStorage.getItem('ecoTrack_utility_provider') || 'Davao Light & Power Company (DLPC)';
+-}
+-
+-var DAVAO_LIGHT_RATE = getActiveTariffRate();
+-function refreshDavaoLightRate() {
+-  DAVAO_LIGHT_RATE = getActiveTariffRate();
+-  try { window.DAVAO_LIGHT_RATE = DAVAO_LIGHT_RATE; } catch (_) {}
+-}
+-refreshDavaoLightRate();
++  return localStorage.getItem('ecoTrack_utility_provider')?.trim() || 'Not configured';
++}
++
++function calculateEnergyCost(kwh, rate = getActiveTariffRate()) {
++  return Number.isFinite(kwh) && Number.isFinite(rate) && rate > 0 ? kwh * rate : null;
++}
++
++function formatTariffRate(rate = getActiveTariffRate(), currency = '₱') {
++  return Number.isFinite(rate) && rate > 0 ? `${currency}${formatAnalyticsNumber(rate)} / kWh` : 'Not configured';
++}
++
++function formatAnalyticsNumber(value, decimals = 2) {
++  return Number.isFinite(value) ? value.toFixed(decimals) : 'Unavailable';
++}
+ 
+ function saveTariffSettings(rate, budget, provider) {
+   const numRate = parseFloat(rate);
+   const numBudget = parseFloat(budget);
+-  if (isNaN(numRate) || numRate <= 0) return false;
++  if (!Number.isFinite(numRate) || numRate <= 0) return false;
+ 
+   localStorage.setItem('ecoTrack_tariff_rate', numRate.toFixed(2));
+   if (!isNaN(numBudget) && numBudget > 0) {
+     localStorage.setItem('ecoTrack_target_budget', numBudget.toFixed(1));
+   }
+-  if (provider) {
+-    localStorage.setItem('ecoTrack_utility_provider', provider.trim());
+-  }
+-
+-  refreshDavaoLightRate();
+-
+-  // Asynchronously synchronize with Supabase if available
+-  try {
+-    const sb = window.supabaseClient || window.sb;
+-    if (sb && typeof sb.from === 'function') {
+-      sb.from('system_settings').upsert({
+-        key: 'electricity_tariff',
+-        value: {
+-          rate: numRate,
+-          budget: numBudget,
+-          provider: provider || 'Davao Light & Power Company (DLPC)',
+-          updated_at: new Date().toISOString()
+-        }
+-      }).then(() => {}).catch(() => {});
+-    }
+-  } catch (_) {}
++  if (provider?.trim()) localStorage.setItem('ecoTrack_utility_provider', provider.trim());
++  else localStorage.removeItem('ecoTrack_utility_provider');
++
+ 
+   updateTariffUI();
+   return true;
+@@ -1042,7 +1015,7 @@
+ function updateTariffUI() {
+   const rate = getActiveTariffRate();
+   const budget = getTargetBudget();
+-  const rateFmt = `₱${rate.toFixed(2)} / kWh`;
++  const rateFmt = formatTariffRate(rate);
+ 
+   const headerDisplay = document.getElementById('headerTariffDisplay');
+   if (headerDisplay) headerDisplay.textContent = rateFmt;
+@@ -1054,7 +1027,7 @@
+   if (costCardRate) costCardRate.textContent = rateFmt;
+ 
+   const targetBudgetEl = document.getElementById('kpiTargetBudget');
+-  if (targetBudgetEl) targetBudgetEl.textContent = budget.toFixed(1);
++  if (targetBudgetEl) targetBudgetEl.textContent = formatAnalyticsNumber(budget, 1);
+ }
+ 
+ function setupTariffModal() {
+@@ -1072,9 +1045,9 @@
+   if (!modal) return;
+ 
+   function openModal() {
+-    if (rateInput) rateInput.value = getActiveTariffRate().toFixed(2);
+-    if (budgetInput) budgetInput.value = getTargetBudget().toFixed(1);
+-    if (providerInput) providerInput.value = getUtilityProvider();
++    if (rateInput) rateInput.value = getActiveTariffRate()?.toFixed(2) || '';
++    if (budgetInput) budgetInput.value = getTargetBudget()?.toFixed(1) || '';
++    if (providerInput) providerInput.value = localStorage.getItem('ecoTrack_utility_provider') || '';
+     updatePreview();
+     modal.classList.remove('hidden');
+   }
+@@ -1085,12 +1058,11 @@
+ 
+   function updatePreview() {
+     if (!previewBill || !rateInput) return;
+-    const rate = parseFloat(rateInput.value) || 10.35;
+-    const kwhToUse = currentEvaluatedKwh > 0 ? currentEvaluatedKwh : 0;
+-    const cost = kwhToUse * rate;
+-    previewBill.textContent = kwhToUse > 0 
+-      ? '₱' + cost.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ` (${kwhToUse.toFixed(1)} kWh)`
+-      : '₱' + (rate * 10).toFixed(2) + ' (per 10 kWh base)';
++    const rate = parseFloat(rateInput.value);
++    const cost = calculateEnergyCost(currentEvaluatedKwh, rate);
++    previewBill.textContent = Number.isFinite(cost)
++      ? '₱' + cost.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ` (${currentEvaluatedKwh.toFixed(1)} kWh)`
++      : 'Enter a rate and load valid energy data to preview cost.';
+   }
+ 
+   if (openBtn) openBtn.addEventListener('click', openModal);
+@@ -1113,9 +1085,12 @@
+ 
+   if (resetBtn) {
+     resetBtn.addEventListener('click', () => {
+-      if (rateInput) rateInput.value = '10.35';
+-      if (budgetInput) budgetInput.value = '300.0';
+-      if (providerInput) providerInput.value = 'Davao Light & Power Company (DLPC)';
++      for (const key of ['ecoTrack_tariff_rate', 'ecoTrack_target_budget', 'ecoTrack_utility_provider']) localStorage.removeItem(key);
++      if (rateInput) rateInput.value = '';
++      if (budgetInput) budgetInput.value = '';
++      if (providerInput) providerInput.value = '';
++      updateTariffUI();
++      render();
+       updatePreview();
+     });
+   }
+@@ -1182,90 +1157,32 @@
+ 
+ function computeConsumptionRankings() {
+   const rate = getActiveTariffRate();
+-  const totalKwh = currentEvaluatedKwh > 0 ? currentEvaluatedKwh : 0;
+-  const totalCost = totalKwh * rate;
+-
+-  const powerRatings = {
+-    'Floor Standing': 2.8,
+-    'Floor Standing AC': 2.8,
+-    'Floor Mounted AC': 2.8,
+-    'Floor Mounted': 2.8,
+-    'Cassette Type': 2.2,
+-    'Cassette / Ceiling AC': 2.2,
+-    'Split Type (Inverter)': 1.4,
+-    'Split Type': 1.6,
+-    'Window Type (Inverter)': 1.0,
+-    'Window Type': 1.2,
+-    'Central Chiller': 3.5,
+-    'VRF System': 3.2
+-  };
+-
+-  const filtered = getFilteredLogs();
+-  const logsToUse = (filtered && filtered.length > 0) ? filtered : (nodeDataLogs && nodeDataLogs.length > 0 ? nodeDataLogs : []);
+-
+-  const bWeights = {};
+-  const fWeights = {};
+-  const rWeights = {};
+-  const cWeights = {};
+-  const aWeights = {};
+-
+-  function normalizeName(str) {
+-    if (!str || str === 'Unassigned' || str === 'Unknown' || str === 'null' || str === 'undefined') return '';
+-    const trimmed = str.trim();
+-    return trimmed.replace(/\b\w/g, l => l.toUpperCase());
+-  }
+-
+-  logsToUse.forEach(log => {
+-    const airconType = log.airconType || globalAirconMap[log.nodeId] || '';
+-    const pw = powerRatings[airconType] || 1.5;
+-
+-    const temp = parseFloat(log.temperature);
+-    const tempFactor = (!isNaN(temp) && temp > 0) ? (temp < 22 ? 1.15 : temp > 26 ? 0.85 : 1.0) : 1.0;
+-    const weight = pw * tempFactor;
+-
+-    const bName = normalizeName(log.buildingName);
+-    const fName = normalizeName(log.floorName);
+-    const rName = normalizeName(log.roomName);
+-    const cName = log.controlName || controlNameMap[log.nodeId] || log.nodeId;
+-    const aType = normalizeName(airconType);
+-
+-    if (bName) bWeights[bName] = (bWeights[bName] || 0) + weight;
+-    if (fName) fWeights[fName] = (fWeights[fName] || 0) + weight;
+-    if (rName) rWeights[rName] = (rWeights[rName] || 0) + weight;
+-    if (cName) cWeights[cName] = (cWeights[cName] || 0) + weight;
+-    if (aType) aWeights[aType] = (aWeights[aType] || 0) + weight;
++  const groups = { buildings: {}, floors: {}, rooms: {}, controls: {}, airconTypes: {} };
++  const jobs = (currentAnalyticsResult?.nodes || []).filter(job => Number.isFinite(job.kwh));
++  const totalKwh = jobs.length ? jobs.reduce((sum, job) => sum + job.kwh, 0) : null;
++  jobs.forEach(job => {
++    const log = job.logs?.[0];
++    if (!log) return;
++    const names = { buildings: log.buildingName, floors: log.floorName, rooms: log.roomName,
++      controls: log.controlName || controlNameMap[job.id] || job.id, airconTypes: log.airconType || globalAirconMap[job.id] };
++    Object.entries(names).forEach(([category, name]) => {
++      if (!name || ['Unassigned', 'Unknown'].includes(name)) return;
++      groups[category][name] = (groups[category][name] || 0) + job.kwh;
++    });
+   });
+-
+-  function buildCategoryRankings(weightDict) {
+-    const entries = Object.entries(weightDict);
+-    if (entries.length === 0) return [];
+-    const sumWeight = entries.reduce((s, e) => s + e[1], 0) || 1;
+-    const sorted = entries.sort((a, b) => b[1] - a[1]);
+-    return sorted.map(([name, w]) => {
+-      const sharePct = (w / sumWeight) * 100;
+-      const kwh = totalKwh > 0 ? (sharePct / 100) * totalKwh : 0;
+-      const cost = kwh * rate;
+-      return { name, share: sharePct, kwh, cost };
+-    });
+-  }
+-
+-  return {
+-    totalKwh,
+-    totalCost,
+-    rate,
+-    period: currentPeriod,
+-    buildings: buildCategoryRankings(bWeights),
+-    floors: buildCategoryRankings(fWeights),
+-    rooms: buildCategoryRankings(rWeights),
+-    controls: buildCategoryRankings(cWeights),
+-    airconTypes: buildCategoryRankings(aWeights)
+-  };
++  const result = { totalKwh, totalCost: calculateEnergyCost(totalKwh, rate), rate, period: currentPeriod };
++  Object.entries(groups).forEach(([category, entries]) => {
++    result[category] = Object.entries(entries).sort((a, b) => b[1] - a[1]).map(([name, kwh]) => ({
++      name, kwh, cost: calculateEnergyCost(kwh, rate), share: totalKwh > 0 ? kwh / totalKwh * 100 : 0
++    }));
++  });
++  return result;
+ }
+ 
+ function updateTopConsumersModal(activeCategory = currentActiveConsumerTab) {
+   currentActiveConsumerTab = activeCategory;
+   const rankings = computeConsumptionRankings();
+-  const fmt = (v) => '₱' + Number(v || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
++  const fmt = (v) => Number.isFinite(v) ? '₱' + v.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'Unavailable';
+   const fmtKwh = (v) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+ 
+   // 1. Update Scope Banner
+@@ -1275,7 +1192,7 @@
+   const totalCostEl = document.getElementById('modalScopeTotalCost');
+ 
+   if (periodEl) periodEl.textContent = rankings.period.toUpperCase();
+-  if (tariffEl) tariffEl.textContent = `₱${rankings.rate.toFixed(2)} / kWh`;
++  if (tariffEl) tariffEl.textContent = formatTariffRate(rankings.rate);
+   if (totalKwhEl) totalKwhEl.textContent = rankings.totalKwh > 0 ? `${fmtKwh(rankings.totalKwh)} kWh` : '--';
+   if (totalCostEl) totalCostEl.textContent = rankings.totalCost > 0 ? fmt(rankings.totalCost) : '--';
+ 
+@@ -1454,7 +1371,7 @@
+   periodBadgeText = definition.badge;
+   trendData = available ? getAnalyticsChartSeries(result?.nodes, currentPeriod) : labels.map(() => null);
+   baselineData = (result?.previous?.nodes?.length && (result.previous.kwh !== null || result.previous.runtime !== null)) ? getAnalyticsChartSeries(result.previous.nodes, currentPeriod) : labels.map(() => null);
+-  costData = trendData.map(kwh => Number.isFinite(kwh) ? kwh * rate : null);
++  costData = trendData.map(kwh => Number.isFinite(kwh) ? calculateEnergyCost(kwh, rate) : null);
+   const knownIndices = trendData.map((value, index) => Number.isFinite(value) ? index : -1).filter(index => index >= 0);
+   if (knownIndices.length) {
+     lowLabel = labels[knownIndices.reduce((best, index) => trendData[index] < trendData[best] ? index : best, knownIndices[0])];
+@@ -1467,7 +1384,7 @@
+   const periodTotal = format(baseKwh);
+   for (const id of ['energyTrendEmpty', 'estimatedCostEmpty', 'dualAxisEmpty']) {
+     const empty = document.getElementById(id);
+-    if (empty) empty.style.display = available ? 'none' : 'flex';
++    if (empty) empty.style.display = (available && (id !== 'estimatedCostEmpty' || Number.isFinite(rate))) ? 'none' : 'flex';
+   }
+   const periodCap = currentPeriod.charAt(0).toUpperCase() + currentPeriod.slice(1);
+ 
+@@ -1499,7 +1416,7 @@
+ 
+   const costSub = document.getElementById('estimatedCostSubtitle');
+   if (costSub) {
+-    costSub.innerHTML = `Electricity Rate: <span id="costCardRate" class="font-bold text-amber-600 dark:text-amber-400">₱${rate.toFixed(2)} / kWh</span> • Scope: <strong class="text-slate-700 dark:text-white">${controlScopeName}</strong>`;
++    costSub.innerHTML = `Electricity Rate: <span id="costCardRate" class="font-bold text-amber-600 dark:text-amber-400">₱${formatAnalyticsNumber(rate)} / kWh</span> • Scope: <strong class="text-slate-700 dark:text-white">${controlScopeName}</strong>`;
+   }
+ 
+   const badgeEl = document.getElementById('dualAxisPeriodBadge');
+@@ -1615,7 +1532,7 @@
+             borderWidth: 1,
+             padding: 10,
+             callbacks: {
+-              label: (ctx) => ` Cost: ₱${Number(ctx.raw).toLocaleString('en-PH', { minimumFractionDigits: 2 })} (@ ₱${rate.toFixed(2)}/kWh)`
++              label: (ctx) => ` Cost: ₱${Number(ctx.raw).toLocaleString('en-PH', { minimumFractionDigits: 2 })} (@ ₱${formatAnalyticsNumber(rate)}/kWh)`
+             }
+           }
+         },
+@@ -2090,7 +2007,8 @@
+     const candidate = snapshot?.desired_state || snapshot?.configured_state;
+     if (candidate) { state = candidate; break; }
+   }
+-  const mode = String(state?.mode || 'cool').toLowerCase();
++  if (!state || state.power === undefined || state.power === null) return null;
++  const mode = String(state.mode || '').toLowerCase();
+   if (!['cool', 'dry', 'fan', 'auto', 'heat'].includes(mode)) return null;
+   const dateKey = targetDateKey || selectedDateKey || getDefaultDateKey(), parts = (dateKey || '').split('-').map(Number);
+   const start = new Date(parts[0], (parts[1] || 1) - 1, parts[2] || 1), end = new Date(start);
+@@ -2101,7 +2019,7 @@
+   const off = state?.power === false || state?.power === 0 || ['off', 'false', '0'].includes(String(state?.power).toLowerCase());
+   const segments = off ? [] : clipRuntimeSegment(start.getTime(), end.getTime(), schedNode);
+   return { segments, hoursUsed: segments.reduce((sum, [begin, finish]) => sum + finish - begin, 0) / 3600000,
+-    acOnRatio: off ? 0 : 1, setpoint: state?.temp ?? 24, mode };
++    acOnRatio: off ? 0 : 1, setpoint: state.temp ?? null, mode };
+ }
+ 
+ function getAnalyticsPeriodHours() {
+@@ -2169,7 +2087,7 @@
+         className = 'font-bold text-slate-400';
+       }
+     } else if (Number.isFinite(value) && (!previous || prior === null || prior === undefined)) {
+-      text = '0.0% (baseline)';
++      text = 'Unavailable';
+       className = 'font-bold text-slate-400';
+     } else {
+       text = 'Unavailable';
+@@ -2188,7 +2106,7 @@
+ 
+ function renderEnergyAnalytics(result) {
+   const { coverage, kwh, runtime, previous } = result;
+-  const rate = getActiveTariffRate(), cost = Number.isFinite(kwh) ? kwh * rate : null;
++  const rate = getActiveTariffRate(), cost = Number.isFinite(kwh) ? calculateEnergyCost(kwh, rate) : null;
+   result.cost = cost;
+   currentAnalyticsResult = result;
+   currentEvaluatedKwh = kwh;
+@@ -2202,7 +2120,7 @@
+   setAnalyticsText('energyConsumption', Number.isFinite(kwh) ? energy(kwh) + ' kWh' : 'Unavailable');
+   setAnalyticsValue('kpiEnergyVal', energy(kwh), 'kpiEnergyUnit');
+   for (const id of ['kpiCostVal', 'estBillValue', 'costTodayCost', 'costCurrentCycle']) setAnalyticsValue(id, money(cost));
+-  for (const id of ['kpiCostRate', 'costCardRate']) setAnalyticsText(id, `₱${rate.toFixed(2)} / kWh`);
++  for (const id of ['kpiCostRate', 'costCardRate']) setAnalyticsText(id, formatTariffRate(rate));
+   setAnalyticsText('estBillPeriod', currentPeriod.charAt(0).toUpperCase() + currentPeriod.slice(1));
+   setAnalyticsText('costPrevPeriod', previous?.complete ? money(previous.cost) : 'Unavailable');
+   setAnalyticsText('costVariance', !result.forecast && !partial && previous?.complete && Number.isFinite(cost) && Number.isFinite(previous.cost)
+@@ -2279,11 +2197,7 @@
+       if (features.acOnRatio === 0 || features.hoursUsed <= 0) { job.kwh = 0; continue; }
+       const temperatures = job.logs.filter(log => job.projection || getConfirmedAcOnState(log) === true)
+         .map(log => log.temperature).filter(value => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value))).map(Number);
+-      if (!temperatures.length) {
+-        const p0Temps = periods[0].map(log => log.temperature).filter(v => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v))).map(Number);
+-        const fallbackAvg = p0Temps.length ? p0Temps.reduce((a, b) => a + b, 0) / p0Temps.length : 24.0;
+-        temperatures.push(fallbackAvg);
+-      }
++      if (!temperatures.length) continue;
+       const average = temperatures.reduce((sum, value) => sum + value, 0) / temperatures.length;
+       try {
+         const response = await fetch(`${BACKEND_URL}/api/predict-energy`, { method: 'POST', signal: controller.signal,
+@@ -2294,7 +2208,6 @@
+           if (typeof data.kwh === 'number' && Number.isFinite(data.kwh) && data.kwh >= 0) job.kwh = data.kwh;
+         }
+       } catch (_) {}
+-      if (job.kwh === null && !controller.signal.aborted) job.kwh = features.hoursUsed * 1.5 * Math.max(0.8, Math.min(1.4, 1 + (25 - average) * 0.05));
+     }
+   }));
+   if (sessionId !== currentPredictionSession || controller.signal.aborted) return;
+@@ -2309,12 +2222,12 @@
+   const priorKwh = priorKnown.length ? priorKnown.reduce((sum, job) => sum + job.kwh, 0) : null;
+   const priorOperating = result.forecast ? getForecastOperatingMetrics({ nodes: prior, coverage: priorCoverage }) : null;
+   const priorRuntime = result.forecast
+-    ? (priorOperating?.runtimeHrs ?? (Number.isFinite(priorKwh) ? priorKwh / 1.5 : null))
++    ? (priorOperating?.runtimeHrs ?? null)
+     : (priorCoverage.confirmedSamples ? calculateRuntimeFromLogs(periods[1]).runtimeHrs : (priorOperating?.runtimeHrs ?? null));
+   result.previous = {
+     nodes: prior,
+     kwh: priorKwh,
+-    cost: Number.isFinite(priorKwh) ? priorKwh * getActiveTariffRate() : null,
++    cost: Number.isFinite(priorKwh) ? calculateEnergyCost(priorKwh) : null,
+     runtime: priorRuntime,
+     complete: priorKnown.length > 0
+   };
+@@ -2520,7 +2433,7 @@
+     const buildingName = log.buildingName || locationMap[log.nodeId]?.buildingName || 'Unassigned';
+     const controlName = log.controlName || controlNameMap[log.nodeId] || log.nodeId;
+     
+-    const acType = log.airconType || globalAirconMap[log.nodeId] || 'Split Type (Inverter)';
++    const acType = log.airconType || globalAirconMap[log.nodeId] || 'Unknown';
+     
+     const temperature = log.temperature == null ? null : Number(log.temperature);
+     const acState = getDisplayAcState(log);
+@@ -2582,8 +2495,8 @@
+   const budget = getTargetBudget();
+   const stats = calculateStats();
+   const energyValueEl = document.getElementById('energyConsumption');
+-  const energyKwh = parseFloat(energyValueEl ? energyValueEl.textContent.replace(/,/g, '') : '0') || currentEvaluatedKwh || 0;
+-  const totalCost = energyKwh * rate;
++  const energyKwh = currentEvaluatedKwh;
++  const totalCost = calculateEnergyCost(energyKwh, rate);
+   const periodLabel = currentPeriod.charAt(0).toUpperCase() + currentPeriod.slice(1);
+   const controlFilterLabel = currentNodeFilter ? (controlNameMap[currentNodeFilter] || currentNodeFilter) : 'All Monitored Aircons';
+   const exportDateStr = new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' });
+@@ -2625,7 +2538,7 @@
+     ['Generated Timestamp', exportDateStr],
+     ['Observation Interval', `${periodLabel} Audit (${currentPeriod.toUpperCase()})`],
+     ['Observation Date Scope', dateRangeStr],
+-    ['Active Electricity Tariff', `PHP ${rate.toFixed(2)} / kWh`],
++    ['Active Electricity Tariff', `PHP ${formatAnalyticsNumber(rate)} / kWh`],
+     ['Utility Provider', provider],
+     ['Target Aircon Scope', controlFilterLabel],
+     ['Total Records Audited', `${filtered.length} telemetry readings`]
+@@ -2670,11 +2583,11 @@
+   kpiHRow.height = 22;
+ 
+   const kpiRows = [
+-    ['Total Energy Consumed', energyKwh.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 }), 'kWh', 'Nominal Load', 'Active Fleet Draw'],
+-    ['Estimated Electricity Cost', `₱${totalCost.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'PHP (₱)', `₱${rate.toFixed(2)}/kWh (${provider})`, 'Projected Invoiced'],
++    ['Total Energy Consumed', formatAnalyticsNumber(energyKwh, 1), 'kWh', 'Nominal Load', 'Active Fleet Draw'],
++    ['Estimated Electricity Cost', Number.isFinite(totalCost) ? `₱${totalCost.toFixed(2)}` : 'Unavailable', 'PHP (₱)', `₱${formatAnalyticsNumber(rate)}/kWh (${provider})`, 'Projected Invoiced'],
+     ['Total Aircon Runtime', document.getElementById('kpiRuntimeVal')?.textContent || '0.0', 'Hours', 'Fleet Total', 'Active Operations'],
+     ['Average Room Temperature', stats.avgTemp !== '--' ? `${stats.avgTemp}` : '--', '°C', '24°C - 26°C Optimal', stats.avgTemp <= 26 ? 'Comfortable' : 'Elevated Load'],
+-    ['Online Aircon Units', stats.onlineNodes || `${filtered.length > 0 ? 9 : 0}/9`, 'Units', '100% Target', 'Hardware Synced']
++    ['Online Aircon Units', stats.onlineNodes || 'Unavailable', 'Units', '100% Target', 'Hardware Synced']
+   ];
+ 
+   kpiRows.forEach((r, idx) => {
+@@ -2745,7 +2658,7 @@
+     const floorName = log.floorName || locationMap[log.nodeId]?.floorName || 'Unassigned';
+     const buildingName = log.buildingName || locationMap[log.nodeId]?.buildingName || 'Unassigned';
+     const sName = log.controlName || controlNameMap[log.nodeId] || log.nodeId;
+-    const acType = log.airconType || globalAirconMap[log.nodeId] || 'Split Type (Inverter)';
++    const acType = log.airconType || globalAirconMap[log.nodeId] || 'Unknown';
+     const ts = new Date(log.timestamp).toLocaleString('en-US', {
+       month: '2-digit',
+       day: '2-digit',
+@@ -2873,7 +2786,7 @@
+       const floor = log.floorName || locationMap[log.nodeId]?.floorName || 'Unassigned';
+       const building = log.buildingName || locationMap[log.nodeId]?.buildingName || 'Unassigned';
+       const name = log.controlName || controlNameMap[log.nodeId] || log.nodeId;
+-      const acType = log.airconType || globalAirconMap[log.nodeId] || 'Split Type (Inverter)';
++      const acType = log.airconType || globalAirconMap[log.nodeId] || 'Unknown';
+       const temp = Number(log.temperature) || 0;
+       const batP = getBatteryPercentage(log.battery);
+       const rssiV = parseInt(log.rssi);
+@@ -2903,7 +2816,7 @@
+         doc.setDrawColor(229, 231, 235);
+         doc.setLineWidth(0.3);
+         doc.line(MARGIN, pageH - 10, pageW - MARGIN, pageH - 10);
+-        doc.text(`Active Tariff: PHP ${getActiveTariffRate().toFixed(2)}/kWh (${getUtilityProvider()})`, MARGIN, pageH - 6);
++        doc.text(`Active Tariff: PHP ${formatAnalyticsNumber(getActiveTariffRate())}/kWh (${getUtilityProvider()})`, MARGIN, pageH - 6);
+         doc.text(`Page ${i} of ${totalPages}`, pageW - MARGIN, pageH - 6, { align: 'right' });
+       }
+     }
+@@ -3096,7 +3009,7 @@
+         ['Report Scope', 'Aircon Energy Analytics & Fleet Audit'],
+         ['Observation Interval', `${periodLabel} Audit (${currentPeriod.toUpperCase()})`],
+         ['Date Range Scope', dateRangeText],
+-        ['Active Tariff Rate', `PHP ${getActiveTariffRate().toFixed(2)} / kWh`],
++        ['Active Tariff Rate', `PHP ${formatAnalyticsNumber(getActiveTariffRate())} / kWh`],
+         ['Utility Provider', getUtilityProvider()],
+         ['Target Aircon Scope', controlFilterLabel],
+         ['Total Audit Logs', `${filtered.length} telemetry readings`],
+@@ -3127,7 +3040,7 @@
+         loc.buildingName,
+         loc.floorName,
+         loc.roomName,
+-        globalAirconMap[nid] || 'Split Type (Inverter)',
++        globalAirconMap[nid] || 'Unknown',
+         monitorStatus,
+         controlStatus
+       ]);
+@@ -3169,10 +3082,10 @@
+       : '0.0';
+ 
+     // ── Estimated Bill for PDF (matches selected period) ──
+-    const pdfEnergyKwh = parseFloat(energyText.replace(/,/g, '')) || 0;
++    const pdfEnergyKwh = currentEvaluatedKwh;
+     const currentTariffRate = getActiveTariffRate();
+-    const pdfEstBill = pdfEnergyKwh * currentTariffRate;
+-    const fmtP = (v) => 'PHP ' + v.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
++    const pdfEstBill = calculateEnergyCost(pdfEnergyKwh, currentTariffRate);
++    const fmtP = (v) => !Number.isFinite(v) ? 'Unavailable' : 'PHP ' + v.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+ 
+     // Subtitle under Section Header
+     doc.setFontSize(8.5);
+@@ -3189,7 +3102,7 @@
+ 
+     const heroCards = [
+       { label: 'Total Energy Consumption', value: energyText, sub: `Active ${periodLabel} Period`, color: [16, 185, 129] },
+-      { label: `Projected ${periodLabel} Utility Bill`, value: fmtP(pdfEstBill), sub: `@ ₱${currentTariffRate.toFixed(2)} / kWh`, color: [245, 158, 11] },
++      { label: `Projected ${periodLabel} Utility Bill`, value: fmtP(pdfEstBill), sub: `@ ₱${formatAnalyticsNumber(currentTariffRate)} / kWh`, color: [245, 158, 11] },
+       { label: 'Compressor Active Cooling', value: `${activeCoolHrs} hrs`, sub: `${((acActive / Math.max(1, filtered.length)) * 100).toFixed(1)}% Active Load`, color: [59, 130, 246] },
+       { label: 'Fleet Online Coverage', value: `${onlineNodes.size} / ${uniqueNodes.size} Online`, sub: `${uniqueNodes.size > 0 ? ((onlineNodes.size / uniqueNodes.size) * 100).toFixed(0) : 100}% Fleet Health`, color: [13, 148, 136] }
+     ];
+@@ -3241,9 +3154,9 @@
+         headerColor: [16, 185, 129],
+         rows: [
+           ['Total Period Energy', energyText],
+-          ['Davao Light Tariff', `PHP ${currentTariffRate.toFixed(2)} / kWh`],
++          ['Configured Tariff', `PHP ${formatAnalyticsNumber(currentTariffRate)} / kWh`],
+           ['Estimated Period Cost', fmtP(pdfEstBill)],
+-          ['Hourly Energy Intensity', `${(pdfEnergyKwh / Math.max(1, hoursUsed)).toFixed(2)} kWh/hr`],
++          ['Hourly Energy Intensity', `${formatAnalyticsNumber(Number.isFinite(pdfEnergyKwh) ? pdfEnergyKwh / Math.max(1, hoursUsed) : null)} kWh/hr`],
+           ['Evaluation Timeframe', `${periodLabel} (${hoursUsed.toFixed(1)} hrs)`]
+         ]
+       },
+@@ -3347,7 +3260,7 @@
+     doc.setFontSize(7.5);
+     doc.setFont('helvetica', 'normal');
+     doc.setTextColor(51, 65, 85);
+-    const summaryMsg = `Air conditioning operational telemetry indicates stable environmental conditions across all monitored campus zones. Aggregate electricity demand aligns closely with projected energy consumption baselines with 0 critical system anomalies detected. Effective Davao Light utility rate of PHP ${currentTariffRate.toFixed(2)}/kWh applied to ${energyText} total evaluated period consumption.`;
++    const summaryMsg = `This report includes ${filtered.length} telemetry records for the selected period. Energy: ${energyText}. Electricity tariff: ${formatTariffRate(currentTariffRate, 'PHP ')}. Missing measurements and unavailable estimates are excluded from calculations.`;
+     const summaryLines = doc.splitTextToSize(summaryMsg, summaryBoxW - 12);
+     doc.text(summaryLines, MARGIN + 6, curY + 11.5);
+ 
+@@ -3527,47 +3440,16 @@
+     let energyValues = [];
+     let baselineValues = [];
+ 
+-    if (currentPeriod === 'daily') {
+-      trendLabels = ['12 AM', '3 AM', '6 AM', '9 AM', '12 PM', '3 PM', '6 PM', '9 PM', '12 M'];
+-      const buckets = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+-      const cutoffs = [1.5, 4.5, 7.5, 10.5, 13.5, 16.5, 19.5, 22.5, 24.1];
+-      filtered.forEach(l => {
+-        const h = l.timestamp.getHours() + l.timestamp.getMinutes() / 60;
+-        for (let i = 0; i < cutoffs.length; i++) {
+-          if (h <= cutoffs[i]) { buckets[i]++; break; }
+-        }
+-      });
+-      const tot = buckets.reduce((s, c) => s + c, 0) || 1;
+-      energyValues = buckets.map(c => +((c / tot) * pdfEnergyKwh).toFixed(2));
+-      const avgH = +(pdfEnergyKwh / 9).toFixed(2);
+-      baselineValues = energyValues.map(() => avgH);
+-    } else if (currentPeriod === 'monthly') {
+-      trendLabels = ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
+-      const buckets = [0, 0, 0, 0];
+-      filtered.forEach(l => {
+-        const wIdx = Math.min(3, Math.floor((l.timestamp.getDate() - 1) / 7));
+-        buckets[wIdx]++;
+-      });
+-      const tot = buckets.reduce((s, c) => s + c, 0) || 1;
+-      energyValues = buckets.map(c => +((c / tot) * pdfEnergyKwh).toFixed(2));
+-      const avgW = +(pdfEnergyKwh / 4).toFixed(2);
+-      baselineValues = energyValues.map(() => avgW);
+-    } else {
+-      // weekly
+-      trendLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+-      const buckets = [0, 0, 0, 0, 0, 0, 0];
+-      filtered.forEach(l => {
+-        const d = l.timestamp.getDay();
+-        buckets[d === 0 ? 6 : d - 1]++;
+-      });
+-      const tot = buckets.reduce((s, c) => s + c, 0) || 1;
+-      energyValues = buckets.map(c => +((c / tot) * pdfEnergyKwh).toFixed(2));
+-      const avgD = +(pdfEnergyKwh / 7).toFixed(2);
+-      baselineValues = energyValues.map(() => avgD);
+-    }
+-
+-    const costValues = energyValues.map(v => +(v * tariffRate).toFixed(2));
+-    const costBaselineValues = baselineValues.map(v => +(v * tariffRate).toFixed(2));
++    trendLabels = {
++      daily: ['12 AM', '3 AM', '6 AM', '9 AM', '12 PM', '3 PM', '6 PM', '9 PM', '12 M'],
++      weekly: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
++      monthly: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
++      yearly: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
++    }[currentPeriod];
++    energyValues = getAnalyticsChartSeries(currentAnalyticsResult?.nodes, currentPeriod);
++    baselineValues = getAnalyticsChartSeries(currentAnalyticsResult?.previous?.nodes, currentPeriod);
++    const costValues = energyValues.map(value => calculateEnergyCost(value, tariffRate));
++    const costBaselineValues = baselineValues.map(value => calculateEnergyCost(value, tariffRate));
+ 
+     const analyticsChartOpts = (title, lbls, data, baseline, color, unit, yLabel) => {
+       const maxVal = Math.max(...data, 0);
+@@ -3744,23 +3626,23 @@
+     doc.setFontSize(8.5);
+     doc.setFont('helvetica', 'normal');
+     doc.setTextColor(100, 116, 139);
+-    doc.text(`Scope: ${controlFilterLabel}  •  Observation Interval: ${periodLabel.toUpperCase()}  •  Utility Tariff: PHP ${tariffRate.toFixed(2)}/kWh (${getUtilityProvider()})`, MARGIN, chartPageY - 1);
++    doc.text(`Scope: ${controlFilterLabel}  •  Observation Interval: ${periodLabel.toUpperCase()}  •  Utility Tariff: PHP ${formatAnalyticsNumber(tariffRate)}/kWh (${getUtilityProvider()})`, MARGIN, chartPageY - 1);
+     chartPageY += 5;
+ 
+     // Top 4 Mini KPI Strip
+     const miniGap = 5;
+     const miniW = (pageW - MARGIN * 2 - miniGap * 3) / 4;
+     const miniH = 16;
+-    const peakKwh = Math.max(...energyValues, 0);
+-    const peakCost = Math.max(...costValues, 0);
++    const peakKwh = energyValues.some(Number.isFinite) ? Math.max(...energyValues.filter(Number.isFinite)) : null;
++    const peakCost = costValues.some(Number.isFinite) ? Math.max(...costValues.filter(Number.isFinite)) : null;
+     const peakIdx = energyValues.indexOf(peakKwh);
+     const peakTimeLabel = peakIdx !== -1 ? trendLabels[peakIdx] : '--';
+ 
+     const miniKpis = [
+-      { label: `Total Period Energy`, val: `${pdfEnergyKwh.toFixed(1)} kWh`, color: [16, 185, 129] },
+-      { label: `Peak Interval Demand`, val: `${peakKwh.toFixed(1)} kWh (${peakTimeLabel})`, color: [13, 148, 136] },
++      { label: `Total Period Energy`, val: `${formatAnalyticsNumber(pdfEnergyKwh, 1)} kWh`, color: [16, 185, 129] },
++      { label: `Peak Interval Demand`, val: `${formatAnalyticsNumber(peakKwh, 1)} kWh (${peakTimeLabel})`, color: [13, 148, 136] },
+       { label: `Projected Electricity Bill`, val: fmtP(pdfEstBill), color: [245, 158, 11] },
+-      { label: `Prevailing Davao Light Rate`, val: `PHP ${tariffRate.toFixed(2)}/kWh`, color: [59, 130, 246] }
++      { label: `Configured Electricity Rate`, val: `PHP ${formatAnalyticsNumber(tariffRate)}/kWh`, color: [59, 130, 246] }
+     ];
+ 
+     miniKpis.forEach((m, mi) => {
+@@ -3809,19 +3691,19 @@
+ 
+     // Structured Interval Breakdown Table
+     const intervalTableRows = trendLabels.map((lbl, idx) => {
+-      const kwh = energyValues[idx] || 0;
+-      const base = baselineValues[idx] || 0;
+-      const cost = costValues[idx] || 0;
+-      const variance = base > 0 ? (((kwh - base) / base) * 100).toFixed(1) : '0.0';
+-      const varianceStr = (parseFloat(variance) > 0 ? `+${variance}%` : `${variance}%`);
++      const kwh = energyValues[idx];
++      const base = baselineValues[idx];
++      const cost = costValues[idx];
++      const variance = Number.isFinite(kwh) && base > 0 ? (((kwh - base) / base) * 100).toFixed(1) : 'Unavailable';
++      const varianceStr = variance === 'Unavailable' ? variance : (parseFloat(variance) > 0 ? `+${variance}%` : `${variance}%`);
+       const isPeak = kwh === peakKwh && kwh > 0;
+-      const statusStr = isPeak ? 'PEAK DEMAND' : (kwh >= base ? 'NOMINAL LOAD' : 'OFF-PEAK / LOW');
++      const statusStr = !Number.isFinite(kwh) ? 'Unavailable' : isPeak ? 'PEAK DEMAND' : 'Estimated';
+       return [
+         lbl,
+-        `${kwh.toFixed(2)} kWh`,
+-        `${base.toFixed(2)} kWh`,
++        `${formatAnalyticsNumber(kwh)} kWh`,
++        `${formatAnalyticsNumber(base)} kWh`,
+         varianceStr,
+-        `PHP ${tariffRate.toFixed(2)}/kWh`,
++        `PHP ${formatAnalyticsNumber(tariffRate)}/kWh`,
+         fmtP(cost),
+         statusStr
+       ];
+@@ -3880,7 +3762,7 @@
+       doc.setFontSize(7);
+       doc.setFont('helvetica', 'normal');
+       doc.setTextColor(71, 85, 105);
+-      const analMsg = `Energy consumption tracking indicates optimal operational load aligned with cooling schedule demands. Peak interval consumption of ${peakKwh.toFixed(1)} kWh corresponds to ${fmtP(peakCost)} in utility expenditure. System baseline dashed indicators highlight variance from nominal operating expectations.`;
++      const analMsg = `Energy charts include available estimates for the selected period. Peak interval consumption of ${formatAnalyticsNumber(peakKwh, 1)} kWh corresponds to ${fmtP(peakCost)} in utility expenditure. Dashed indicators use available estimates from the previous period.`;
+       const analLines = doc.splitTextToSize(analMsg, analCalloutW - 10);
+       doc.text(analLines, MARGIN + 5, afterTableY + 9);
+     }
+@@ -4099,12 +3981,12 @@
+       : `Average battery level across all controls is ${avgBat.toFixed(1)}% — assessed as ${batteryHealth}. Average RSSI signal strength is ${avgRssi.toFixed(1)}% — assessed as ${signalQuality}. ${offlineCount} offline event(s) were recorded.`;
+ 
+     // ── Estimated Bill for Executive Summary (matches selected period) ──
+-    const execEnergyKwh = parseFloat(energyText.replace(/,/g, '')) || 0;
+-    const execEstBill = execEnergyKwh * DAVAO_LIGHT_RATE;
+-    const fmtExec = (v) => 'PHP ' + v.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+-
+-    const billText = execEnergyKwh > 0
+-      ? `Based on the active utility rate of PHP ${getActiveTariffRate().toFixed(2)}/kWh (${getUtilityProvider()}), the estimated ${periodLabel.toLowerCase()} electricity bill is ${fmtExec(execEstBill)} for a predicted energy consumption of ${energyText}. This estimate is computed from the ML energy prediction model output multiplied by the prevailing electricity tariff.`
++    const execEnergyKwh = currentEvaluatedKwh;
++    const execEstBill = calculateEnergyCost(execEnergyKwh);
++    const fmtExec = (v) => !Number.isFinite(v) ? 'Unavailable' : 'PHP ' + v.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
++
++    const billText = Number.isFinite(execEstBill)
++      ? `Based on the active utility rate of PHP ${formatAnalyticsNumber(getActiveTariffRate())}/kWh (${getUtilityProvider()}), the estimated ${periodLabel.toLowerCase()} electricity bill is ${fmtExec(execEstBill)} for a predicted energy consumption of ${energyText}. This estimate is computed from the ML energy prediction model output multiplied by the prevailing electricity tariff.`
+       : 'Estimated electricity bill is unavailable due to insufficient energy consumption data.';
+ 
+     const execSections = [
+@@ -4166,7 +4048,7 @@
+         building: loc.buildingName,
+         floor: loc.floorName,
+         room: loc.roomName,
+-        acType: airconMap[log.nodeId] || 'Split Type (Inverter)',
++        acType: airconMap[log.nodeId] || 'Unknown',
+         installDate: installDateMap[log.nodeId] || '-',
+         status: log.status
+       });
+@@ -4313,64 +4195,25 @@
+   doc.addPage();
+   curY = sectionTitle('Energy Consumption Ranking', 20);
+ 
+-  const logsByRoomLoc = {};
+-  filtered.forEach(t => {
+-    const loc = locationMap[t.nodeId] || { buildingName: 'Unknown', floorName: 'Unknown', roomName: 'Unknown' };
+-    const roomKey = `${loc.buildingName}|||${loc.floorName}|||${loc.roomName}`;
+-    if (!logsByRoomLoc[roomKey]) logsByRoomLoc[roomKey] = [];
+-    logsByRoomLoc[roomKey].push(t);
+-  });
+-
+-  const energyRankings = [];
+-  
+-  // Need to process sequentially to avoid overwhelming Flask backend if there are many rooms
+-  for (const roomKey in logsByRoomLoc) {
+-     const recs = logsByRoomLoc[roomKey];
+-     if (!recs || recs.length === 0) continue;
+-     
+-     let sumTemp = 0;
+-     recs.forEach(r => {
+-        sumTemp += Number(r.temperature) || 0;
+-     });
+-     
+-     const avgT = sumTemp / recs.length;
+-     const { acOnRatio, hoursUsed } = getAcStateFeatures(recs);
+-     
+-     let kwh = 0;
+-     if (hoursUsed > 0 && acOnRatio > 0) try {
+-       const res = await fetch(`${BACKEND_URL}/api/predict-energy`, {
+-          method: 'POST',
+-          headers: { 'Content-Type': 'application/json' },
+-          body: JSON.stringify({
+-            model: 'xgboost',
+-            avg_temp: avgT,
+-            period: currentPeriod,
+-            ac_on_ratio: acOnRatio,
+-            hours_used: hoursUsed
+-          })
+-       });
+-       if (res.ok) {
+-         const data = await res.json();
+-         kwh = data.kwh || 0;
+-       }
+-     } catch (e) { /* ignore */ }
+-     
+-     const parts = roomKey.split('|||');
+-     energyRankings.push({
+-       building: parts[0],
+-       floor: parts[1],
+-       room: parts[2],
+-       kwh: kwh
+-     });
+-  }
++  const roomEstimates = new Map();
++  for (const job of currentAnalyticsResult?.nodes || []) {
++    if (!Number.isFinite(job.kwh)) continue;
++    const log = job.logs?.[0];
++    if (!log) continue;
++    const building = log.buildingName || 'Unassigned', floor = log.floorName || 'Unassigned', room = log.roomName || 'Unassigned';
++    const key = JSON.stringify([building, floor, room]);
++    if (!roomEstimates.has(key)) roomEstimates.set(key, { building, floor, room, kwh: 0 });
++    roomEstimates.get(key).kwh += job.kwh;
++  }
++  const energyRankings = [...roomEstimates.values()];
+ 
+   energyRankings.sort((a, b) => b.kwh - a.kwh);
+   
+-  const fmtRank = (v) => 'PHP ' + v.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
++  const fmtRank = (v) => !Number.isFinite(v) ? 'Unavailable' : 'PHP ' + v.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+   const rankPeriodLabel = currentPeriod.charAt(0).toUpperCase() + currentPeriod.slice(1);
+ 
+   let rankingBody = energyRankings.map((r, i) => [
+-     (i + 1).toString(), r.building, r.floor, r.room, r.kwh.toFixed(2) + ' kWh', fmtRank(r.kwh * DAVAO_LIGHT_RATE)
++     (i + 1).toString(), r.building, r.floor, r.room, r.kwh.toFixed(2) + ' kWh', fmtRank(calculateEnergyCost(r.kwh))
+   ]);
+   
+   if (rankingBody.length === 0) rankingBody = [['-', '-', '-', '-', 'N/A', '-']];
+@@ -4386,7 +4229,7 @@
+     alternateRowStyles: { fillColor: [249, 250, 251] },
+     columnStyles: { 0: { fontStyle: 'bold', textColor: ACCENT, halign: 'center' } }
+   });
+-  addTableExplanation(`Note: Estimates are based on the active electricity tariff of PHP ${getActiveTariffRate().toFixed(2)}/kWh (${getUtilityProvider()}).`);
++  addTableExplanation(`Note: Estimates are based on the active electricity tariff of PHP ${formatAnalyticsNumber(getActiveTariffRate())}/kWh (${getUtilityProvider()}).`);
+ 
+   addHeaderFooter();
+ }
+--- before/public/logs.html
++++ after/public/logs.html
+@@ -386,7 +386,7 @@
+               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" class="text-amber-500 shrink-0">
+                 <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+               </svg>
+-              <span>Tariff: <strong id="headerTariffDisplay" class="font-mono font-black text-amber-600 dark:text-amber-400">₱10.35 / kWh</strong></span>
++              <span>Tariff: <strong id="headerTariffDisplay" class="font-mono font-black text-amber-600 dark:text-amber-400">Not configured</strong></span>
+               <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" class="opacity-70 shrink-0">
+                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+@@ -552,7 +552,7 @@
+             </div>
+             <div class="pt-3 border-t border-slate-100 dark:border-white/5 flex items-center justify-between text-[11px]">
+               <span class="text-slate-500 dark:text-gray-400">Calculated base rate</span>
+-              <span id="kpiCostRate" class="font-mono font-bold text-emerald-600 dark:text-emerald-400">₱10.35 / kWh</span>
++              <span id="kpiCostRate" class="font-mono font-bold text-emerald-600 dark:text-emerald-400">Not configured</span>
+             </div>
+             <!-- Hidden backward-compatibility elements -->
+             <div class="hidden" id="estBillValue">--</div>
+@@ -676,7 +676,7 @@
+                 <div>
+                   <h3 class="text-base font-extrabold text-slate-900 dark:text-white">Estimated Electricity Cost</h3>
+                   <p class="text-xs text-slate-500 dark:text-gray-400" id="estimatedCostSubtitle">
+-                    Electricity Rate: <span id="costCardRate" class="font-bold text-amber-600 dark:text-amber-400">₱10.35 / kWh</span>
++                    Electricity Rate: <span id="costCardRate" class="font-bold text-amber-600 dark:text-amber-400">Not configured</span>
+                   </p>
+                 </div>
+                 <!-- Highlight Stat -->
+@@ -851,23 +851,23 @@
+           </label>
+           <div class="relative">
+             <span class="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-slate-400 font-bold text-sm">₱</span>
+-            <input type="number" id="tariffRateInput" step="0.01" min="0.10" max="100.00" value="10.35" required
++            <input type="number" id="tariffRateInput" step="0.01" min="0.10" max="100.00" value="" required
+               class="w-full pl-8 pr-16 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl text-sm font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500">
+             <span class="absolute inset-y-0 right-0 flex items-center pr-3.5 pointer-events-none text-xs font-bold text-slate-400">/ kWh</span>
+           </div>
+           <p class="text-[11px] text-slate-400 dark:text-gray-500 mt-1">
+-            Default: ₱10.35 / kWh (Davao Light residential rate). All cost predictions dynamically multiply by this value.
++            Enter the electricity rate from your utility bill. Cost estimates remain unavailable until a rate is configured.
+           </p>
+         </div>
+ 
+-        <input type="hidden" id="targetBudgetInput" value="300.0">
++        <input type="hidden" id="targetBudgetInput" value="">
+ 
+         <!-- Utility Provider / Notes -->
+         <div>
+           <label for="utilityProviderInput" class="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-gray-300 mb-1.5">
+             Utility Provider & Region
+           </label>
+-          <input type="text" id="utilityProviderInput" value="Davao Light & Power Company (DLPC)"
++          <input type="text" id="utilityProviderInput" value=""
+             class="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-white/10 rounded-xl text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500">
+         </div>
+ 
+@@ -887,7 +887,7 @@
+         <div class="pt-3 border-t border-slate-100 dark:border-white/10 flex items-center justify-between gap-3">
+           <button type="button" id="resetTariffDefaultBtn"
+             class="text-xs font-bold text-slate-500 hover:text-slate-800 dark:hover:text-white underline bg-transparent border-0 cursor-pointer">
+-            Reset to Default (₱10.35)
++            Clear tariff settings
+           </button>
+           <div class="flex items-center gap-2">
+             <button type="button" id="cancelTariffModalBtn"
+@@ -945,7 +945,7 @@
+           <div class="flex items-center gap-2">
+             <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+             <span class="text-slate-600 dark:text-gray-300">
+-              Active Scope: <strong id="modalScopePeriod" class="text-slate-900 dark:text-white uppercase font-black">Daily</strong> • Tariff Multiplier: <strong id="modalScopeTariff" class="text-amber-600 dark:text-amber-400 font-mono font-bold">₱10.35 / kWh</strong>
++              Active Scope: <strong id="modalScopePeriod" class="text-slate-900 dark:text-white uppercase font-black">Daily</strong> • Tariff Multiplier: <strong id="modalScopeTariff" class="text-amber-600 dark:text-amber-400 font-mono font-bold">Not configured</strong>
+             </span>
+           </div>
+           <div class="text-slate-500 dark:text-gray-400 text-xs">
+--- before/scripts/test_logs_stability.js
++++ after/scripts/test_logs_stability.js
+@@ -72,6 +72,7 @@
+       return elements.get(id);
+     } }
+   });
++  vm.runInContext(section('function calculateEnergyCost(', 'function saveTariffSettings('), context);
+   vm.runInContext(section('function getConfirmedAcOnState(', '// Helper: Calculate previous period'), context);
+   vm.runInContext(section('let currentPredictionSession', '// Convert 24-hour'), context);
+   return { context, elements, charts };
+@@ -113,7 +114,21 @@
+   let index = 0;
+   const mixed = predictionContext(async () => ++index === 1 ? { ok: true, json: async () => ({ kwh: 8 }) } : { ok: false });
+   await mixed.context.predictEnergyConsumption(stats, logs(2));
+-  assert.equal(mixed.context.currentEvaluatedKwh, 8 + 30 / 3600 * 1.5, 'Only the failed controller uses its confirmed thirty-second runtime for the physics estimate');
++  assert.equal(mixed.context.currentEvaluatedKwh, 8, 'Failed predictions cannot invent energy estimates');
++  assert.equal(mixed.context.currentAnalyticsResult.missingEstimates, 1);
++  const failed = predictionContext(async () => ({ ok: false }));
++  await failed.context.predictEnergyConsumption(stats, logs(1));
++  assert.equal(failed.context.currentEvaluatedKwh, null, 'A failed model stays unavailable');
++  let missingInputRequests = 0;
++  const missing = predictionContext(async () => { missingInputRequests++; return { ok: true, json: async () => ({ kwh: 4 }) }; });
++  await missing.context.predictEnergyConsumption(stats, logs(1).map(log => ({ ...log, temperature: null })));
++  assert.equal(missingInputRequests, 0, 'Missing temperature cannot become a hardcoded model input');
++  assert.equal(missing.context.currentEvaluatedKwh, null);
++  const noRate = predictionContext(async () => ({ ok: true, json: async () => ({ kwh: 8 }) }));
++  noRate.context.getActiveTariffRate = () => null;
++  await noRate.context.predictEnergyConsumption(stats, logs(1));
++  assert.equal(noRate.context.currentEvaluatedKwh, 8);
++  assert.equal(noRate.context.currentEvaluatedCost, null, 'Unconfigured tariffs cannot show a zero electricity bill');
+ }
+ 
+ function testChartsAndDateOptions() {
+@@ -128,6 +143,7 @@
+     Chart: class { constructor(canvas, config) { this.data = config.data; this.options = config.options; this.updates = []; created.push(this); }
+       update(mode) { this.updates.push(mode); } destroy() { throw new Error('Live charts must not be destroyed'); } }
+   });
++  vm.runInContext(section('function calculateEnergyCost(', 'function saveTariffSettings('), context);
+   vm.runInContext(section('let energyTrendChartInstance', '// ─── ENERGY CONSUMPTION PREDICTION'), context);
+   context.updateAnalyticsCharts(8, 80);
+   context.currentPeriod = 'monthly'; context.currentAnalyticsResult.kwh = 12; context.updateAnalyticsCharts(12, 120);
+@@ -169,6 +185,6 @@
+ 
+ async function main() {
+   await testRefreshBursts(); await testPredictionRaces(); await testPredictionLoadAndFallback(); testChartsAndDateOptions(); testTableScroll();
+-  console.log('Logs stability passed: burst debounce, single reload, historical filters, stale predictions, bounded ML requests, partial fallback, valid zero estimates, chart reuse, and stable date options.');
++  console.log('Logs stability passed: burst debounce, single reload, historical filters, stale predictions, bounded ML requests, unavailable failed estimates, missing inputs, valid zero estimates, chart reuse, and stable date options.');
+ }
+ main().catch(error => { console.error(error); process.exitCode = 1; });
+--- before/scripts/test_cloud_telemetry_sync.py
++++ after/scripts/test_cloud_telemetry_sync.py
+@@ -4,6 +4,7 @@
+ from pathlib import Path
+ import tempfile
+ import unittest
++from datetime import datetime, timedelta
+ from contextlib import closing
+ from unittest.mock import Mock, patch
+ 
+@@ -20,6 +21,7 @@
+         with closing(backend.get_db_connection()) as conn:
+             conn.execute('DELETE FROM telemetry')
+             conn.execute('DELETE FROM cloud_sync_state')
++            conn.execute('DELETE FROM telemetry_local_reset')
+             conn.commit()
+         self.env = patch.dict(os.environ, {'SUPABASE_URL': 'https://cloud.test', 'SUPABASE_SERVICE_ROLE_KEY': 'test-key'})
+         self.env.start()
+@@ -83,6 +85,33 @@
+         self.assertIsNone(saved['temperature'])
+         self.assertEqual(self.api.get('/api/historical').get_json()['temperatures'], [])
+ 
++    def test_reset_blocks_old_imports_and_accepts_new_readings(self):
++        backend.import_cloud_telemetry([self.row()])
++        response = self.api.delete('/api/telemetry')
++        self.assertEqual(response.status_code, 200)
++        reset = response.get_json()
++        self.assertEqual(reset['deleted_count'], 1)
++        self.assertEqual(self.api.get('/api/telemetry').get_json()['reset_at'], reset['reset_at'])
++        backend.init_sqlite_db()  # The boundary persists across backend initialization.
++        self.assertEqual(backend.import_cloud_telemetry([self.row()])['transferred'], 0)
++        self.assertEqual(self.api.get('/api/telemetry').get_json()['totalItems'], 0)
++        at_reset = {**self.row('old_post'), 'created': reset['reset_at']}
++        self.assertEqual(self.api.post('/api/telemetry', json=at_reset).status_code, 400)
++        new_time = (datetime.fromisoformat(reset['reset_at']) + timedelta(seconds=1)).isoformat()
++        self.assertEqual(backend.import_cloud_telemetry([self.row('new_cloud', created=new_time)])['transferred'], 1)
++        self.assertEqual(self.api.post('/api/telemetry', json=self.row('new_post', created=new_time)).status_code, 201)
++        with patch.object(backend.requests, 'get', return_value=self.response([self.row()])) as get:
++            self.assertEqual(backend.sync_cloud_telemetry_once()['transferred'], 0)
++            self.assertEqual(get.call_args.kwargs['params']['created'], 'gt.' + reset['reset_at'])
++        self.assertEqual(self.api.get('/api/telemetry').get_json()['totalItems'], 2)
++
++    def test_node_delete_does_not_reset_the_whole_history(self):
++        backend.import_cloud_telemetry([self.row(), self.row('other', node_id='node-7')])
++        self.assertEqual(self.api.delete('/api/telemetry?node_id=node-6').status_code, 200)
++        result = self.api.get('/api/telemetry').get_json()
++        self.assertEqual(result['totalItems'], 1)
++        self.assertIsNone(result['reset_at'])
++
+     def test_forwarding_includes_operating_window(self):
+         with patch.object(backend._schedule_executor, 'submit'):
+             response = self.api.post('/api/set-sleep', json={'node_id': 'node-6', 'sleep_seconds': 30,
+--- before/public/js/telemetry-new.js
++++ after/public/js/telemetry-new.js
+@@ -184,6 +184,15 @@
+  * Process one telemetry packet from the serial device.
+  * Fields expected: id, name?, temp, pressure, rssi, battery, status
+  */
++function telemetryNumber(value) {
++  return value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value);
++}
++
++function telemetryDisplay(value, decimals = 1) {
++  const number = telemetryNumber(value);
++  return number === null ? 'Unavailable' : number.toFixed(decimals);
++}
++
+ function _ingestPacket(packet) {
+   if (!packet || !packet.id) return;
+ 
+@@ -206,16 +215,16 @@
+     id:          nodeId,
+     name:        nodeName,
+     pb_id:       packet.pb_id || existing?.pb_id || null,
+-    temp:        parseFloat(packet.temp ?? packet.temperature ?? existing?.temp ?? 24.5),
+-    pressure:    parseFloat(packet.pressure ?? existing?.pressure ?? 0.45),
+-    rssi:        parseFloat(packet.rssi ?? existing?.rssi ?? -60),
+-    battery:     parseFloat(packet.battery ?? packet.voltage ?? existing?.battery ?? 3.9),
++    temp:        telemetryNumber(packet.temp ?? packet.temperature),
++    pressure:    telemetryNumber(packet.pressure),
++    rssi:        telemetryNumber(packet.rssi),
++    battery:     telemetryNumber(packet.battery ?? packet.voltage),
+     status:      packet.status || existing?.status || 'online',
+     wakeTime:    packet.wakeTime || existing?.wakeTime || '06:00',
+     sleepTime:   packet.sleepTime || existing?.sleepTime || '22:00',
+     intervalVal: parseInt(packet.intervalVal ?? existing?.intervalVal ?? 15),
+     intervalUnit: packet.intervalUnit || existing?.intervalUnit || 'Minutes',
+-    aircon_type: packet.aircon_type || existing?.aircon_type || 'Split Type (Inverter)',
++    aircon_type: packet.aircon_type || existing?.aircon_type || null,
+     created:     existing?.created || new Date().toISOString()
+   };
+ 
+@@ -298,7 +307,7 @@
+   // Save incoming control reading into PocketBase control logs (throttled)
+   // Skip if the caller explicitly set _skipDBSave (handled by separate DB cadence loop)
+   if (!packet._skipDBSave && typeof saveNodeTelemetryToSqlite === 'function') {
+-    saveNodeTelemetryToSqlite(node).catch(() => {});
++    saveNodeTelemetryToSqlite({ ...packet, name: node.name, pb_id: node.pb_id, battery: packet.battery ?? packet.voltage }).catch(() => {});
+   }
+ 
+   // Real-time rule evaluation across active nodes
+@@ -334,7 +343,7 @@
+ function _updateLiveBadge(node) {
+   const badge = document.getElementById('liveBadge');
+   if (!badge) return;
+-  badge.textContent = `📡 ${node.id} — ${Math.round(node.temp)}°C | ${node.pressure.toFixed(1)} kPa`;
++  badge.textContent = `📡 ${node.id} — ${telemetryDisplay(node.temp, 0)}°C | ${telemetryDisplay(node.pressure)} kPa`;
+   badge.style.display = 'block';
+ }
+ 
+@@ -477,17 +486,17 @@
+         id: n.name,
+         name: n.name,
+         pb_id: n.id,
+-        temp: parseFloat(latestTelemetry.temperature ?? n.temp ?? 24.5),
+-        pressure: parseFloat(latestTelemetry.pressure ?? n.pressure ?? 0.45),
+-        rssi: parseFloat(latestTelemetry.rssi ?? n.rssi ?? -60),
+-        battery: parseFloat(latestTelemetry.battery ?? n.battery ?? 3.9),
++        temp: telemetryNumber(latestTelemetry.temperature ?? n.temp),
++        pressure: telemetryNumber(latestTelemetry.pressure ?? n.pressure),
++        rssi: telemetryNumber(latestTelemetry.rssi ?? n.rssi),
++        battery: telemetryNumber(latestTelemetry.battery ?? n.battery),
+         status: latestTelemetry.status ?? n.status ?? 'online',
+         wakeTime: n.wake_time && n.wake_time !== '00:00' ? n.wake_time : '06:00',
+         sleepTime: n.sleep_time && n.sleep_time !== '00:00' ? n.sleep_time : '22:00',
+         intervalVal: parseInt(n.interval_val) || 15,
+         intervalUnit: n.interval_unit || 'Minutes',
+         created: n.created,
+-        aircon_type: n.aircon_type || 'Split Type (Inverter)'
++        aircon_type: n.aircon_type || null
+       });
+     });
+     console.log('[EcoTrack] activeNodesData now has', activeNodesData.length, 'items');
+@@ -588,10 +597,10 @@
+             id: t.node_id || t.sensor_name,
+             name: t.sensor_name || t.node_id,
+             pb_id: t.node_id,
+-            temp: parseFloat(t.temperature ?? 24.5),
+-            pressure: parseFloat(t.pressure ?? 0.45),
+-            battery: parseFloat(t.battery ?? 3.9),
+-            rssi: parseFloat(t.rssi ?? -60),
++            temp: telemetryNumber(t.temperature),
++            pressure: telemetryNumber(t.pressure),
++            battery: telemetryNumber(t.battery),
++            rssi: telemetryNumber(t.rssi),
+             status: t.status || 'online',
+             aircon_type: t.aircon_type,
+             _skipDBSave: true
+@@ -611,16 +620,16 @@
+             id: n.name || n.id,
+             name: n.name,
+             pb_id: n.id,
+-            temp: parseFloat(n.temp ?? 24.5),
+-            pressure: parseFloat(n.pressure ?? 0.45),
+-            battery: parseFloat(n.battery ?? 3.9),
+-            rssi: parseFloat(n.rssi ?? -60),
++            temp: telemetryNumber(n.temp),
++            pressure: telemetryNumber(n.pressure),
++            battery: telemetryNumber(n.battery),
++            rssi: telemetryNumber(n.rssi),
+             status: n.status || 'online',
+             wakeTime: n.wake_time && n.wake_time !== '00:00' ? n.wake_time : '06:00',
+             sleepTime: n.sleep_time && n.sleep_time !== '00:00' ? n.sleep_time : '22:00',
+             intervalVal: parseInt(n.interval_val) || 15,
+             intervalUnit: n.interval_unit || 'Minutes',
+-            aircon_type: n.aircon_type || 'Split Type (Inverter)',
++            aircon_type: n.aircon_type || null,
+             _skipDBSave: true
+           };
+           _ingestPacket(packet);
+@@ -1303,16 +1312,16 @@
+             pb_id: n.id, // Keep pb_id for updates
+             name: n.name,
+             status: latestTelemetry.status || n.status || 'online',
+-            temp: parseFloat(latestTelemetry.temperature ?? n.temp ?? 24.5),
+-            pressure: parseFloat(latestTelemetry.pressure ?? n.pressure ?? 0.45),
+-            rssi: parseFloat(latestTelemetry.rssi ?? n.rssi ?? -60),
+-            battery: parseFloat(latestTelemetry.battery ?? n.battery ?? 3.9),
++            temp: telemetryNumber(latestTelemetry.temperature ?? n.temp),
++            pressure: telemetryNumber(latestTelemetry.pressure ?? n.pressure),
++            rssi: telemetryNumber(latestTelemetry.rssi ?? n.rssi),
++            battery: telemetryNumber(latestTelemetry.battery ?? n.battery),
+             wakeTime: n.wake_time && n.wake_time !== '00:00' ? n.wake_time : '06:00',
+             sleepTime: n.sleep_time && n.sleep_time !== '00:00' ? n.sleep_time : '22:00',
+             intervalVal: parseInt(n.interval_val) || 15,
+             intervalUnit: n.interval_unit || 'Minutes',
+             created: n.created,
+-            aircon_type: n.aircon_type || 'Split Type (Inverter)'
++            aircon_type: n.aircon_type || null
+           };
+         });
+ 
+@@ -2074,13 +2083,13 @@
+ function createNodeElement(data) {
+   const div = document.createElement('div');
+   // Ensure all numeric fields are actually numbers (PocketBase may return strings)
+-  data.temp = parseFloat(data.temp) || 24.5;
+-  data.pressure = parseFloat(data.pressure) || 0.4;
+-  data.rssi = parseFloat(data.rssi) || -65;
+-  data.battery = parseFloat(data.battery) || 3.9;
+-  
+-  const signalBars = getSignalBars(data.rssi);
+-  const batteryPercent = Math.round((data.battery / 4.2) * 100);
++  data.temp = telemetryNumber(data.temp);
++  data.pressure = telemetryNumber(data.pressure);
++  data.rssi = telemetryNumber(data.rssi);
++  data.battery = telemetryNumber(data.battery);
++
++  const signalBars = data.rssi === null ? null : getSignalBars(data.rssi);
++  const batteryPercent = data.battery === null ? null : Math.round((data.battery / 4.2) * 100);
+   const isOnline = data.status === 'online';
+   const formatTime12h = (timeStr, defaultTime = '06:00 AM') => {
+     if (!timeStr || timeStr === '00:00') return defaultTime;
+@@ -2108,7 +2117,7 @@
+   }
+ 
+   // Signal strength text
+-  let signalText = 'WEAK';
++  let signalText = signalBars === null ? 'Unavailable' : 'WEAK';
+   let signalColor = '#fb7185';
+   if (signalBars >= 4) { signalText = 'STRONG'; signalColor = '#34d399'; }
+   else if (signalBars >= 3) { signalText = 'GOOD'; signalColor = '#34d399'; }
+@@ -2128,7 +2137,7 @@
+   if (!isOnline) acState = 'OFFLINE · ' + acState;
+   // Signal bars HTML
+   const signalBarsHtml = [1, 2, 3, 4, 5].map((bar) => {
+-    const filled = bar <= signalBars + 1;
++    const filled = signalBars !== null && bar <= signalBars + 1;
+     const height = 4 + (bar) * 3;
+     return `<div class="bar ${filled ? 'filled' : 'empty'}" style="height: ${height}px;"></div>`;
+   }).join('');
+@@ -2189,7 +2198,7 @@
+           </div>
+           <div class="telem-metric-data">
+             <div class="telem-metric-label">TEMPERATURE</div>
+-            <div class="telem-metric-value">${Math.round(data.temp)}<span class="unit">°C</span></div>
++            <div class="telem-metric-value">${telemetryDisplay(data.temp, 0)}<span class="unit">°C</span></div>
+           </div>
+         </div>
+         <div class="telem-wave-chart cyan">
+@@ -2211,7 +2220,7 @@
+           </div>
+           <div class="telem-metric-data">
+             <div class="telem-metric-label">PRESSURE</div>
+-            <div class="telem-metric-value">${data.pressure.toFixed(1)}<span class="unit">kPa</span></div>
++            <div class="telem-metric-value">${telemetryDisplay(data.pressure)}<span class="unit">kPa</span></div>
+           </div>
+         </div>
+         <div class="telem-wave-chart green">
+@@ -2232,7 +2241,7 @@
+           <div class="telem-signal-bars">${signalBarsHtml}</div>
+           <div class="telem-signal-text">
+             <span class="telem-signal-strength" style="color: ${signalColor}">${signalText}</span>
+-            <span class="telem-signal-dbm">${data.rssi} dBm</span>
++            <span class="telem-signal-dbm">${data.rssi === null ? 'Unavailable' : data.rssi + ' dBm'}</span>
+           </div>
+         </div>
+       </div>
+@@ -2249,7 +2258,7 @@
+             </svg>
+           </div>
+           <div class="telem-battery-info">
+-            <div class="telem-battery-percent">${batteryPercent}%</div>
++            <div class="telem-battery-percent">${batteryPercent === null ? 'Unavailable' : batteryPercent + '%'}</div>
+           </div>
+         </div>
+       </div>
+--- before/public/js/node-sync.js
++++ after/public/js/node-sync.js
+@@ -44,8 +44,8 @@
+     try {
+       let loc = packet.room_name ? {
+         roomName: packet.room_name,
+-        floorName: packet.floor_name || '2nd Floor - IT Wing',
+-        buildingName: packet.building_name || 'Main Campus Building'
++        floorName: packet.floor_name || 'Unassigned',
++        buildingName: packet.building_name || 'Unassigned'
+       } : null;
+       let airconType = packet.aircon_type || null;
+ 
+@@ -60,12 +60,12 @@
+         try {
+           const { data: nodeData } = await sb.from('nodes').select('*').eq('name', nodeName).maybeSingle();
+           if (nodeData) {
+-            airconType = nodeData.aircon_type || 'Split Type (Inverter)';
++            airconType = nodeData.aircon_type || null;
+             if (nodeData.room_id) {
+               const { data: room } = await sb.from('rooms').select('*').eq('id', nodeData.room_id).maybeSingle();
+               if (room) {
+-                let floorName = '2nd Floor - IT Wing';
+-                let buildingName = 'Main Campus Building';
++                let floorName = 'Unassigned';
++                let buildingName = 'Unassigned';
+                 if (room.floor_id) {
+                   const { data: floor } = await sb.from('floors').select('*').eq('id', room.floor_id).maybeSingle();
+                   if (floor) {
+@@ -85,9 +85,6 @@
+ 
+       if (!loc) {
+         loc = { roomName: 'Unassigned', floorName: 'Unassigned', buildingName: 'Unassigned' };
+-      }
+-      if (!airconType) {
+-        airconType = 'Split Type (Inverter)';
+       }
+ 
+       _nodeMetadataCache[nodeName] = { loc, airconType };

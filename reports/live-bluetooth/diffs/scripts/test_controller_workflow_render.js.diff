@@ -1,0 +1,41 @@
+--- before/scripts/test_controller_workflow_render.js
++++ scripts/test_controller_workflow_render.js
+@@ -1,6 +1,6 @@
+ // Isolated Chromium production-component checks; no account or network.
+ const {app,BrowserWindow}=require('electron'),fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+-const root=path.resolve(__dirname,'..'),out=path.join(root,'reports/ble-error-code');
++const root=path.resolve(__dirname,'..'),out=path.join(root,'reports/live-bluetooth');
+ app.setPath('userData',path.join(root,'scratch/controller-workflow-electron'));app.disableHardwareAcceleration();app.on('window-all-closed',()=>{});
+ const read=file=>fs.readFileSync(path.join(root,file),'utf8'),html=read('public/nodes.html'),control=read('public/control.html');
+ const section=(source,start,end)=>{const a=source.indexOf(start),b=source.indexOf(end,a);assert(a>=0&&b>a,start);return source.slice(a,b);};
+@@ -55,7 +55,7 @@
+  await listenForRemote('register');check(request.nearby===true&&get('nodeFormBrand').value==='Daikin'&&!get('registerRemoteBtn').disabled,'Detection result updates brand and releases buttons');
+  const preserved={name:get('nodeFormName').value,room:get('nodeFormRoom').value,brand:get('nodeFormBrand').value,password:get('registrationWifiPassword').value};
+  let resolveReconnect,selectedId;const reply=new Promise(resolve=>resolveReconnect=resolve);
+- window.EcoTrackHardwareCloud={connect:async id=>{selectedId=id;return reply;}};
++ window.EcoTrackHardwareCloud={reconnect:async id=>{selectedId=id;return reply;},connect:async()=>{throw Error('Reconnect should preserve the current link');}};
+  window.dispatchEvent(new CustomEvent('ecotrack:bluetooth-disconnected',{detail:{device_id:'esp32s3-fixture'}}));
+  check(get('registrationCloudStatus').dataset.state==='bluetooth'&&get('registrationCloudTitle').textContent==='Bluetooth: Reconnect required','Live disconnect uses Bluetooth status instead of a Supabase failure');
+  check(get('existingWifiMessage').textContent.startsWith('Previously confirmed'),'Disconnected setup identifies Wi-Fi as previously confirmed');
+@@ -63,12 +63,20 @@
+  check(get('reconnectRegistrationBtn').disabled&&get('reconnectRegistrationBtn').getAttribute('aria-busy')==='true'&&get('saveNodeBtn').disabled,'Reconnect provides immediate busy feedback and guards Save');
+  resolveReconnect({device_id:'esp32s3-fixture',wifi_status:'connected',wifi_ssid:'Fixture network',ip_address:'10.0.0.6'});
+  for(let n=0;n<12;n++)await Promise.resolve();
+- check(selectedId==='esp32s3-fixture'&&get('registrationCloudStatus').dataset.state==='pending'&&get('step3IpBadge').textContent==='10.0.0.6','Reconnect verifies the selected ESP32 and refreshes the reported IP');
++ check(selectedId==='esp32s3-fixture'&&get('registrationCloudStatus').dataset.state==='pending'&&get('step3IpBadge').textContent==='10.0.0.6','Reconnect reuses the selected ESP32 and refreshes the reported IP');
+  check(get('nodeFormName').value===preserved.name&&get('nodeFormRoom').value===preserved.room&&get('nodeFormBrand').value===preserved.brand&&get('registrationWifiPassword').value===preserved.password,'Reconnect preserves name, location, brand, and the recovery password');
+  check(!get('reconnectRegistrationBtn').disabled&&get('reconnectRegistrationBtn').getAttribute('aria-busy')==='false'&&!get('saveNodeBtn').disabled&&form.checkValidity(),'Reconnect releases controls and retains native form validity');
+  window.dispatchEvent(new CustomEvent('ecotrack:bluetooth-disconnected',{detail:{device_id:'another-controller'}}));
+  check(get('registrationCloudStatus').dataset.state==='pending','Another controller disconnect cannot change this wizard');
+  window.dispatchEvent(new CustomEvent('ecotrack:bluetooth-disconnected',{detail:{device_id:'esp32s3-fixture'}}));
++ const liveInfo={device_id:'esp32s3-fixture',wifi_status:'connected',wifi_ssid:'Fixture network',ip_address:'10.0.0.7',cloud_status:'error',firmware_version:'cloud-ir-controller-1.3-rxtx',capabilities:{ir_receiver:true,ir_transmitter:true}};
++ window.dispatchEvent(new CustomEvent('ecotrack:bluetooth-info',{detail:{info:liveInfo}}));
++ check(get('registrationCloudStatus').dataset.state==='pending'&&!get('summaryStatusBadge').textContent.includes('disconnected'),'A fresh Bluetooth reply clears a stale disconnect warning without claiming Supabase verification');
++ check(get('nodeFormFw').value===liveInfo.firmware_version&&get('nodeFormFw').readOnly&&get('nodeFormHw').readOnly&&get('nodeFormHw').value.includes('transmitter'),'Firmware and receiver/transmitter role come from the live ESP32');
++ reportRegistrationFailure(Object.assign(new Error('ESP32 Bluetooth is connected, but reading device information failed. Persistent GATT error.'),{code:'BLE_CONNECTION_FAILED',bluetooth_connected:true}));
++ check(get('registrationCloudStatus').dataset.state==='bluetooth_request'&&!get('summaryStatusBadge').textContent.includes('disconnected')&&!get('chooseRegistrationBtn').classList.contains('hidden'),'A connected request failure is distinguished from a physical disconnection');
++ window.dispatchEvent(new CustomEvent('ecotrack:bluetooth-info',{detail:{info:liveInfo}}));
++ check(get('registrationCloudStatus').dataset.state==='pending'&&get('chooseRegistrationBtn').classList.contains('hidden'),'The next successful read clears request failures and hides the alternate picker');
+  return checks;
+  })()`);
+  const capabilityCode=[

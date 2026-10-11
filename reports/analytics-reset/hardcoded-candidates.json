@@ -1,0 +1,1037 @@
+{
+  "scanned_files": 59,
+  "candidates": [
+    {
+      "file": "public/aircons.html",
+      "line": 1034,
+      "category": "assumed_metadata",
+      "excerpt": "'main campus building', 'engineering complex', 'science & technology center',"
+    },
+    {
+      "file": "public/aircons.html",
+      "line": 1037,
+      "category": "assumed_metadata",
+      "excerpt": "'server room a', 'server room b', 'laboratory a', 'laboratory b', 'main office area',"
+    },
+    {
+      "file": "public/control.html",
+      "line": 445,
+      "category": "assumed_metadata",
+      "excerpt": "<span id=\"compLatency\" class=\"font-mono font-bold text-emerald-600 dark:text-emerald-400\">42ms (Instant ACK)</span>"
+    },
+    {
+      "file": "public/control.html",
+      "line": 747,
+      "category": "assumed_metadata",
+      "excerpt": "<span id=\"diagNodeSnr\" class=\"font-mono text-teal-600 dark:text-teal-300 font-bold\">192.168.1.101</span>"
+    },
+    {
+      "file": "public/control.html",
+      "line": 1036,
+      "category": "assumed_metadata",
+      "excerpt": "<span id=\"cmdErrorNodeIp\" class=\"font-bold text-slate-800 dark:text-gray-200 truncate\">192.168.1.101</span>"
+    },
+    {
+      "file": "public/control.html",
+      "line": 1058,
+      "category": "assumed_metadata",
+      "excerpt": "ICMP Network Probe: <span id=\"cmdPingTargetIp\">192.168.1.101</span>"
+    },
+    {
+      "file": "public/control.html",
+      "line": 1063,
+      "category": "assumed_metadata",
+      "excerpt": "Pinging 192.168.1.101 with 32 bytes of data:"
+    },
+    {
+      "file": "public/control.html",
+      "line": 1064,
+      "category": "assumed_metadata",
+      "excerpt": "Reply from 192.168.1.101: bytes=32 time=28ms TTL=64 RSSI=-65dBm"
+    },
+    {
+      "file": "public/control.html",
+      "line": 1259,
+      "category": "assumed_measurement",
+      "excerpt": "quickStatusText.textContent = `POWER ON \u2022 ${activeAc.state?.temperature || 24}\u00b0C \u2022 ${(activeAc.state?.mode || 'cool').toUpperCase()}`;"
+    },
+    {
+      "file": "public/control.html",
+      "line": 1505,
+      "category": "assumed_measurement",
+      "excerpt": "const curTemp = state.temperature || 24;"
+    },
+    {
+      "file": "public/control.html",
+      "line": 1588,
+      "category": "assumed_metadata",
+      "excerpt": "dispNodeSnr.textContent = node?.ip_address || (node?.rssi ? '192.168.1.101' : '\u2014');"
+    },
+    {
+      "file": "public/control.html",
+      "line": 2133,
+      "category": "assumed_measurement",
+      "excerpt": "? `POWER ON \u2022 ${(state.mode || 'cool').toUpperCase()} ${state.temperature || 24}\u00b0C \u2022 FAN ${(state.fan || 'auto').toUpperCase()}`"
+    },
+    {
+      "file": "public/control.html",
+      "line": 2170,
+      "category": "assumed_measurement",
+      "excerpt": "document.getElementById('simLcdTemp').textContent = `${state.temperature || 24}\u00b0C`;"
+    },
+    {
+      "file": "public/control.html",
+      "line": 2225,
+      "category": "assumed_measurement",
+      "excerpt": "else if (cmdType === 'TEMP_UP') { command = 'TEMP'; val = (state.temperature || 24) + 1; }"
+    },
+    {
+      "file": "public/control.html",
+      "line": 2226,
+      "category": "assumed_measurement",
+      "excerpt": "else if (cmdType === 'TEMP_DOWN') { command = 'TEMP'; val = (state.temperature || 24) - 1; }"
+    },
+    {
+      "file": "public/control.html",
+      "line": 2261,
+      "category": "assumed_metadata",
+      "excerpt": "document.getElementById('diagNodeSnr').textContent = node?.ip_address || (node?.rssi ? '192.168.1.101' : 'N/A');"
+    },
+    {
+      "file": "public/control.html",
+      "line": 2582,
+      "category": "demo_or_random",
+      "excerpt": "const lat = Math.floor(Math.random() * 7) + 12;"
+    },
+    {
+      "file": "public/control.html",
+      "line": 2592,
+      "category": "assumed_measurement",
+      "excerpt": "<span style=\"color: #2dd4bf !important; font-weight: 600;\">RSSI=${node?.rssi || -65}dBm</span>"
+    },
+    {
+      "file": "public/control.html",
+      "line": 2677,
+      "category": "assumed_measurement",
+      "excerpt": "else if (cmd === 'TEMP_UP') executeCommand('TEMP', (device.state?.temperature || 24) + 1);"
+    },
+    {
+      "file": "public/control.html",
+      "line": 2678,
+      "category": "assumed_measurement",
+      "excerpt": "else if (cmd === 'TEMP_DOWN') executeCommand('TEMP', (device.state?.temperature || 24) - 1);"
+    },
+    {
+      "file": "public/dashboard.html",
+      "line": 254,
+      "category": "assumed_measurement",
+      "excerpt": "tempVal.textContent = Math.round(Number(ac.state?.temperature || 24));"
+    },
+    {
+      "file": "public/dashboard.html",
+      "line": 356,
+      "category": "assumed_measurement",
+      "excerpt": "const prevTemp = Math.round(Number(ac.state.temperature || 24));"
+    },
+    {
+      "file": "public/dashboard.html",
+      "line": 558,
+      "category": "assumed_measurement",
+      "excerpt": "<span class=\"target-temp-val text-3xl font-black font-mono tracking-tight tabular-nums ${isPowerOn ? 'text-cyan-600 dark:text-cyan-400' : 'text-gray-400 dark:text-gray-500'}\">${Math.round(Number(ac.state?.temperature || 24))}</span>"
+    },
+    {
+      "file": "public/dashboard.html",
+      "line": 656,
+      "category": "assumed_metadata",
+      "excerpt": "const ip = n.ip_address || '192.168.1.101';"
+    },
+    {
+      "file": "public/logs.html",
+      "line": 389,
+      "category": "assumed_metadata",
+      "excerpt": "<span>Tariff: <strong id=\"headerTariffDisplay\" class=\"font-mono font-black text-amber-600 dark:text-amber-400\">\u20b110.35 / kWh</strong></span>"
+    },
+    {
+      "file": "public/logs.html",
+      "line": 555,
+      "category": "assumed_metadata",
+      "excerpt": "<span id=\"kpiCostRate\" class=\"font-mono font-bold text-emerald-600 dark:text-emerald-400\">\u20b110.35 / kWh</span>"
+    },
+    {
+      "file": "public/logs.html",
+      "line": 679,
+      "category": "assumed_metadata",
+      "excerpt": "Electricity Rate: <span id=\"costCardRate\" class=\"font-bold text-amber-600 dark:text-amber-400\">\u20b110.35 / kWh</span>"
+    },
+    {
+      "file": "public/logs.html",
+      "line": 854,
+      "category": "assumed_metadata",
+      "excerpt": "<input type=\"number\" id=\"tariffRateInput\" step=\"0.01\" min=\"0.10\" max=\"100.00\" value=\"10.35\" required"
+    },
+    {
+      "file": "public/logs.html",
+      "line": 859,
+      "category": "assumed_metadata",
+      "excerpt": "Default: \u20b110.35 / kWh (Davao Light residential rate). All cost predictions dynamically multiply by this value."
+    },
+    {
+      "file": "public/logs.html",
+      "line": 863,
+      "category": "assumed_metadata",
+      "excerpt": "<input type=\"hidden\" id=\"targetBudgetInput\" value=\"300.0\">"
+    },
+    {
+      "file": "public/logs.html",
+      "line": 870,
+      "category": "assumed_metadata",
+      "excerpt": "<input type=\"text\" id=\"utilityProviderInput\" value=\"Davao Light & Power Company (DLPC)\""
+    },
+    {
+      "file": "public/logs.html",
+      "line": 890,
+      "category": "assumed_metadata",
+      "excerpt": "Reset to Default (\u20b110.35)"
+    },
+    {
+      "file": "public/logs.html",
+      "line": 948,
+      "category": "assumed_metadata",
+      "excerpt": "Active Scope: <strong id=\"modalScopePeriod\" class=\"text-slate-900 dark:text-white uppercase font-black\">Daily</strong> \u2022 Tariff Multiplier: <strong id=\"modalScopeTariff\" class=\"text-amber-600 dark:text-amber-400 font-mono font-bold\">\u20b110.35 "
+    },
+    {
+      "file": "public/js/aircon-system.js",
+      "line": 225,
+      "category": "demo_or_random",
+      "excerpt": "// ===== PURGE STALE MOCK DATA FROM PREVIOUS SESSIONS & AUTO-DEDUPLICATE ====="
+    },
+    {
+      "file": "public/js/aircon-system.js",
+      "line": 226,
+      "category": "demo_or_random",
+      "excerpt": "// Only purge legacy demo mock data (e.g. Living Room, Master Bedroom) or outdated (node- patterns"
+    },
+    {
+      "file": "public/js/aircon-system.js",
+      "line": 238,
+      "category": "demo_or_random",
+      "excerpt": "console.log('[AirconSystem] Purged legacy mock/outdated aircon names from localStorage.');"
+    },
+    {
+      "file": "public/js/aircon-system.js",
+      "line": 250,
+      "category": "demo_or_random",
+      "excerpt": "// ===== DEFAULT SEED DATA (empty \u00e2\u20ac\u201d all data comes from Supabase or user registration) ====="
+    },
+    {
+      "file": "public/js/aircon-system.js",
+      "line": 289,
+      "category": "demo_or_random",
+      "excerpt": "id: 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),"
+    },
+    {
+      "file": "public/js/aircon-system.js",
+      "line": 470,
+      "category": "assumed_measurement",
+      "excerpt": "rssi: isOnline ? (n.rssi || -65) : null,"
+    },
+    {
+      "file": "public/js/aircon-system.js",
+      "line": 715,
+      "category": "demo_or_random",
+      "excerpt": "// Only purge old mock nodes with fake room names (Living/Bed, Kitchen/Dining)"
+    },
+    {
+      "file": "public/js/aircon-system.js",
+      "line": 1024,
+      "category": "assumed_measurement",
+      "excerpt": "rssi: deviceData.rssi || -65,"
+    },
+    {
+      "file": "public/js/aircon-system.js",
+      "line": 1103,
+      "category": "assumed_measurement",
+      "excerpt": "target.rssi = target.rssi || -65;"
+    },
+    {
+      "file": "public/js/aircon-system.js",
+      "line": 1139,
+      "category": "assumed_measurement",
+      "excerpt": "rssi: target.rssi || -65,"
+    },
+    {
+      "file": "public/js/aircon-system.js",
+      "line": 1175,
+      "category": "demo_or_random",
+      "excerpt": "// Purge stale mock aircons (Living Room, Master Bedroom, etc.)"
+    },
+    {
+      "file": "public/js/aircon-system.js",
+      "line": 1773,
+      "category": "demo_or_random",
+      "excerpt": "id: cmd.id || 'cmd_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),"
+    },
+    {
+      "file": "public/js/analytics.js",
+      "line": 458,
+      "category": "demo_or_random",
+      "excerpt": "await updateMultiNodeData(); // Pull live backend data instead of mock"
+    },
+    {
+      "file": "public/js/analytics.js",
+      "line": 839,
+      "category": "assumed_measurement",
+      "excerpt": "const temp = latestTel ? parseFloat(latestTel.temperature || 0).toFixed(1)"
+    },
+    {
+      "file": "public/js/analytics.js",
+      "line": 840,
+      "category": "assumed_measurement",
+      "excerpt": ": parseFloat(n.temp || 0).toFixed(1);"
+    },
+    {
+      "file": "public/js/analytics.js",
+      "line": 841,
+      "category": "assumed_measurement",
+      "excerpt": "const pressure = latestTel ? parseFloat(latestTel.pressure || 0).toFixed(1)"
+    },
+    {
+      "file": "public/js/analytics.js",
+      "line": 842,
+      "category": "assumed_measurement",
+      "excerpt": ": parseFloat(n.pressure || 0).toFixed(1);"
+    },
+    {
+      "file": "public/js/analytics.js",
+      "line": 846,
+      "category": "assumed_measurement",
+      "excerpt": "const rssi = latestTel ? (latestTel.rssi || -100) + ' dBm'"
+    },
+    {
+      "file": "public/js/analytics.js",
+      "line": 847,
+      "category": "assumed_measurement",
+      "excerpt": ": (n.rssi || -100) + ' dBm';"
+    },
+    {
+      "file": "public/js/analytics.js",
+      "line": 2049,
+      "category": "assumed_measurement",
+      "excerpt": "const b = t.battery || 0;"
+    },
+    {
+      "file": "public/js/analytics.js",
+      "line": 2269,
+      "category": "assumed_measurement",
+      "excerpt": "const diff = Math.abs((latest.temperature || 24) - (room.target_temperature || 24));"
+    },
+    {
+      "file": "public/js/analytics.js",
+      "line": 2271,
+      "category": "assumed_measurement",
+      "excerpt": "battSum += latest.battery || 100;"
+    },
+    {
+      "file": "public/js/analytics.js",
+      "line": 2272,
+      "category": "assumed_measurement",
+      "excerpt": "let rssiScore = (((latest.rssi || -70) + 100) / 70) * 100;"
+    },
+    {
+      "file": "public/js/global-notifications.js",
+      "line": 643,
+      "category": "demo_or_random",
+      "excerpt": "id: notifId || `v_hist_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,"
+    },
+    {
+      "file": "public/js/global-notifications.js",
+      "line": 748,
+      "category": "assumed_measurement",
+      "excerpt": "temp: n.temp ?? n.temperature ?? 0,"
+    },
+    {
+      "file": "public/js/global-notifications.js",
+      "line": 749,
+      "category": "assumed_measurement",
+      "excerpt": "temperature: n.temp ?? n.temperature ?? 0,"
+    },
+    {
+      "file": "public/js/global-notifications.js",
+      "line": 750,
+      "category": "assumed_measurement",
+      "excerpt": "battery: n.battery ?? 100,"
+    },
+    {
+      "file": "public/js/global-notifications.js",
+      "line": 751,
+      "category": "assumed_measurement",
+      "excerpt": "pressure: n.pressure ?? 0,"
+    },
+    {
+      "file": "public/js/global-notifications.js",
+      "line": 752,
+      "category": "assumed_measurement",
+      "excerpt": "rssi: n.rssi ?? 0,"
+    },
+    {
+      "file": "public/js/login.js",
+      "line": 569,
+      "category": "demo_or_random",
+      "excerpt": "adminId = 'admin_' + Math.random().toString(36).substring(2, 9);"
+    },
+    {
+      "file": "public/js/logs.js",
+      "line": 651,
+      "category": "demo_or_random",
+      "excerpt": "progress += Math.floor(Math.random() * 12) + 5;"
+    },
+    {
+      "file": "public/js/logs.js",
+      "line": 988,
+      "category": "assumed_metadata",
+      "excerpt": "return (stored && !isNaN(stored) && stored > 0) ? stored : 10.35;"
+    },
+    {
+      "file": "public/js/logs.js",
+      "line": 993,
+      "category": "assumed_metadata",
+      "excerpt": "return (stored && !isNaN(stored) && stored > 0) ? stored : 300.0;"
+    },
+    {
+      "file": "public/js/logs.js",
+      "line": 997,
+      "category": "assumed_metadata",
+      "excerpt": "return localStorage.getItem('ecoTrack_utility_provider') || 'Davao Light & Power Company (DLPC)';"
+    },
+    {
+      "file": "public/js/logs.js",
+      "line": 1031,
+      "category": "assumed_metadata",
+      "excerpt": "provider: provider || 'Davao Light & Power Company (DLPC)',"
+    },
+    {
+      "file": "public/js/logs.js",
+      "line": 1088,
+      "category": "assumed_metadata",
+      "excerpt": "const rate = parseFloat(rateInput.value) || 10.35;"
+    },
+    {
+      "file": "public/js/logs.js",
+      "line": 1116,
+      "category": "assumed_metadata",
+      "excerpt": "if (rateInput) rateInput.value = '10.35';"
+    },
+    {
+      "file": "public/js/logs.js",
+      "line": 1117,
+      "category": "assumed_metadata",
+      "excerpt": "if (budgetInput) budgetInput.value = '300.0';"
+    },
+    {
+      "file": "public/js/logs.js",
+      "line": 1118,
+      "category": "assumed_metadata",
+      "excerpt": "if (providerInput) providerInput.value = 'Davao Light & Power Company (DLPC)';"
+    },
+    {
+      "file": "public/js/logs.js",
+      "line": 1188,
+      "category": "invented_estimate",
+      "excerpt": "const powerRatings = {"
+    },
+    {
+      "file": "public/js/logs.js",
+      "line": 1220,
+      "category": "invented_estimate",
+      "excerpt": "const pw = powerRatings[airconType] || 1.5;"
+    },
+    {
+      "file": "public/js/logs.js",
+      "line": 1223,
+      "category": "invented_estimate",
+      "excerpt": "const tempFactor = (!isNaN(temp) && temp > 0) ? (temp < 22 ? 1.15 : temp > 26 ? 0.85 : 1.0) : 1.0;"
+    },
+    {
+      "file": "public/js/logs.js",
+      "line": 1224,
+      "category": "invented_estimate",
+      "excerpt": "const weight = pw * tempFactor;"
+    },
+    {
+      "file": "public/js/logs.js",
+      "line": 2104,
+      "category": "assumed_measurement",
+      "excerpt": "acOnRatio: off ? 0 : 1, setpoint: state?.temp ?? 24, mode };"
+    },
+    {
+      "file": "public/js/logs.js",
+      "line": 2284,
+      "category": "invented_estimate",
+      "excerpt": "const fallbackAvg = p0Temps.length ? p0Temps.reduce((a, b) => a + b, 0) / p0Temps.length : 24.0;"
+    },
+    {
+      "file": "public/js/logs.js",
+      "line": 2285,
+      "category": "invented_estimate",
+      "excerpt": "temperatures.push(fallbackAvg);"
+    },
+    {
+      "file": "public/js/logs.js",
+      "line": 2297,
+      "category": "invented_estimate",
+      "excerpt": "if (job.kwh === null && !controller.signal.aborted) job.kwh = features.hoursUsed * 1.5 * Math.max(0.8, Math.min(1.4, 1 + (25 - average) * 0.05));"
+    },
+    {
+      "file": "public/js/logs.js",
+      "line": 2312,
+      "category": "invented_estimate",
+      "excerpt": "? (priorOperating?.runtimeHrs ?? (Number.isFinite(priorKwh) ? priorKwh / 1.5 : null))"
+    },
+    {
+      "file": "public/js/logs.js",
+      "line": 3244,
+      "category": "assumed_metadata",
+      "excerpt": "['Davao Light Tariff', `PHP ${currentTariffRate.toFixed(2)} / kWh`],"
+    },
+    {
+      "file": "public/js/logs.js",
+      "line": 3350,
+      "category": "assumed_metadata",
+      "excerpt": "const summaryMsg = `Air conditioning operational telemetry indicates stable environmental conditions across all monitored campus zones. Aggregate electricity demand aligns closely with projected energy consumption baselines with 0 critical "
+    },
+    {
+      "file": "public/js/logs.js",
+      "line": 3350,
+      "category": "invented_estimate",
+      "excerpt": "const summaryMsg = `Air conditioning operational telemetry indicates stable environmental conditions across all monitored campus zones. Aggregate electricity demand aligns closely with projected energy consumption baselines with 0 critical "
+    },
+    {
+      "file": "public/js/logs.js",
+      "line": 3763,
+      "category": "assumed_metadata",
+      "excerpt": "{ label: `Prevailing Davao Light Rate`, val: `PHP ${tariffRate.toFixed(2)}/kWh`, color: [59, 130, 246] }"
+    },
+    {
+      "file": "public/js/maintenance-modal.js",
+      "line": 64,
+      "category": "demo_or_random",
+      "excerpt": "return id.includes('-TEST-') || id.startsWith('TEST-') || id.endsWith('-TEST') || id.includes('TEST_') || id.includes('MOCK');"
+    },
+    {
+      "file": "public/js/maintenance-modal.js",
+      "line": 1303,
+      "category": "demo_or_random",
+      "excerpt": "operation = { signature, id: 'desktop-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) };"
+    },
+    {
+      "file": "public/js/maintenance-modal.js",
+      "line": 1455,
+      "category": "assumed_measurement",
+      "excerpt": "temp: { name: 'Temperature', status: 'Connected', val: `${a.temp || 24}\u00b0C`, code: 'healthy' },"
+    },
+    {
+      "file": "public/js/maintenance-modal.js",
+      "line": 2010,
+      "category": "demo_or_random",
+      "excerpt": "const chName = `maint_desktop_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;"
+    },
+    {
+      "file": "public/js/maintenance-modal.js",
+      "line": 6143,
+      "category": "demo_or_random",
+      "excerpt": "const newReportId = `REP-${Math.floor(1000 + Math.random() * 9000)}`;"
+    },
+    {
+      "file": "public/js/maintenance-modal.js",
+      "line": 8370,
+      "category": "demo_or_random",
+      "excerpt": "// Target reports do not exist in the remote database (e.g. mock/test records, already removed, or uncommitted local drafts)."
+    },
+    {
+      "file": "public/js/maintenance-modal.js",
+      "line": 8381,
+      "category": "demo_or_random",
+      "excerpt": "return s.includes('-TEST-') || s.startsWith('TEST-') || s.endsWith('-TEST') || s.includes('TEST_') || s.includes('MOCK');"
+    },
+    {
+      "file": "public/js/maintenance-modal.js",
+      "line": 8462,
+      "category": "demo_or_random",
+      "excerpt": "// Purge duplicate and mock/test reports from localStorage on startup"
+    },
+    {
+      "file": "public/js/node-sync.js",
+      "line": 48,
+      "category": "assumed_metadata",
+      "excerpt": "buildingName: packet.building_name || 'Main Campus Building'"
+    },
+    {
+      "file": "public/js/node-sync.js",
+      "line": 68,
+      "category": "assumed_metadata",
+      "excerpt": "let buildingName = 'Main Campus Building';"
+    },
+    {
+      "file": "public/js/notifications.js",
+      "line": 617,
+      "category": "assumed_measurement",
+      "excerpt": "temp: n.temp || 0,"
+    },
+    {
+      "file": "public/js/notifications.js",
+      "line": 618,
+      "category": "assumed_measurement",
+      "excerpt": "pressure: n.pressure || 0,"
+    },
+    {
+      "file": "public/js/notifications.js",
+      "line": 619,
+      "category": "assumed_measurement",
+      "excerpt": "battery: n.battery || 0,"
+    },
+    {
+      "file": "public/js/notifications.js",
+      "line": 620,
+      "category": "assumed_measurement",
+      "excerpt": "rssi: n.rssi || 0"
+    },
+    {
+      "file": "public/js/notifications.js",
+      "line": 1151,
+      "category": "assumed_measurement",
+      "excerpt": "const temp = Number(node.temp ?? node.temperature ?? 0);"
+    },
+    {
+      "file": "public/js/notifications.js",
+      "line": 1152,
+      "category": "assumed_measurement",
+      "excerpt": "const pressure = Number(node.pressure ?? 0);"
+    },
+    {
+      "file": "public/js/notifications.js",
+      "line": 1153,
+      "category": "assumed_measurement",
+      "excerpt": "const battery = Number(node.battery ?? 0);"
+    },
+    {
+      "file": "public/js/rules.js",
+      "line": 2011,
+      "category": "assumed_measurement",
+      "excerpt": "temperature: n.temp ?? n.temperature ?? 0,"
+    },
+    {
+      "file": "public/js/rules.js",
+      "line": 2012,
+      "category": "assumed_measurement",
+      "excerpt": "temp: n.temp ?? n.temperature ?? 0,"
+    },
+    {
+      "file": "public/js/rules.js",
+      "line": 2013,
+      "category": "assumed_measurement",
+      "excerpt": "battery: n.battery ?? 100,"
+    },
+    {
+      "file": "public/js/rules.js",
+      "line": 2014,
+      "category": "assumed_measurement",
+      "excerpt": "pressure: n.pressure ?? 0,"
+    },
+    {
+      "file": "public/js/rules.js",
+      "line": 2462,
+      "category": "assumed_measurement",
+      "excerpt": "const recordedVal = `${Math.round(telemetry.temp ?? telemetry.temperature ?? 0)}\u00b0C`;"
+    },
+    {
+      "file": "public/js/scheduler.js",
+      "line": 918,
+      "category": "assumed_measurement",
+      "excerpt": "const pressure = node.pressure || 0.45;"
+    },
+    {
+      "file": "public/js/shared.js",
+      "line": 60,
+      "category": "demo_or_random",
+      "excerpt": "// Mock data removed in favor of live telemetry."
+    },
+    {
+      "file": "public/js/shared.js",
+      "line": 307,
+      "category": "demo_or_random",
+      "excerpt": "id: notifId || `v_hist_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,"
+    },
+    {
+      "file": "public/js/staff.js",
+      "line": 4,
+      "category": "demo_or_random",
+      "excerpt": "// State - clean any legacy mock staff from localStorage on load"
+    },
+    {
+      "file": "public/js/staff.js",
+      "line": 119,
+      "category": "assumed_metadata",
+      "excerpt": "buildingName: s.building_name || 'Main Campus Building',"
+    },
+    {
+      "file": "public/js/staff.js",
+      "line": 123,
+      "category": "assumed_metadata",
+      "excerpt": "roomName: s.room_name || ((s.room_id === 'all_rooms' || s.floor_name === 'All Floors' || s.building_name === 'All Buildings') ? 'All Rooms' : 'Server Room A'),"
+    },
+    {
+      "file": "public/js/staff.js",
+      "line": 124,
+      "category": "assumed_metadata",
+      "excerpt": "assignment: s.assignment || `${s.building_name || 'Main Campus Building'} \u2022 ${s.floor_name || '2nd Floor - IT Wing'} \u2022 ${s.room_name || 'Server Room A'}`,"
+    },
+    {
+      "file": "public/js/staff.js",
+      "line": 440,
+      "category": "assumed_metadata",
+      "excerpt": "<span class=\"font-bold text-gray-800 dark:text-white text-xs\">${staff.roomName || 'Server Room A'}</span>"
+    },
+    {
+      "file": "public/js/staff.js",
+      "line": 1038,
+      "category": "assumed_metadata",
+      "excerpt": "const buildingName = (bSelect?.selectedOptions && bSelect.selectedOptions[0]) ? bSelect.selectedOptions[0].text : (staff.buildingName || (buildingId === 'all_buildings' ? 'All Buildings' : 'Main Campus Building'));"
+    },
+    {
+      "file": "public/js/staff.js",
+      "line": 1042,
+      "category": "assumed_metadata",
+      "excerpt": "const roomName = (rSelect?.selectedOptions && rSelect.selectedOptions[0]) ? rSelect.selectedOptions[0].text : (staff.roomName || (roomId === 'all_rooms' ? 'All Rooms' : 'Server Room A'));"
+    },
+    {
+      "file": "public/js/staff.js",
+      "line": 1250,
+      "category": "assumed_metadata",
+      "excerpt": "if (locEl) locEl.textContent = `${staff.roomName || 'Server Room A'} \u2022 ${staff.floorName || '2nd Floor'}, ${staff.buildingName || 'Main Campus'}`;"
+    },
+    {
+      "file": "public/js/staff.js",
+      "line": 1327,
+      "category": "assumed_metadata",
+      "excerpt": "const buildingName = (bSelect?.selectedOptions && bSelect.selectedOptions[0]) ? bSelect.selectedOptions[0].text : (buildingId === 'all_buildings' ? 'All Buildings' : 'Main Campus Building');"
+    },
+    {
+      "file": "public/js/staff.js",
+      "line": 1331,
+      "category": "assumed_metadata",
+      "excerpt": "const roomName = (rSelect?.selectedOptions && rSelect.selectedOptions[0]) ? rSelect.selectedOptions[0].text : (roomId === 'all_rooms' ? 'All Rooms' : 'Server Room A');"
+    },
+    {
+      "file": "public/js/staff.js",
+      "line": 1334,
+      "category": "demo_or_random",
+      "excerpt": "id: 'stf_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6),"
+    },
+    {
+      "file": "public/js/staff.js",
+      "line": 1376,
+      "category": "demo_or_random",
+      "excerpt": "if (!pendingStaffRegistration || pendingStaffRegistration.signature !== signature) pendingStaffRegistration = { signature, id: 'desktop-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) };"
+    },
+    {
+      "file": "public/js/staff.js",
+      "line": 1500,
+      "category": "assumed_metadata",
+      "excerpt": "if (locEl) locEl.textContent = `${staff.roomName || 'Server Room A'} \u2022 ${staff.floorName || '2nd Floor'}, ${staff.buildingName || 'Main Campus'}`;"
+    },
+    {
+      "file": "public/js/staff.js",
+      "line": 1640,
+      "category": "assumed_metadata",
+      "excerpt": "const room = staff.roomName || 'Server Room A';"
+    },
+    {
+      "file": "public/js/staff.js",
+      "line": 1762,
+      "category": "assumed_metadata",
+      "excerpt": "if (locEl) locEl.textContent = `${staff.roomName || 'Server Room A'} \u2022 ${staff.floorName || '2nd Floor'}, ${staff.buildingName || 'Main Campus'}`;"
+    },
+    {
+      "file": "public/js/staff.js",
+      "line": 2142,
+      "category": "assumed_metadata",
+      "excerpt": "if (rmEl) rmEl.textContent = staff.roomName || 'Server Room A';"
+    },
+    {
+      "file": "public/js/supabase.umd.js",
+      "line": 8,
+      "category": "demo_or_random",
+      "excerpt": "[redacted configuration line]"
+    },
+    {
+      "file": "public/js/telemetry-new.js",
+      "line": 209,
+      "category": "assumed_measurement",
+      "excerpt": "temp:        parseFloat(packet.temp ?? packet.temperature ?? existing?.temp ?? 24.5),"
+    },
+    {
+      "file": "public/js/telemetry-new.js",
+      "line": 210,
+      "category": "assumed_measurement",
+      "excerpt": "pressure:    parseFloat(packet.pressure ?? existing?.pressure ?? 0.45),"
+    },
+    {
+      "file": "public/js/telemetry-new.js",
+      "line": 211,
+      "category": "assumed_measurement",
+      "excerpt": "rssi:        parseFloat(packet.rssi ?? existing?.rssi ?? -60),"
+    },
+    {
+      "file": "public/js/telemetry-new.js",
+      "line": 212,
+      "category": "assumed_measurement",
+      "excerpt": "battery:     parseFloat(packet.battery ?? packet.voltage ?? existing?.battery ?? 3.9),"
+    },
+    {
+      "file": "public/js/telemetry-new.js",
+      "line": 480,
+      "category": "assumed_measurement",
+      "excerpt": "temp: parseFloat(latestTelemetry.temperature ?? n.temp ?? 24.5),"
+    },
+    {
+      "file": "public/js/telemetry-new.js",
+      "line": 481,
+      "category": "assumed_measurement",
+      "excerpt": "pressure: parseFloat(latestTelemetry.pressure ?? n.pressure ?? 0.45),"
+    },
+    {
+      "file": "public/js/telemetry-new.js",
+      "line": 482,
+      "category": "assumed_measurement",
+      "excerpt": "rssi: parseFloat(latestTelemetry.rssi ?? n.rssi ?? -60),"
+    },
+    {
+      "file": "public/js/telemetry-new.js",
+      "line": 483,
+      "category": "assumed_measurement",
+      "excerpt": "battery: parseFloat(latestTelemetry.battery ?? n.battery ?? 3.9),"
+    },
+    {
+      "file": "public/js/telemetry-new.js",
+      "line": 591,
+      "category": "assumed_measurement",
+      "excerpt": "temp: parseFloat(t.temperature ?? 24.5),"
+    },
+    {
+      "file": "public/js/telemetry-new.js",
+      "line": 592,
+      "category": "assumed_measurement",
+      "excerpt": "pressure: parseFloat(t.pressure ?? 0.45),"
+    },
+    {
+      "file": "public/js/telemetry-new.js",
+      "line": 593,
+      "category": "assumed_measurement",
+      "excerpt": "battery: parseFloat(t.battery ?? 3.9),"
+    },
+    {
+      "file": "public/js/telemetry-new.js",
+      "line": 594,
+      "category": "assumed_measurement",
+      "excerpt": "rssi: parseFloat(t.rssi ?? -60),"
+    },
+    {
+      "file": "public/js/telemetry-new.js",
+      "line": 614,
+      "category": "assumed_measurement",
+      "excerpt": "temp: parseFloat(n.temp ?? 24.5),"
+    },
+    {
+      "file": "public/js/telemetry-new.js",
+      "line": 615,
+      "category": "assumed_measurement",
+      "excerpt": "pressure: parseFloat(n.pressure ?? 0.45),"
+    },
+    {
+      "file": "public/js/telemetry-new.js",
+      "line": 616,
+      "category": "assumed_measurement",
+      "excerpt": "battery: parseFloat(n.battery ?? 3.9),"
+    },
+    {
+      "file": "public/js/telemetry-new.js",
+      "line": 617,
+      "category": "assumed_measurement",
+      "excerpt": "rssi: parseFloat(n.rssi ?? -60),"
+    },
+    {
+      "file": "public/js/telemetry-new.js",
+      "line": 1306,
+      "category": "assumed_measurement",
+      "excerpt": "temp: parseFloat(latestTelemetry.temperature ?? n.temp ?? 24.5),"
+    },
+    {
+      "file": "public/js/telemetry-new.js",
+      "line": 1307,
+      "category": "assumed_measurement",
+      "excerpt": "pressure: parseFloat(latestTelemetry.pressure ?? n.pressure ?? 0.45),"
+    },
+    {
+      "file": "public/js/telemetry-new.js",
+      "line": 1308,
+      "category": "assumed_measurement",
+      "excerpt": "rssi: parseFloat(latestTelemetry.rssi ?? n.rssi ?? -60),"
+    },
+    {
+      "file": "public/js/telemetry-new.js",
+      "line": 1309,
+      "category": "assumed_measurement",
+      "excerpt": "battery: parseFloat(latestTelemetry.battery ?? n.battery ?? 3.9),"
+    },
+    {
+      "file": "public/js/telemetry-new.js",
+      "line": 2387,
+      "category": "assumed_measurement",
+      "excerpt": "const batteryValue = nodeData.battery ?? 0;"
+    },
+    {
+      "file": "src/main.js",
+      "line": 237,
+      "category": "assumed_measurement",
+      "excerpt": "rssi: item.rssi || -60,"
+    },
+    {
+      "file": "backend/app.py",
+      "line": 612,
+      "category": "assumed_metadata",
+      "excerpt": "building_name = item.get('building_name') or 'Main Campus Building'"
+    },
+    {
+      "file": "firmware/esp32s3_ecotrack_node/esp32s3_ecotrack_node.ino",
+      "line": 69,
+      "category": "assumed_metadata",
+      "excerpt": "#define DEFAULT_BUILDING_NAME    \"Main Campus Building\""
+    },
+    {
+      "file": "firmware/esp32s3_ecotrack_node/esp32s3_ecotrack_node.ino",
+      "line": 71,
+      "category": "assumed_metadata",
+      "excerpt": "#define DEFAULT_ROOM_NAME        \"Server Room A\""
+    },
+    {
+      "file": "firmware/esp32s3_ecotrack_node/esp32s3_ecotrack_node.ino",
+      "line": 219,
+      "category": "measurement_initialization",
+      "excerpt": "static inline float _batteryVoltage = 4.00f;"
+    },
+    {
+      "file": "create_telemetry_table.sql",
+      "line": 12,
+      "category": "assumed_metadata",
+      "excerpt": "room_name TEXT DEFAULT 'Server Room A',"
+    },
+    {
+      "file": "create_telemetry_table.sql",
+      "line": 14,
+      "category": "assumed_metadata",
+      "excerpt": "building_name TEXT DEFAULT 'Main Campus Building',"
+    },
+    {
+      "file": "create_telemetry_table.sql",
+      "line": 83,
+      "category": "assumed_metadata",
+      "excerpt": "ADD COLUMN IF NOT EXISTS building_name TEXT DEFAULT 'Main Campus Building',"
+    },
+    {
+      "file": "create_telemetry_table.sql",
+      "line": 85,
+      "category": "assumed_metadata",
+      "excerpt": "ADD COLUMN IF NOT EXISTS room_name TEXT DEFAULT 'Server Room A',"
+    },
+    {
+      "file": "create_telemetry_table.sql",
+      "line": 86,
+      "category": "assumed_metadata",
+      "excerpt": "ADD COLUMN IF NOT EXISTS assignment TEXT DEFAULT 'Main Campus Building \u2022 2nd Floor - IT Wing \u2022 Server Room A',"
+    },
+    {
+      "file": "supabase_schema.sql",
+      "line": 132,
+      "category": "assumed_metadata",
+      "excerpt": "building_name TEXT DEFAULT 'Main Campus Building',"
+    },
+    {
+      "file": "supabase_schema.sql",
+      "line": 134,
+      "category": "assumed_metadata",
+      "excerpt": "room_name TEXT DEFAULT 'Server Room A',"
+    },
+    {
+      "file": "supabase_schema.sql",
+      "line": 152,
+      "category": "assumed_metadata",
+      "excerpt": "ALTER TABLE staff ADD COLUMN IF NOT EXISTS building_name TEXT DEFAULT 'Main Campus Building';"
+    },
+    {
+      "file": "supabase_schema.sql",
+      "line": 154,
+      "category": "assumed_metadata",
+      "excerpt": "ALTER TABLE staff ADD COLUMN IF NOT EXISTS room_name TEXT DEFAULT 'Server Room A';"
+    },
+    {
+      "file": "supabase_schema.sql",
+      "line": 220,
+      "category": "assumed_metadata",
+      "excerpt": "room_name TEXT DEFAULT 'Server Room A',"
+    },
+    {
+      "file": "supabase_schema.sql",
+      "line": 222,
+      "category": "assumed_metadata",
+      "excerpt": "building_name TEXT DEFAULT 'Main Campus Building',"
+    },
+    {
+      "file": "scripts/demo-seeds/legacy_notifications_demo.sql",
+      "line": 2,
+      "category": "demo_or_random",
+      "excerpt": "-- 6. INSERT SEED NOTIFICATIONS FOR IMMEDIATE DEMO & TESTING"
+    },
+    {
+      "file": "scripts/demo-seeds/legacy_notifications_demo.sql",
+      "line": 11,
+      "category": "assumed_metadata",
+      "excerpt": "'Scheduled filter cleaning & sensor inspection for Node 01 (Server Room A) is due today. Please complete checklist.',"
+    },
+    {
+      "file": "scripts/demo-seeds/legacy_notifications_demo.sql",
+      "line": 17,
+      "category": "assumed_metadata",
+      "excerpt": "'Server Room AC Unit',"
+    },
+    {
+      "file": "scripts/demo-seeds/legacy_notifications_demo.sql",
+      "line": 18,
+      "category": "assumed_metadata",
+      "excerpt": "'Main Campus Building \u2022 Server Room A',"
+    },
+    {
+      "file": "scripts/demo-seeds/legacy_notifications_demo.sql",
+      "line": 34,
+      "category": "assumed_metadata",
+      "excerpt": "'Main Campus Building \u2022 2nd Floor IT Wing',"
+    },
+    {
+      "file": "scripts/demo-seeds/legacy_schema_demo.sql",
+      "line": 3,
+      "category": "demo_or_random",
+      "excerpt": "-- INITIAL DEFAULT SEED DATA"
+    },
+    {
+      "file": "scripts/demo-seeds/legacy_schema_demo.sql",
+      "line": 13,
+      "category": "assumed_metadata",
+      "excerpt": "VALUES ('bld_main', 'Main Campus Building')"
+    },
+    {
+      "file": "scripts/demo-seeds/legacy_schema_demo.sql",
+      "line": 23,
+      "category": "assumed_metadata",
+      "excerpt": "('rm_svr_01', 'Server Room A', 5, 'flr_2nd_it'),"
+    }
+  ]
+}

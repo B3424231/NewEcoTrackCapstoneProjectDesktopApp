@@ -1,0 +1,249 @@
+--- before/reports/cloud-hardware/EcoTrackCloudReceiver.ino.txt
++++ reports/cloud-hardware/EcoTrackCloudReceiver.ino.txt
+@@ -1,7 +1,9 @@
+-// EcoTrack ESP32-S3 cloud IR receiver. No hardcoded Wi-Fi credentials.
++// EcoTrack ESP32-S3 cloud IR receiver + transmitter. No hardcoded Wi-Fi credentials.
+ // Arduino ESP32 core 3.3.12, ArduinoJson 7, IRremoteESP8266 2.9.0.
+-// Board: ESP32S3 Dev Module; Partition Scheme: Huge APP (3MB No OTA).
+-// IR receiver: VCC=3.3V, GND=GND, OUT=IR_RX_PIN. No IR transmitter/battery.
++// Board: Heltec Wireless Stick Lite(V3), ESP32 core 3.3.12.
++// Receiver OUT=IR_RX_PIN. Transmitter module S/IN=IR_TX_PIN; common GND.
++// Power the transmitter at its rated supply; its signal input must accept 3.3V.
++// No battery readings. This sketch reports IR transmission, not measured AC power.
+ // Bluetooth: encrypted Just Works pairing and bonding, with no six-digit PIN.
+ #include <WiFi.h>
+ #include <WiFiClientSecure.h>
+@@ -16,21 +18,31 @@
+ #include <IRutils.h>
+ #include <IRac.h>
+ #include <esp_sleep.h>
++#include <driver/gpio.h>
++#include <initializer_list>
+ #include <mbedtls/base64.h>
+ #include <time.h>
+ #include <sys/time.h>
+ 
+-constexpr uint16_t IR_RX_PIN = 4;  // Change this to your actual receiver OUT pin.
++constexpr uint16_t IR_RX_PIN = 4;  // Receiver OUT.
++constexpr uint16_t IR_TX_PIN = 5;  // Transmitter module S/IN.
++constexpr bool IR_TX_ENABLED = true;  // Set false while no transmitter is wired.
++constexpr bool IR_TX_INVERTED = false;  // Set true for an active-low module.
++constexpr int16_t IR_AC_MODEL = -1;  // Protocol-specific model; detected model takes priority.
++static_assert(!IR_TX_ENABLED || IR_TX_PIN != IR_RX_PIN, "Receiver and transmitter need separate GPIOs.");
+ constexpr long UTC_OFFSET_SECONDS = 8 * 3600;
+ constexpr uint32_t CLOUD_POLL_MS = 2000;
+ constexpr uint32_t RECHECK_SLEEP_SECONDS = 900;
+ constexpr char SERVICE_UUID[] = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+ constexpr char INFO_UUID[] = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+ constexpr char WIFI_UUID[] = "1c95d5e3-d8f7-413a-bf3d-7a2e5d7be87e";
+-constexpr char VERSION[] = "cloud-ir-receiver-1.2-monitor";
++constexpr char VERSION[] = "cloud-ir-controller-1.3-rxtx";
+ constexpr char CAPTURE_UUID[] = "b80301f3-639c-4eaf-bcc0-537759229321";
+ 
+ IRrecv receiver(IR_RX_PIN, 1024, 50, true);
++IRac transmitter(IR_TX_PIN, IR_TX_INVERTED);
++stdAc::state_t lastAcState;
++bool haveLastAcState = false;
+ decode_results decoded;
+ Preferences prefs;
+ BLECharacteristic *infoCharacteristic = nullptr;
+@@ -83,7 +95,7 @@
+   document["request_id"] = requestId;
+   document["error"] = lastError.substring(0, 64);
+   document["capabilities"]["ir_receiver"] = true;
+-  document["capabilities"]["ir_transmitter"] = false;
++  document["capabilities"]["ir_transmitter"] = IR_TX_ENABLED;
+   document["capabilities"]["ble_ir_monitor"] = true;
+   if (WiFi.status() == WL_CONNECTED) {
+     document["ip_address"] = WiFi.localIP().toString();
+@@ -225,6 +237,118 @@
+     default: return "";
+   }
+ }
++decode_type_t transmitterProtocol(String protocol) {
++  protocol.trim();
++  decode_type_t exact = strToDecodeType(protocol.c_str());
++  if (exact != UNKNOWN && IRac::isProtocolSupported(exact)) return exact;
++  protocol.toLowerCase();
++  if (protocol == "midea_ir" || protocol == "midea") return MIDEA;
++  if (protocol == "carrier") return CARRIER_AC64;
++  if (protocol == "panasonic") return PANASONIC_AC;
++  if (protocol == "mitsubishi") return MITSUBISHI_AC;
++  if (protocol == "samsung") return SAMSUNG_AC;
++  if (protocol == "haier") return HAIER_AC;
++  if (protocol == "hitachi") return HITACHI_AC;
++  if (protocol == "fujitsu") return FUJITSU_AC;
++  if (protocol == "toshiba") return TOSHIBA_AC;
++  if (protocol == "sharp") return SHARP_AC;
++  if (protocol == "tcl") return TCL112AC;
++  if (protocol == "whirlpool") return WHIRLPOOL_AC;
++  // Do not guess an encoder for generic_ac, koppel_ir or other unknown families.
++  return exact;
++}
++bool switchValue(JsonVariantConst value, bool &result) {
++  if (value.is<bool>()) { result = value.as<bool>(); return true; }
++  String text = value.is<const char *>() ? value.as<String>() : "";
++  if (text == "on") { result = true; return true; }
++  if (text == "off") { result = false; return true; }
++  return false;
++}
++bool prepareAcState(JsonVariantConst payload, stdAc::state_t &desired, String &error) {
++  if (!payload.is<JsonObjectConst>() || !payload["state"].is<JsonObjectConst>()) { error = "Full AC state is required."; return false; }
++  decode_type_t type = transmitterProtocol(payload["protocol"] | "");
++  if (type == UNKNOWN || !IRac::isProtocolSupported(type)) {
++    error = "Unsupported AC protocol. Detect/select the exact protocol in Edit or IR Profiles first."; return false;
++  }
++  JsonVariantConst state = payload["state"];
++  bool power;
++  String mode = state["mode"] | "", fan = state["fan"] | "";
++  if (!switchValue(state["power"], power) ||
++      (mode != "cool" && mode != "dry" && mode != "fan" && mode != "auto" && mode != "heat") ||
++      (fan != "auto" && fan != "low" && fan != "medium" && fan != "high" && fan != "quiet" && fan != "silent" && fan != "turbo") ||
++      state["temp"].is<bool>() || (!state["temp"].is<double>() && !state["temp"].is<long>())) {
++    error = "Invalid AC power, mode, temperature or fan setting."; return false;
++  }
++  float temperature = state["temp"].as<float>();
++  if (!isfinite(temperature) || temperature < 16 || temperature > 32) { error = "AC temperature must be 16 to 32 degrees C."; return false; }
++  IRac::initState(&desired);
++  desired.protocol = type;
++  desired.model = haveLastAcState && lastAcState.protocol == type ? lastAcState.model : IR_AC_MODEL;
++  if (!payload["model"].isNull()) {
++    if (!payload["model"].is<int>() || payload["model"].as<int>() < -1 || payload["model"].as<int>() > 32767) {
++      error = "Invalid AC protocol model."; return false;
++    }
++    desired.model = payload["model"].as<int>();
++  }
++  desired.power = power; desired.celsius = true; desired.degrees = temperature;
++  desired.mode = IRac::strToOpmode(mode.c_str());
++  desired.fanspeed = fan == "quiet" || fan == "silent" ? stdAc::fanspeed_t::kMin :
++    fan == "turbo" ? stdAc::fanspeed_t::kMax : IRac::strToFanspeed(fan.c_str());
++  desired.quiet = fan == "quiet" || fan == "silent";
++  bool swing = false, turbo = fan == "turbo", eco = false, sleep = false;
++  for (const char *field : {"swing", "turbo", "eco", "sleep"}) {
++    bool value;
++    if (state[field].isNull()) continue;
++    if (!switchValue(state[field], value)) { error = String("Invalid AC setting: ") + field; return false; }
++    if (!strcmp(field,"swing")) swing = value;
++    else if (!strcmp(field,"turbo")) turbo = value;
++    else if (!strcmp(field,"eco")) eco = value;
++    else sleep = value;
++  }
++  desired.swingv = swing ? stdAc::swingv_t::kAuto : stdAc::swingv_t::kOff;
++  desired.turbo = turbo; desired.econo = eco; desired.sleep = sleep ? 0 : -1;
++  return true;
++}
++void rememberAcState(const stdAc::state_t &state) {
++  lastAcState = state; haveLastAcState = true;
++  JsonDocument saved;
++  saved["protocol"] = typeToString(state.protocol); saved["model"] = state.model;
++  saved["state"]["power"] = state.power ? "on" : "off";
++  saved["state"]["temp"] = state.celsius ? state.degrees : (state.degrees - 32.0f) * 5.0f / 9.0f;
++  saved["state"]["mode"] = commonMode(state.mode).length() ? commonMode(state.mode) : "auto";
++  saved["state"]["fan"] = commonFan(state.fanspeed).length() ? commonFan(state.fanspeed) : "auto";
++  saved["state"]["swing"] = state.swingv != stdAc::swingv_t::kOff ? "on" : "off";
++  saved["state"]["turbo"] = state.turbo ? "on" : "off";
++  saved["state"]["eco"] = state.econo ? "on" : "off";
++  saved["state"]["sleep"] = state.sleep >= 0 ? "on" : "off";
++  String json; serializeJson(saved,json);
++  if (prefs.getString("ir-state") != json) prefs.putString("ir-state",json);
++}
++void transmitAcIntent(const String &id, JsonVariantConst payload) {
++  if (!IR_TX_ENABLED) { setAck(id,false,JsonVariantConst(),"IR transmitter is disabled in this sketch."); return; }
++  if (String(payload["aircon_id"] | "").isEmpty()) { setAck(id,false,JsonVariantConst(),"AC profile ID is required."); return; }
++  stdAc::state_t desired; String error;
++  if (!prepareAcState(payload,desired,error)) { setAck(id,false,JsonVariantConst(),error); return; }
++  // Avoid recording our own outgoing signal as a physical-remote observation.
++  receiver.disableIRIn();
++  const stdAc::state_t *previous = haveLastAcState && lastAcState.protocol == desired.protocol ? &lastAcState : nullptr;
++  bool sent = transmitter.sendAc(desired,previous);
++  digitalWrite(IR_TX_PIN, IR_TX_INVERTED ? HIGH : LOW);
++  delay(100); receiver.enableIRIn();
++  if (!sent) { setAck(id,false,JsonVariantConst(),"This IR protocol could not be transmitted."); return; }
++  rememberAcState(desired);
++  JsonDocument result;
++  result["delivery_status"] = "transmitted";
++  result["aircon_id"] = payload["aircon_id"];
++  result["protocol"] = typeToString(desired.protocol);
++  result["state"].set(payload["state"]);
++  // This receipt confirms an IR send attempt, not physical AC operation.
++  setAck(id,true,result.as<JsonVariantConst>());
++  Serial.printf("IR transmitted: %s | power: %s | %.1f C | mode: %s | fan: %s | GPIO: %u\n",
++    typeToString(desired.protocol).c_str(),desired.power ? "on" : "off",desired.degrees,
++    commonMode(desired.mode).c_str(),commonFan(desired.fanspeed).c_str(),IR_TX_PIN);
++}
++
+ void publishCaptureMetadata(JsonVariantConst frame) {
+   JsonDocument metadata;
+   metadata["sequence"] = frame["sequence"];
+@@ -259,7 +383,8 @@
+     frame["raw_count"] = decoded.rawlen - 1;
+     stdAc::state_t acState;
+     IRac::initState(&acState);
+-    if (IRAcUtils::decodeToState(&decoded, &acState)) {
++    if (IRAcUtils::decodeToState(&decoded, &acState, haveLastAcState ? &lastAcState : nullptr)) {
++      rememberAcState(acState);
+       frame["state"]["power"] = acState.power;
+       frame["state"]["temp"] = acState.celsius ? acState.degrees : (acState.degrees - 32.0f) * 5.0f / 9.0f;
+       frame["state"]["mode"] = commonMode(acState.mode);
+@@ -294,7 +419,9 @@
+     applyConfig(command["payload"]);
+     JsonDocument result; result["interval_ms"] = intervalMs; result["wake_time"] = wakeTime; result["sleep_time"] = sleepTime;
+     setAck(id, true, result.as<JsonVariantConst>());
+-  } else { setAck(id, false, JsonVariantConst(), "Receiver-only hardware cannot transmit IR commands."); }
++  } else if (kind == "ac_intent") {
++    transmitAcIntent(id,command["payload"]);
++  } else { setAck(id, false, JsonVariantConst(), "Unsupported cloud command."); }
+ }
+ String isoUtc(time_t seconds) {
+   tm value; gmtime_r(&seconds, &value); char result[25]; strftime(result, sizeof(result), "%Y-%m-%dT%H:%M:%SZ", &value); return String(result);
+@@ -308,7 +435,7 @@
+   if (reportDue) status["report_id"] = deviceId + "-" + String(bootCount) + "-" + String(reportSequence);
+   status["firmware_version"] = VERSION; status["wifi_ssid"] = WiFi.SSID();
+   status["ip_address"] = WiFi.localIP().toString(); status["rssi"] = WiFi.RSSI();
+-  status["capabilities"]["ir_receiver"] = true; status["capabilities"]["ir_transmitter"] = false;
++  status["capabilities"]["ir_receiver"] = true; status["capabilities"]["ir_transmitter"] = IR_TX_ENABLED;
+   status["applied_config"]["interval_seconds"] = intervalMs / 1000;
+   status["applied_config"]["wake_time"] = wakeTime; status["applied_config"]["sleep_time"] = sleepTime;
+   if (sleepingUntil.length()) status["sleeping_until"] = sleepingUntil;
+@@ -404,11 +531,22 @@
+   if (WiFi.status() == WL_CONNECTED && !exchange(isoUtc(time(nullptr) + duration))) return;
+   if (!secondsUntilWake() || bluetoothConnected || pendingAck.length()) return;
+   Serial.printf("Sleeping %lu seconds; reconnecting to check the cloud schedule on wake.\n", (unsigned long)duration);
+-  Serial.flush(); receiver.disableIRIn(); BLEDevice::deinit(true); WiFi.disconnect(true);
++  Serial.flush(); receiver.disableIRIn();
++  if (IR_TX_ENABLED) {
++    digitalWrite(IR_TX_PIN,IR_TX_INVERTED ? HIGH : LOW);
++    gpio_hold_en((gpio_num_t)IR_TX_PIN); gpio_deep_sleep_hold_en();
++  }
++  BLEDevice::deinit(true); WiFi.disconnect(true);
+   esp_sleep_enable_timer_wakeup((uint64_t)duration * 1000000ULL); esp_deep_sleep_start();
+ }
+ void setup() {
+   Serial.begin(115200); prefs.begin("ecotrack-cloud", false);
++  if (IR_TX_ENABLED) {
++    gpio_deep_sleep_hold_dis(); gpio_hold_dis((gpio_num_t)IR_TX_PIN);
++    pinMode(IR_TX_PIN,OUTPUT); digitalWrite(IR_TX_PIN,IR_TX_INVERTED ? HIGH : LOW);
++  }
++  JsonDocument previous; String stateError;
++  if (!deserializeJson(previous,prefs.getString("ir-state")) && prepareAcState(previous.as<JsonVariantConst>(),lastAcState,stateError)) haveLastAcState = true;
+   bootCount = prefs.getUInt("boot", 0) + 1; prefs.putUInt("boot", bootCount);
+   uint64_t mac = ESP.getEfuseMac(); char hardware[32];
+   snprintf(hardware, sizeof(hardware), "esp32s3-%012llx", (unsigned long long)(mac & 0xFFFFFFFFFFFFULL)); deviceId = hardware;
+@@ -418,7 +556,7 @@
+   pendingAck = prefs.getString("ack"); completedCommand = prefs.getString("completed");
+   provisionQueue = xQueueCreate(1, sizeof(ProvisionMessage));
+   if (!provisionQueue) { Serial.println("Provisioning queue allocation failed."); while (true) delay(1000); }
+-  Serial.println("EcoTrack cloud IR receiver: " + deviceId);
++  Serial.println("EcoTrack cloud IR receiver + transmitter: " + deviceId);
+   receiver.enableIRIn(); beginBluetooth();
+   WiFi.mode(WIFI_STA); configTime(UTC_OFFSET_SECONDS, 0, "pool.ntp.org", "time.google.com");
+   if (ssid.length()) { WiFi.begin(ssid.c_str(), password.c_str()); wifiStatus = "connecting"; wifiStarted = millis(); }
+@@ -431,7 +569,7 @@
+   if (learningId.length() && (int32_t)(millis() - learningDeadline) >= 0) { setAck(learningId, false, JsonVariantConst(), "No new IR signal received within six seconds."); learningId = ""; }
+   if (millis() - lastCloudPoll >= min(CLOUD_POLL_MS, intervalMs)) { lastCloudPoll = millis(); exchange(); }
+   if (millis() - lastStatusPrint >= intervalMs) {
+-    lastStatusPrint = millis(); Serial.printf("Wi-Fi: %s | Supabase: %s | IR receiver GPIO: %u\n", wifiStatus.c_str(), cloudStatus.c_str(), IR_RX_PIN);
++    lastStatusPrint = millis(); Serial.printf("Wi-Fi: %s | Supabase: %s | IR RX GPIO: %u | IR TX GPIO: %u (%s)\n", wifiStatus.c_str(), cloudStatus.c_str(), IR_RX_PIN, IR_TX_PIN, IR_TX_ENABLED ? "enabled" : "disabled");
+   }
+   updateBleInfo(); scheduledSleep(); delay(5);
+ }

@@ -1,0 +1,10 @@
+{
+  "mode_and_export_scenarios": 6,
+  "native_viewport_theme_scenarios": 3,
+  "historical_snapshot_round_trip_tests": 1,
+  "logs_stability": "passed",
+  "telemetry_cadence": "passed",
+  "analytics_reset": "passed",
+  "runtime_cadence": "fails identically on pre-change source",
+  "power_and_runtime_functions_unchanged": true
+}

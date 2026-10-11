@@ -1,0 +1,33 @@
+{
+  "passed": 27,
+  "checks": [
+    "Editable Status removed; IP stays hardware-reported",
+    "Remote detection requires an actual Bluetooth selection",
+    "Bluetooth remote detection works before registration without adding a controller",
+    "Password Enter does not implicitly register a device",
+    "Save waits for heartbeat and metadata/AC binding, guards duplicates, then publishes completion",
+    "Cloud failure stays incomplete and leaves Save available for retry",
+    "Rejected registration can be retried",
+    "Metadata failure cannot mark the draft complete or close the form",
+    "Registration preserves the exact detected IR variant and has no redundant profile write",
+    "Choosing an existing AC with an empty brand field retains its real brand and protocol",
+    "A receiver/transmitter sketch enables control using its reported capability instead of a fixed receiver-only registration",
+    "Already connected Wi-Fi can repair a deleted cloud credential from Step 3",
+    "Custom room failure does not enter the cache; retry uses the server ID and actual floor",
+    "A deleted room is rejected before rotating hardware credentials",
+    "Edit saves a complete custom hierarchy without requiring a brand or changing real status",
+    "IR failures remain actionable and release edit controls",
+    "A dropped Bluetooth connection preserves the form and is reported before location writes or credential rotation",
+    "A different ESP32 cannot be registered under the selected controller details",
+    "Changed Wi-Fi must be verified before any registration write",
+    "Step 3 reconnect reuses the known device, checks live Wi-Fi, preserves values, guards duplicates, and never saves automatically",
+    "Reconnecting to a changed SSID discards the old network password",
+    "A late reconnect reply cannot repopulate a closed wizard",
+    "A connected GATT failure requests a retry without claiming the Bluetooth link disconnected",
+    "A fresh device reply clears a stale Bluetooth warning and shows actual firmware and hardware capabilities without saving",
+    "A Bluetooth reply cannot erase a genuine cloud failure or mark Supabase verified",
+    "Choosing a device again is a separate explicit action and still does not register automatically",
+    "Firmware and hardware capability fields are read-only device reports"
+  ],
+  "physical_hardware_tested": false
+}

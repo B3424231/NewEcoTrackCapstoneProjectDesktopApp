@@ -1,0 +1,814 @@
+--- before/public/nodes.html
++++ after/public/nodes.html
+@@ -22,7 +22,7 @@
+       }
+     }
+   </script>
+-  <link rel="stylesheet" href="./styles.css?v=55">
++  <link rel="stylesheet" href="./styles.css?v=56">
+   <style>
+     /* High-contrast status pill guarantees for AC Controller Devices */
+     .node-status-online {
+@@ -92,7 +92,7 @@
+   </style>
+   <script src="./js/supabase.umd.js"></script>
+   <script src="./js/supabase-client.js"></script>
+-  <script src="./js/hardware-cloud.js?v=2"></script>
++  <script src="./js/hardware-cloud.js?v=3"></script>
+   <script src="./js/sidebar.js"></script>
+   <script src="./js/sidebar-loader.js?v=7"></script>
+   <script src="./js/icons.js"></script>
+@@ -375,22 +375,22 @@
+           <div class="p-3 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 space-y-2">
+             <div class="flex items-center justify-between">
+               <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-gray-400">Wi-Fi Connection Diagnostics</span>
+-              <button type="button" id="verifyWifiBtn" class="text-[10px] font-bold text-teal-600 dark:text-teal-400 hover:underline border-0 bg-transparent cursor-pointer flex items-center gap-1">
++              <button type="button" id="verifyWifiBtn" aria-busy="false" class="text-[10px] font-bold text-teal-600 dark:text-teal-400 hover:underline border-0 bg-transparent cursor-pointer flex items-center gap-1">
+                 <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+-                <span>Test Connection</span>
++                <span id="verifyWifiLabel">Test Connection</span>
+               </button>
+             </div>
+             <div class="space-y-1 text-xs">
+               <div class="flex items-center gap-2 text-slate-700 dark:text-slate-300">
+-                <span id="chkBle" class="w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[9px] font-black">✓</span>
+-                <span class="text-[11px]">Bluetooth GATT provisioning channel active</span>
++                <span id="chkBle" data-state="pending" class="connection-check w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black">-</span>
++                <span id="chkBleText" class="text-[11px]">Bluetooth connection has not been checked</span>
+               </div>
+               <div class="flex items-center gap-2 text-slate-700 dark:text-slate-300">
+-                <span id="chkWifi" class="w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[9px] font-black">✓</span>
+-                <span class="text-[11px]">2.4 GHz Wi-Fi credentials dispatched</span>
++                <span id="chkWifi" data-state="pending" class="connection-check w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black">-</span>
++                <span id="chkWifiText" class="text-[11px]">Wi-Fi connection has not been checked</span>
+               </div>
+               <div class="flex items-center gap-2 text-slate-700 dark:text-slate-300">
+-                <span id="chkIp" class="w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[9px] font-black">✓</span>
++                <span id="chkIp" data-state="pending" class="connection-check w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black">-</span>
+                 <span id="chkIpText" class="text-[11px]">Device connection has not been verified</span>
+               </div>
+             </div>
+@@ -412,6 +412,17 @@
+           <div id="registrationCloudStatus" role="status" aria-live="polite" aria-atomic="true" data-state="pending" class="p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-800 dark:text-amber-200 space-y-1">
+             <p id="registrationCloudTitle" class="font-bold">Supabase: Pending registration</p>
+             <p id="registrationCloudMessage">Bluetooth and Wi-Fi setup are complete. Save &amp; Verify Controller will register this device in Supabase and confirm its connection.</p>
++          </div>
++
++
++          <div id="existingWifiPanel" class="hidden p-3 rounded-xl border border-teal-500/30 bg-teal-500/10 space-y-2">
++            <p id="existingWifiMessage" class="text-xs font-semibold text-teal-800 dark:text-teal-200" role="status" aria-live="polite"></p>
++            <p id="existingCloudMessage" class="text-xs text-slate-600 dark:text-slate-300"></p>
++            <label for="registrationWifiPassword" class="block text-xs font-bold text-slate-700 dark:text-slate-200">Current Wi-Fi password</label>
++            <input type="password" id="registrationWifiPassword" autocomplete="off" minlength="8" maxlength="63"
++              placeholder="Enter the same Wi-Fi password once for cloud registration"
++              class="w-full px-3 py-2 rounded-xl bg-white dark:bg-black/30 border border-slate-200 dark:border-white/15 text-xs text-slate-900 dark:text-white">
++            <p class="text-[11px] text-slate-500 dark:text-slate-400">This receiver sketch needs the password when receiving a fresh cloud credential. It is sent over Bluetooth to the ESP32.</p>
+           </div>
+ 
+           <!-- Hidden Device ID field that stores the paired node ID -->
+@@ -1367,6 +1378,112 @@
+       let wifiConfirmedFor = null;
+       let pingProbeRevision = 0;
+ 
++      // Connection diagnostics and existing Wi-Fi reuse.
++      let existingWifiInfo = null;
++      let connectionTestRevision = 0;
++      let registrationSessionVersion = 0;
++      function setConnectionCheck(id, state, message) {
++        const badge = document.getElementById(id);
++        if (badge) {
++          badge.dataset.state = state;
++          badge.textContent = state === 'success' ? 'OK' : state === 'error' ? '!' : state === 'checking' ? '...' : '-';
++          badge.className = 'connection-check w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black';
++        }
++        const text = document.getElementById(id + 'Text');
++        if (text) text.textContent = message;
++      }
++      function resetConnectionDiagnostics() {
++        existingWifiInfo = null;
++        connectionTestRevision++;
++        setConnectionCheck('chkBle', 'pending', 'Bluetooth connection has not been checked');
++        setConnectionCheck('chkWifi', 'pending', 'Wi-Fi connection has not been checked');
++        setConnectionCheck('chkIp', 'pending', 'Device IP has not been read');
++        const button = document.getElementById('verifyWifiBtn');
++        if (button) { button.disabled = false; button.setAttribute('aria-busy', 'false'); }
++        const label = document.getElementById('verifyWifiLabel');
++        if (label) label.textContent = 'Test Connection';
++        refreshExistingWifiPanel();
++      }
++      function hasConnectedWifi(info) {
++        const ip = info?.ip_address || '';
++        return !!info && !!selectedBleDevice?.nodeId && info.device_id === selectedBleDevice.nodeId && info.wifi_status === 'connected' &&
++          typeof info.wifi_ssid === 'string' && !!info.wifi_ssid.trim() &&
++          /^(\d{1,3}\.){3}\d{1,3}$/.test(ip) && ip.split('.').every(part => Number(part) <= 255) && ip !== '0.0.0.0';
++      }
++      function canReuseExistingWifi() {
++        return hasConnectedWifi(existingWifiInfo) &&
++          existingWifiInfo.wifi_ssid === document.getElementById('nodeFormSsid').value.trim() &&
++          wifiConfirmedFor === existingWifiInfo.wifi_ssid;
++      }
++      function confirmedWifiReady() {
++        const ssid = document.getElementById('nodeFormSsid').value.trim();
++        const pass = document.getElementById('nodeFormPassword').value;
++        return !!selectedBleDevice?.info && !!ssid && wifiConfirmedFor === ssid &&
++          (canReuseExistingWifi() || pass.length >= 8);
++      }
++      function registrationCredentials() {
++        return {
++          ssid: document.getElementById('nodeFormSsid').value.trim(),
++          pass: canReuseExistingWifi() ? document.getElementById('registrationWifiPassword').value : document.getElementById('nodeFormPassword').value
++        };
++      }
++      function refreshExistingWifiPanel() {
++        const reuse = canReuseExistingWifi();
++        const panel = document.getElementById('existingWifiPanel');
++        panel?.classList.toggle('hidden', !reuse);
++        const password = document.getElementById('registrationWifiPassword');
++        if (password) password.required = reuse && currentModalStep === 3;
++        document.getElementById('nodeFormPassword').required = !reuse;
++        if (reuse) {
++          document.getElementById('existingWifiMessage').textContent =
++            `Bluetooth verified. ESP32 is already connected to ${existingWifiInfo.wifi_ssid} (${existingWifiInfo.ip_address}). Steps 1 and 2 are complete.`;
++          document.getElementById('existingCloudMessage').textContent = existingWifiInfo.cloud_status === 'error'
++            ? 'Supabase is not connected. Save & Verify Controller will refresh the deleted or invalid cloud registration.'
++            : 'Save & Verify Controller will refresh this device registration and verify its Supabase connection.';
++        }
++      }
++      function acceptExistingWifi(info, advance = false) {
++        if (!hasConnectedWifi(info)) return false;
++        existingWifiInfo = info;
++        selectedBleDevice.info = info;
++        selectedBleDevice.ip = info.ip_address;
++        document.getElementById('nodeFormSsid').value = info.wifi_ssid;
++        wifiConfirmedFor = info.wifi_ssid;
++        document.getElementById('registrationWifiPassword').value = document.getElementById('nodeFormPassword').value;
++        updateDeviceIpResult(info.ip_address, `ESP32 Wi-Fi connected. Device IP: ${info.ip_address}`);
++        setDeviceIpFeedback('success', `ESP32 replied. Device IP: ${info.ip_address}`);
++        setConnectionCheck('chkBle', 'success', 'Bluetooth connection verified with the selected ESP32');
++        setConnectionCheck('chkWifi', 'success', `ESP32 confirmed its existing Wi-Fi connection: ${info.wifi_ssid}`);
++        refreshExistingWifiPanel();
++        if (advance) setNodeModalStep(3);
++        return true;
++      }
++      async function resumeControllerSetup(session) {
++        const button = document.getElementById('scanBleBtn');
++        const label = document.getElementById('scanBleLabel');
++        if (button) button.disabled = true;
++        if (label) label.textContent = 'Checking previously connected ESP32...';
++        let timer;
++        try {
++          const info = await Promise.race([
++            window.EcoTrackHardwareCloud.resume(),
++            new Promise(resolve => { timer = setTimeout(() => resolve(null), 8000); })
++          ]);
++          if (session !== registrationSessionVersion || modal.classList.contains('hidden') || !info) return;
++          discoveredBleDevices = [{ id: info.bluetooth_name || info.device_id, nodeId: info.device_id, mac: info.mac_address || 'Not reported',
++            rssi: info.rssi ?? null, status: 'Bluetooth connected', ip: info.ip_address || '', info }];
++          selectBleDevice(discoveredBleDevices[0]);
++        } catch (_) {
++          // No previous authorization or no device reply: keep the normal Bluetooth picker.
++        } finally {
++          clearTimeout(timer);
++          if (session === registrationSessionVersion) {
++            if (button) button.disabled = false;
++            if (label) label.textContent = 'Connect Nearby ESP32';
++          }
++        }
++      }
++
+       async function scanForBleDevices() {
+         try {
+           const info = await window.EcoTrackHardwareCloud.connect();
+@@ -1437,8 +1554,14 @@
+ 
+       function selectBleDevice(device) {
+         resetDeviceIpFeedback();
++        resetConnectionDiagnostics();
+         resetRemoteDetection('register');
++        const previousId = selectedBleDevice?.nodeId;
+         selectedBleDevice = device;
++        if (previousId !== device.nodeId) {
++          document.getElementById('nodeFormPassword').value = '';
++          document.getElementById('registrationWifiPassword').value = '';
++        }
+         const nodeIdInput = document.getElementById('nodeFormId');
+         if (nodeIdInput) nodeIdInput.value = device.nodeId;
+ 
+@@ -1474,6 +1597,8 @@
+         updateConfigSummary();
+         renderDiscoveredBleNodes();
+         if (typeof updateNextButtonState === 'function') updateNextButtonState();
++        setConnectionCheck('chkBle', 'success', 'Bluetooth connection verified with the selected ESP32');
++        if (!acceptExistingWifi(device.info, true)) setNodeModalStep(2);
+         if (window.EcoToast) window.EcoToast.show(`Bluetooth connected to ${device.nodeId}`, 'success');
+       }
+ 
+@@ -1770,7 +1895,7 @@
+       function updateDeviceIpResult(ip, message) {
+         document.getElementById('nodeFormIp').value = ip;
+         document.getElementById('chkIpText').textContent = message;
+-        document.getElementById('chkIp').textContent = ip ? 'OK' : 'Pending';
++        setConnectionCheck('chkIp', ip ? 'success' : 'pending', message);
+         const badge = document.getElementById('step3IpBadge');
+         if (badge) badge.textContent = ip || '--';
+         updateConfigSummary();
+@@ -1805,6 +1930,8 @@
+           const message = `ESP32 replied. Device IP: ${ip}`;
+           updateDeviceIpResult(ip, message);
+           setDeviceIpFeedback('success', message);
++          const targetSsid = document.getElementById('nodeFormSsid').value.trim();
++          if (hasConnectedWifi(info) && (!targetSsid || targetSsid === info.wifi_ssid)) acceptExistingWifi(info, true);
+           window.EcoToast?.show(message, 'success');
+         } catch (error) {
+           if (version !== deviceIpReadVersion || nodeId !== selectedBleDevice?.nodeId) return;
+@@ -1859,33 +1986,78 @@
+         });
+       }
+ 
+-      // Write the supplied credentials to the real ESP32 and wait for its reply.
++      // Test the real connection before writing credentials or repairing cloud access.
+       const verifyWifiBtn = document.getElementById('verifyWifiBtn');
+       verifyWifiBtn?.addEventListener('click', async () => {
++        if (verifyWifiBtn.disabled || autoAssignIpBtn?.disabled) return;
++        const revision = ++connectionTestRevision;
++        const nodeId = selectedBleDevice?.nodeId;
++        let timer, bluetoothVerified = false;
+         verifyWifiBtn.disabled = true;
+-        const previous = verifyWifiBtn.innerHTML;
+-        verifyWifiBtn.textContent = 'Connecting ESP32...';
+-        wifiConfirmedFor = null;
++        verifyWifiBtn.setAttribute('aria-busy', 'true');
++        document.getElementById('verifyWifiLabel').textContent = 'Checking ESP32...';
++        setDeviceIpBusy(true);
++        setConnectionCheck('chkBle', 'checking', 'Waiting for the selected ESP32 to reply over Bluetooth');
++        setConnectionCheck('chkWifi', 'pending', 'Wi-Fi connection is being checked');
+         try {
++          if (!nodeId) throw new Error('Connect the nearby ESP32 through Bluetooth first.');
+           const ssid = document.getElementById('nodeFormSsid').value.trim();
+           const pass = document.getElementById('nodeFormPassword').value;
+-          const info = await window.EcoTrackHardwareCloud.provision({ ssid, pass });
+-          if (info.device_id !== selectedBleDevice?.nodeId) throw new Error('Wrong Bluetooth device connected.');
+-          wifiConfirmedFor = ssid;
+-          document.getElementById('nodeFormIp').value = info.ip_address || '';
+-          document.getElementById('chkIpText').textContent = info.ip_address ? `ESP32 connected; IP: ${info.ip_address}` : 'ESP32 confirmed Wi-Fi connection.';
+-          document.getElementById('chkWifi').textContent = 'OK';
+-          document.getElementById('chkIp').textContent = 'OK';
+-          window.EcoToast?.show('ESP32 confirmed Wi-Fi. Register it to verify Supabase access.', 'success');
++          const current = await Promise.race([
++            window.EcoTrackHardwareCloud.readInfo(),
++            new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('ESP32 did not reply. Reconnect Bluetooth and try again.')), 12000); })
++          ]);
++          clearTimeout(timer);
++          if (revision !== connectionTestRevision || nodeId !== selectedBleDevice?.nodeId) return;
++          if (current.device_id !== nodeId) throw new Error('Wrong Bluetooth device connected.');
++          bluetoothVerified = true;
++          setConnectionCheck('chkBle', 'success', 'Bluetooth connection verified with the selected ESP32');
++          let info = current;
++          if (!(hasConnectedWifi(current) && (!ssid || current.wifi_ssid === ssid))) {
++            wifiConfirmedFor = null;
++            existingWifiInfo = null;
++            refreshExistingWifiPanel();
++            document.getElementById('verifyWifiLabel').textContent = 'Connecting Wi-Fi...';
++            setConnectionCheck('chkWifi', 'checking', 'Sending the selected network settings; waiting for the ESP32');
++            info = await window.EcoTrackHardwareCloud.provision({ ssid, pass, device_id: nodeId });
++          }
++          if (revision !== connectionTestRevision || nodeId !== selectedBleDevice?.nodeId) return;
++          if (!acceptExistingWifi(info, true)) throw new Error('ESP32 did not confirm a connected Wi-Fi network and valid IP.');
++          document.getElementById('verifyWifiLabel').textContent = 'Wi-Fi Connected';
++          window.EcoToast?.show('ESP32 Wi-Fi connection verified. Continue to Controller Info to verify Supabase.', 'success');
+         } catch (error) {
+-          document.getElementById('chkIpText').textContent = error.message;
++          if (revision !== connectionTestRevision || nodeId !== selectedBleDevice?.nodeId) return;
++          wifiConfirmedFor = null;
++          existingWifiInfo = null;
++          refreshExistingWifiPanel();
++          if (!bluetoothVerified || error.code === 'BLE_CONNECTION_FAILED' || /gatt|bluetooth/i.test(error.message || '')) setConnectionCheck('chkBle', 'error', 'Bluetooth connection could not be verified. Reconnect the ESP32.');
++          setConnectionCheck('chkWifi', 'error', 'Wi-Fi connection could not be verified');
++          updateDeviceIpResult('', error.message);
++          setConnectionCheck('chkIp', 'error', error.message);
++          setDeviceIpFeedback('error', error.message);
++          document.getElementById('verifyWifiLabel').textContent = 'Retry Connection';
+           window.EcoToast?.show(error.message, 'error');
+         } finally {
+-          verifyWifiBtn.disabled = false; verifyWifiBtn.innerHTML = previous;
+-          updateNextButtonState(); updateConfigSummary();
++          clearTimeout(timer);
++          if (revision === connectionTestRevision) {
++            verifyWifiBtn.disabled = false;
++            verifyWifiBtn.setAttribute('aria-busy', 'false');
++            setDeviceIpBusy(false);
++            updateNextButtonState(); updateConfigSummary();
++          }
+         }
+       });
+-      for (const field of ['nodeFormSsid','nodeFormPassword']) document.getElementById(field)?.addEventListener('input', () => { wifiConfirmedFor = null; updateNextButtonState(); });
++      for (const field of ['nodeFormSsid','nodeFormPassword']) document.getElementById(field)?.addEventListener('input', () => {
++        wifiConfirmedFor = null; existingWifiInfo = null;
++        refreshExistingWifiPanel();
++        setConnectionCheck('chkWifi', 'pending', 'Network settings changed. Test Connection to verify them.');
++        document.getElementById('verifyWifiLabel').textContent = 'Test Connection';
++        updateNextButtonState();
++      });
++      document.getElementById('registrationWifiPassword')?.addEventListener('input', () => {
++        // Keep this password in form memory only; the registration RPC never receives it.
++        document.getElementById('nodeFormPassword').value = document.getElementById('registrationWifiPassword').value;
++      });
+ 
+       // Real-time Wi-Fi Password validation listener
+       const nodePassInput = document.getElementById('nodeFormPassword');
+@@ -2141,60 +2313,22 @@
+       // Manage state and restrictions for Next buttons and Stepper Tabs
+       function updateNextButtonState() {
+         const nextBtn = document.getElementById('nodeNextStepBtn');
+-        const stepTab2 = document.getElementById('nodeStepTab2');
+-        const stepTab3 = document.getElementById('nodeStepTab3');
+         const isBlePaired = !!selectedBleDevice?.info;
+-
+-        // Visual lock cues on tabs if Bluetooth not paired
+-        if (stepTab2) {
+-          if (!isBlePaired) {
+-            stepTab2.classList.add('opacity-40', 'cursor-not-allowed');
+-            stepTab2.title = 'Bluetooth pairing required first';
+-          } else {
+-            stepTab2.classList.remove('opacity-40', 'cursor-not-allowed');
+-            stepTab2.title = '';
+-          }
+-        }
+-        if (stepTab3) {
+-          const ssid = document.getElementById('nodeFormSsid')?.value.trim();
+-          const pass = document.getElementById('nodeFormPassword')?.value || '';
+-          const isWifiValid = isBlePaired && !!ssid && pass.length >= 8 && wifiConfirmedFor === ssid;
+-          if (!isWifiValid) {
+-            stepTab3.classList.add('opacity-40', 'cursor-not-allowed');
+-            stepTab3.title = !isBlePaired ? 'Bluetooth pairing required first' : 'Complete valid Wi-Fi credentials first (min 8 chars)';
+-          } else {
+-            stepTab3.classList.remove('opacity-40', 'cursor-not-allowed');
+-            stepTab3.title = '';
+-          }
+-        }
+-
++        const wifiReady = confirmedWifiReady();
++        for (const [id, ready] of [['nodeStepTab2', isBlePaired], ['nodeStepTab3', wifiReady]]) {
++          const tab = document.getElementById(id);
++          if (tab) {
++            tab.classList.toggle('opacity-40', !ready);
++            tab.classList.toggle('cursor-not-allowed', !ready);
++            tab.title = ready ? '' : !isBlePaired ? 'Connect the ESP32 through Bluetooth first' : 'Test Connection to verify the ESP32 Wi-Fi connection';
++          }
++        }
+         if (!nextBtn) return;
+-        if (currentModalStep === 1) {
+-          nextBtn.disabled = !isBlePaired;
+-          if (!isBlePaired) {
+-            nextBtn.classList.add('opacity-40', 'cursor-not-allowed');
+-            nextBtn.title = 'Pair with a Bluetooth AC Controller Node first to proceed';
+-          } else {
+-            nextBtn.classList.remove('opacity-40', 'cursor-not-allowed');
+-            nextBtn.title = '';
+-          }
+-        } else if (currentModalStep === 2) {
+-          const ssid = document.getElementById('nodeFormSsid')?.value.trim();
+-          const pass = document.getElementById('nodeFormPassword')?.value || '';
+-          const isValid = !!ssid && pass.length >= 8 && wifiConfirmedFor === ssid;
+-          nextBtn.disabled = !isValid;
+-          if (!isValid) {
+-            nextBtn.classList.add('opacity-40', 'cursor-not-allowed');
+-            nextBtn.title = !ssid ? 'Enter Target Wi-Fi SSID' : 'Wi-Fi Password must be at least 8 characters (WPA2)';
+-          } else {
+-            nextBtn.classList.remove('opacity-40', 'cursor-not-allowed');
+-            nextBtn.title = '';
+-          }
+-        } else {
+-          nextBtn.disabled = false;
+-          nextBtn.classList.remove('opacity-40', 'cursor-not-allowed');
+-          nextBtn.title = '';
+-        }
++        const ready = currentModalStep === 1 ? isBlePaired : currentModalStep === 2 ? wifiReady : true;
++        nextBtn.disabled = !ready;
++        nextBtn.classList.toggle('opacity-40', !ready);
++        nextBtn.classList.toggle('cursor-not-allowed', !ready);
++        nextBtn.title = ready ? '' : !isBlePaired ? 'Connect the ESP32 through Bluetooth first' : 'Test Connection and wait for the ESP32 reply';
+       }
+ 
+       function setNodeModalStep(step) {
+@@ -2217,7 +2351,7 @@
+         // RESTRICTION 1: Must go through Bluetooth BLE discovery and pairing first before Wi-Fi or Controller Info
+         if (step >= 2) {
+           const idVal = document.getElementById('nodeFormId')?.value.trim();
+-          if (!idVal) {
++          if (!idVal || !selectedBleDevice?.info || selectedBleDevice.nodeId !== idVal) {
+             if (window.EcoToast) {
+               window.EcoToast.show('Bluetooth discovery required: Please search for and pair with an ESP32-S3 AC Controller Node via Bluetooth first before Wi-Fi setup.', 'warning');
+             }
+@@ -2231,50 +2365,14 @@
+           }
+         }
+ 
+-        // RESTRICTION 2: Validate Wi-Fi credentials before advancing to Step 3
+-        if (step === 3) {
+-          const idVal = document.getElementById('nodeFormId')?.value.trim();
+-          if (!idVal) {
+-            if (window.EcoToast) window.EcoToast.show('Bluetooth discovery required: Please pair a Bluetooth node first.', 'warning');
+-            setNodeModalStep(1);
+-            return;
+-          }
+-          const ssidVal = document.getElementById('nodeFormSsid')?.value.trim();
+-          const passVal = document.getElementById('nodeFormPassword')?.value || '';
+-          const ipVal = document.getElementById('nodeFormIp')?.value.trim();
+-          const ipRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+-
+-          if (!ssidVal) {
+-            const el = document.getElementById('nodeFormSsid');
+-            el?.focus();
+-            el?.classList.add('border-rose-500', 'ring-1', 'ring-rose-500');
+-            setTimeout(() => el?.classList.remove('border-rose-500', 'ring-1', 'ring-rose-500'), 2500);
+-            if (window.EcoToast) window.EcoToast.show('Please select or enter the Target Wi-Fi SSID.', 'warning');
+-            return;
+-          }
+-          if (!passVal) {
+-            const el = document.getElementById('nodeFormPassword');
+-            el?.focus();
+-            el?.classList.add('border-rose-500', 'ring-1', 'ring-rose-500');
+-            setTimeout(() => el?.classList.remove('border-rose-500', 'ring-1', 'ring-rose-500'), 2500);
+-            if (window.EcoToast) window.EcoToast.show('Wi-Fi Password is required to provision the AC controller node.', 'warning');
+-            return;
+-          }
+-          if (passVal.length < 8) {
+-            const el = document.getElementById('nodeFormPassword');
+-            el?.focus();
+-            el?.classList.add('border-rose-500', 'ring-2', 'ring-rose-500/50');
+-            setTimeout(() => el?.classList.remove('border-rose-500', 'ring-2', 'ring-rose-500/50'), 2500);
+-            if (window.EcoToast) window.EcoToast.show('Wi-Fi Restriction: Password must be at least 8 characters (WPA2 security standard).', 'error');
+-            return;
+-          }
+-          if (wifiConfirmedFor !== ssidVal) {
+-            window.EcoToast?.show('Click Test Connection and wait for the ESP32 Wi-Fi confirmation first.', 'warning');
+-            return;
+-          }
++        // Existing Wi-Fi is verified from the real BLE reply; cloud registration is separate.
++        if (step === 3 && !confirmedWifiReady()) {
++          window.EcoToast?.show('Test Connection and wait for the ESP32 Wi-Fi confirmation first.', 'warning');
++          return;
+         }
+ 
+         currentModalStep = step;
++        refreshExistingWifiPanel();
+ 
+         // Active step visibility
+         step1El.classList.toggle('hidden', step !== 1);
+@@ -2382,7 +2480,7 @@
+ 
+       if (nextStepBtn) {
+         nextStepBtn.addEventListener('click', () => {
+-          if (currentModalStep === 1) setNodeModalStep(2);
++          if (currentModalStep === 1) setNodeModalStep(confirmedWifiReady() ? 3 : 2);
+           else if (currentModalStep === 2) setNodeModalStep(3);
+         });
+       }
+@@ -2448,7 +2546,9 @@
+         if (registrationSaving) return;
+         resetRemoteDetection('register');
+         setRegistrationCloudStatus('pending');
++        const session = ++registrationSessionVersion;
+         form.reset();
++        resetConnectionDiagnostics();
+         resetDeviceIpFeedback();
+         await loadBuildingsFloorsRooms();
+         await loadRegistrationAirconChoices();
+@@ -2499,6 +2599,8 @@
+         const passInputEl = document.getElementById('nodeFormPassword');
+         if (passInputEl) {
+           passInputEl.value = '';
++          passInputEl.type = 'password';
++          document.getElementById('toggleWifiPassBtn').textContent = 'Show';
+           passInputEl.classList.remove('border-rose-500', 'border-emerald-500', 'ring-2', 'ring-rose-500/40');
+         }
+         const passHelp = document.getElementById('wifiPassHelpText');
+@@ -2524,9 +2626,10 @@
+         setNodeModalStep(1);
+         updateNextButtonState();
+         modal.classList.remove('hidden');
++        await resumeControllerSetup(session);
+       });
+ 
+-      function closeModal() { if (registrationSaving) return; resetDeviceIpFeedback(); resetRemoteDetection('register'); modal.classList.add('hidden'); }
++      function closeModal() { if (registrationSaving) return; registrationSessionVersion++; resetConnectionDiagnostics(); resetDeviceIpFeedback(); resetRemoteDetection('register'); modal.classList.add('hidden'); }
+       closeBtn.addEventListener('click', closeModal);
+       cancelBtn.addEventListener('click', closeModal);
+       modal.addEventListener('click', (e) => {
+@@ -2565,11 +2668,13 @@
+         const firmware = document.getElementById('nodeFormFw').value.trim() || 'v2.4.2-WiFi';
+         const ip_address = document.getElementById('nodeFormIp').value.trim();
+         const wifi_ssid = document.getElementById('nodeFormSsid').value.trim();
+-        const wifi_password = document.getElementById('nodeFormPassword').value;
+-        if (!wifi_password) {
+-          setNodeModalStep(2);
+-          document.getElementById('nodeFormPassword')?.focus();
+-          if (window.EcoToast) window.EcoToast.show('Wi-Fi Password is required to provision the ESP32 AC controller.', 'warning');
++        const credentials = registrationCredentials();
++        const wifi_password = credentials.pass;
++        if (!confirmedWifiReady() || wifi_password.length < 8) {
++          const reuse = canReuseExistingWifi();
++          setNodeModalStep(reuse ? 3 : 2);
++          document.getElementById(reuse ? 'registrationWifiPassword' : 'nodeFormPassword')?.focus();
++          if (window.EcoToast) window.EcoToast.show(reuse ? 'Enter the current Wi-Fi password once to refresh this ESP32 cloud registration.' : 'Test Connection with valid Wi-Fi settings before registering the ESP32.', 'warning');
+           return;
+         }
+         const selectedAirconId = document.getElementById('nodeFormAircon')?.value || null;
+@@ -2665,7 +2770,7 @@
+             if (match) effectiveRoomId = match.id;
+           }
+ 
+-          registered = await window.EcoTrackHardwareCloud.register({ room_id: effectiveRoomId, brand: brand || null, aircon_type }, { ssid: wifi_ssid, pass: wifi_password });
++          registered = await window.EcoTrackHardwareCloud.register({ room_id: effectiveRoomId, brand: brand || null, aircon_type }, credentials);
+           await NodeService.saveNode({
+             node_id: registered.info.device_id, db_id: registered.node.id, cloud_registered: true, aircon_id: selectedAirconId,
+             name: `${registered.info.device_id} (${name})`, hardware: 'ESP32-S3 IR receiver', status: 'Connected',
+@@ -2678,6 +2783,7 @@
+             rssi: registered.info.rssi ?? null, controls: ['IR Learning']
+           });
+           document.getElementById('nodeFormPassword').value = '';
++          document.getElementById('registrationWifiPassword').value = '';
+           if (brand) {
+             try {
+               await NodeService.saveRemoteProfile(node_id, {
+--- before/public/js/hardware-cloud.js
++++ after/public/js/hardware-cloud.js
+@@ -5,6 +5,12 @@
+   const INFO = 'beb5483e-36e1-4688-b7f5-ea07361b26a8';
+   const WIFI = '1c95d5e3-d8f7-413a-bf3d-7a2e5d7be87e';
+   const state = { device: null, info: null, writer: null, identity: null };
++  let bluetoothOperation = Promise.resolve();
++  function serializeBluetooth(operation) {
++    const result = bluetoothOperation.then(operation, operation);
++    bluetoothOperation = result.catch(() => {});
++    return result;
++  }
+   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+   const timestamp = () => root.performance?.now?.() ?? Date.now();
+   const client = () => {
+@@ -31,34 +37,62 @@
+   function identityMatches(info) {
+     return /^esp32s3-[a-f0-9]{12}$/.test(info?.device_id || '') && info.cloud_protocol === 1;
+   }
++  function bluetoothFailure(error) {
++    if (error?.name === 'NetworkError' || /gatt|bluetooth/i.test(error?.message || '')) {
++      return Object.assign(new Error('Bluetooth connection failed. Reconnect the nearby ESP32 and try again. If Windows keeps reporting a GATT error, remove its old Bluetooth pairing and pair again.'), { code: 'BLE_CONNECTION_FAILED' });
++    }
++    return error;
++  }
+   async function readInfo() {
+     if (!state.device?.gatt?.connected || !state.info) throw new Error('Reconnect the nearby ESP32 through Bluetooth.');
+-    const value = await state.info.readValue();
++    let value;
++    try { const characteristic = state.info; value = await serializeBluetooth(() => characteristic.readValue()); } catch (error) { throw bluetoothFailure(error); }
+     const info = JSON.parse(new TextDecoder().decode(value));
+     if (!identityMatches(info)) throw new Error('Install the new EcoTrack cloud receiver sketch on this ESP32 first.');
+     if (state.identity && state.identity !== info.device_id) throw new Error('Bluetooth device identity does not match this setup.');
+     state.identity = info.device_id;
+     return info;
+   }
++  async function attachDevice(device) {
++    try {
++      const server = await device.gatt.connect();
++      const service = await server.getPrimaryService(SERVICE);
++      state.device = device;
++      state.identity = null;
++      state.info = await service.getCharacteristic(INFO);
++      state.writer = await service.getCharacteristic(WIFI);
++      const info = await readInfo();
++      device.addEventListener?.('gattserverdisconnected', () => { if (state.device === device) { state.info = null; state.writer = null; } });
++      return { ...info, bluetooth_name: device.name || info.device_id };
++    } catch (error) { throw bluetoothFailure(error); }
++  }
+   async function connect() {
+     if (!root.navigator?.bluetooth?.requestDevice) throw new Error('Bluetooth provisioning requires EcoTrack desktop with a working Bluetooth adapter.');
+     if (state.device?.gatt?.connected) state.device.gatt.disconnect();
+     const device = await root.navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'EcoTrack-' }], optionalServices: [SERVICE] });
+-    const server = await device.gatt.connect();
+-    const service = await server.getPrimaryService(SERVICE);
+-    state.device = device;
+-    state.identity = null;
+-    state.info = await service.getCharacteristic(INFO);
+-    state.writer = await service.getCharacteristic(WIFI);
+-    const info = await readInfo();
+-    device.addEventListener?.('gattserverdisconnected', () => { if (state.device === device) { state.info = null; state.writer = null; } });
+-    return { ...info, bluetooth_name: device.name || info.device_id };
+-  }
+-  async function provision(payload, cloud = false) {
+-    const info = await readInfo();
++    return attachDevice(device);
++  }
++  async function resume() {
++    // Only resume a previously authorized device; never infer hardware from a saved IP.
++    try {
++      if (state.device?.gatt?.connected && state.info) return { ...await readInfo(), bluetooth_name: state.device.name || state.identity };
++      let device = state.device;
++      if (!device && root.navigator?.bluetooth?.getDevices) {
++        const authorized = (await root.navigator.bluetooth.getDevices()).filter(item => item.name?.startsWith('EcoTrack-'));
++        if (authorized.length !== 1) return null;
++        device = authorized[0];
++      }
++      return device ? await attachDevice(device) : null;
++    } catch (_) { return null; }
++  }
++  function validateCredentials(info, payload) {
+     if (payload.device_id && payload.device_id !== info.device_id) throw new Error('Wrong Bluetooth device selected.');
+     if (typeof payload.ssid !== 'string' || !payload.ssid.trim() || new TextEncoder().encode(payload.ssid).length > 32 ||
+         typeof payload.pass !== 'string' || new TextEncoder().encode(payload.pass).length < 8 || new TextEncoder().encode(payload.pass).length > 63) throw new Error('Enter a Wi-Fi name and a password of 8..63 bytes.');
++  }
++  async function provision(payload, cloud = false) {
++    const info = await readInfo();
++    validateCredentials(info, payload);
+     const requestId = root.crypto.randomUUID();
+     const bytes = new TextEncoder().encode(JSON.stringify({ ...payload, device_id: info.device_id, request_id: requestId }));
+     if (bytes.length > 2048) throw new Error('Provisioning payload is too large.');
+@@ -68,7 +102,7 @@
+       const part = bytes.slice(index * 160, (index + 1) * 160);
+       const packet = new Uint8Array(header.length + part.length);
+       packet.set(header); packet.set(part, header.length);
+-      await state.writer.writeValueWithResponse(packet);
++      try { const characteristic = state.writer; await serializeBluetooth(() => characteristic.writeValueWithResponse(packet)); } catch (error) { throw bluetoothFailure(error); }
+     }
+     const deadline = Date.now() + 60000;
+     while (Date.now() < deadline) {
+@@ -82,6 +116,7 @@
+   }
+   async function register(metadata, credentials) {
+     const info = await readInfo();
++    validateCredentials(info, credentials || {});
+     const config = root.ECOTRACK_CONFIG;
+     if (!config?.supabaseUrl?.startsWith('https://') || !publicKey(config.supabaseKey)) throw new Error('A Supabase HTTPS URL and publishable key are required.');
+     const registration = await rpc('ecotrack_register_cloud_device', { p_device_id: info.device_id, p_metadata: metadata });
+@@ -258,5 +293,5 @@
+       root.localStorage.setItem('ecoTrack_nodes', JSON.stringify(nodes));
+     }
+   } catch (_) {}
+-  root.EcoTrackHardwareCloud = { connect, readInfo, provision, register, request, waitForResult, ping, learn, latest, control, getStatus, listStatus, describe, resolveNode };
++  root.EcoTrackHardwareCloud = { connect, resume, readInfo, provision, register, request, waitForResult, ping, learn, latest, control, getStatus, listStatus, describe, resolveNode };
+ })(typeof window !== 'undefined' ? window : globalThis);
+--- before/public/styles.css
++++ after/public/styles.css
+@@ -9085,6 +9085,16 @@
+   padding: 0 !important;
+ }
+ 
++
++/* Registration checks reflect actual replies rather than initial success marks. */
++.connection-check { flex-shrink: 0; background: #e2e8f0; color: #64748b; }
++.connection-check[data-state="checking"] { background: #fef3c7; color: #92400e; }
++.connection-check[data-state="success"] { background: #10b981; color: #fff; }
++.connection-check[data-state="error"] { background: #ffe4e6; color: #be123c; }
++.dark .connection-check[data-state="pending"] { background: #334155; color: #cbd5e1; }
++.dark .connection-check[data-state="checking"] { background: #78350f; color: #fef3c7; }
++.dark .connection-check[data-state="error"] { background: #881337; color: #ffe4e6; }
++
+ /* Nearby Bluetooth selection is a native modal above the registration wizard. */
+ .ecotrack-bluetooth-dialog {
+   --ble-bg: #ffffff;
+--- before/scripts/test_registration_progress.js
++++ after/scripts/test_registration_progress.js
+@@ -9,6 +9,7 @@
+   return html.slice(from, to);
+ };
+ const remoteSource = section('      const remoteCapture = {', '      let nodeCurrentPage = 1;');
++const recoverySource = section('      // Connection diagnostics and existing Wi-Fi reuse.', '      async function scanForBleDevices()');
+ const summarySource = section('      function updateConfigSummary() {', '      // Manage state and restrictions');
+ const submitSource = section("      form.addEventListener('submit',", "      const nPrev = document.getElementById('nodePrevBtn');");
+ const closeSource = section('      function closeModal() {', "      closeBtn.addEventListener('click'");
+@@ -22,7 +23,7 @@
+   return { value: '', textContent: '', disabled: false, className: '', dataset: {}, attributes: {}, options: [], selectedIndex: 0,
+     setAttribute(key, value) { this.attributes[key] = value; },
+     addEventListener() {}, focus() {},
+-    classList: { contains: name => classes.has(name), add: (...names) => names.forEach(name => classes.add(name)), remove: (...names) => names.forEach(name => classes.delete(name)) }
++    classList: { contains: name => classes.has(name), add: (...names) => names.forEach(name => classes.add(name)), remove: (...names) => names.forEach(name => classes.delete(name)), toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); } }
+   };
+ }
+ const registration = () => ({
+@@ -50,11 +51,12 @@
+     ProtocolAdapter: { detectRemoteBrand: async id => ({ success: true, brand: 'Daikin', protocol: 'DAIKIN2' }) },
+     renderBrandChips() {}, renderNodes() {}, setNodeModalStep() {}, resetDeviceIpFeedback() {}, setTimeout: () => 1,
+     _cachedBuildings: [], _cachedFloors: [], _cachedRooms: [], nodeCurrentPage: 1,
++    currentModalStep: 3, selectedBleDevice: { nodeId: 'esp32s3-001122334455', info: { device_id: 'esp32s3-001122334455' } }, wifiConfirmedFor: 'Fixture network',
+     AirconProfileManager: { getById: () => null },
+     modal: get('nodeModal'), saveNodeBtn: get('saveNodeBtn'),
+     form: { addEventListener: (name, fn) => handlers.set(name, fn) }
+   });
+-  vm.runInContext(remoteSource + summarySource + closeSource + submitSource, context);
++  vm.runInContext(remoteSource + recoverySource + summarySource + closeSource + submitSource, context);
+   return { get, window, context, calls, saved, toasts, capture, persisted,
+     submit: () => handlers.get('submit')({ preventDefault() {} }) };
+ }
+@@ -203,6 +205,22 @@
+   app.context.closeModal();
+   assert.equal(app.get('nodeModal').classList.contains('hidden'), true);
+   checks.push('Optional profile failure releases the save guard and keeps its error visible');
++
++  app = harness();
++  app.get('nodeFormPassword').value = '';
++  app.get('registrationWifiPassword').value = 'fixture-network-password';
++  vm.runInContext("existingWifiInfo = { device_id:'esp32s3-001122334455', wifi_status:'connected', wifi_ssid:'Fixture network', ip_address:'10.0.0.4', cloud_status:'error' };", app.context);
++  const recovering = app.submit();
++  assert.equal(app.calls.length, 1);
++  assert.equal(app.calls[0][1].pass, 'fixture-network-password');
++  assert.equal(app.calls[0][1].ssid, 'Fixture network');
++  assert.equal(app.get('registrationCloudStatus').dataset.state, 'verifying');
++  app.capture.resolve(registration());
++  app.persisted.resolve();
++  await recovering;
++  assert.equal(app.get('registrationCloudStatus').dataset.state, 'verified');
++  assert.equal(app.get('registrationWifiPassword').value, '');
++  checks.push('Skipped Wi-Fi setup can register with the repair password and still waits for the cloud heartbeat');
+ 
+   app = harness();
+   app.get('nodeFormAircon').value = 'existing-ac';
+--- before/scripts/test_device_setup_feedback.js
++++ after/scripts/test_device_setup_feedback.js
+@@ -9,6 +9,7 @@
+   assert(a >= 0 && b > a);
+   return html.slice(a, b);
+ }
++const diagnosticSource = section('      function setConnectionCheck(', '      function resetConnectionDiagnostics()') + section('      function hasConnectedWifi(', '      function canReuseExistingWifi()');
+ const ipSource = section('      const autoAssignIpBtn =', '      const togglePassBtn =');
+ function deferred() {
+   let resolve, reject;
+@@ -45,7 +46,7 @@
+     setTimeout(fn) { timers.set(++timerId, fn); return timerId; },
+     clearTimeout(id) { timers.delete(id); }
+   });
+-  vm.runInContext(ipSource, context);
++  vm.runInContext(diagnosticSource + ipSource, context);
+   return { context, get, reply, messages, timers, reads: () => reads, click: () => get('autoAssignIpBtn').click() };
+ }
+ const info = (overrides = {}) => ({ device_id: 'esp32s3-001122334455', wifi_status: 'connected', ip_address: '192.168.1.66', ...overrides });
+--- before/scripts/test_cloud_hardware_client.js
++++ after/scripts/test_cloud_hardware_client.js
+@@ -22,7 +22,7 @@
+  }
+ }};
+ const service={getCharacteristic:async id=>id.startsWith('beb5483e')?infoChar:writeChar};
+-const device={name:'EcoTrack-'+bluetoothInfo.device_id,addEventListener(){},gatt:{connected:true,connect:async()=>({getPrimaryService:async()=>service}),disconnect(){disconnected=true;this.connected=false;}}};
++const device={name:'EcoTrack-'+bluetoothInfo.device_id,addEventListener(){},gatt:{connected:true,connect:async()=>{device.gatt.connected=true;return {getPrimaryService:async()=>service};},disconnect(){disconnected=true;this.connected=false;}}};
+ const sb={
+  rpc:async(name,args)=>{
+   requests.push({name,args:structuredClone(args)}); if(rpcError)return {data:null,error:rpcError};
+@@ -77,6 +77,48 @@
+  hardwareStatus.last_seen=new Date(now-60000).toISOString();assert.equal((await cloud.getStatus('node-real')).connection_status,'offline');checkList.push('Old heartbeat is offline even when its database row still exists');
+  rpcError={code:'PGRST202',message:'Function missing'};await assert.rejects(()=>cloud.request('node-real','ping'),/supabase_cloud_hardware_migration/);checkList.push('Missing cloud deployment produces actionable setup error');
+  rpcError=null;readError={code:'42501',message:'Access denied'};await assert.rejects(()=>cloud.getStatus('node-real'),/Access denied/);checkList.push('Database permission failures remain failures');
++ readError=null; rpcError=null;
++ const beforeResume=provisioned.length;
++ const resumed=await cloud.resume();
++ assert.equal(resumed.device_id,bluetoothInfo.device_id); assert.equal(provisioned.length,beforeResume);
++ checkList.push('Previously authorized ESP32 reconnects by reading live BLE info without rewriting Wi-Fi');
++ const beforeInvalid=requests.length;
++ await assert.rejects(()=>cloud.register({}, {ssid:'Campus network',pass:''}),/8..63 bytes/);
++ assert.equal(requests.length,beforeInvalid);
++ checkList.push('Invalid credentials cannot rotate or recreate a cloud device credential');
++ let activeReads=0,maxReads=0;
++ const originalRead=infoChar.readValue;
++ infoChar.readValue=async()=>{activeReads++;maxReads=Math.max(maxReads,activeReads);await Promise.resolve();const result=await originalRead();activeReads--;return result;};
++ await Promise.all([cloud.readInfo(),cloud.readInfo()]);
++ assert.equal(maxReads,1); infoChar.readValue=originalRead;
++ checkList.push('Concurrent UI reads are serialized into one GATT operation at a time');
++ infoChar.readValue=async()=>{throw Object.assign(new Error('GATT Error Unknown.'),{name:'NetworkError'});};
++ await assert.rejects(()=>cloud.readInfo(),error=>error.code==='BLE_CONNECTION_FAILED'&&/Reconnect/.test(error.message));
++ infoChar.readValue=originalRead;
++ checkList.push('Raw GATT errors include actionable Bluetooth reconnection guidance');
++ hardwareStatus.last_seen=new Date(now).toISOString();
++ bluetoothInfo.cloud_status='error';
++ const repaired=await cloud.register({}, {ssid:'Campus network',pass:'fixture-network-password'});
++ assert.equal(repaired.cloud_state.connection_status,'online');assert.equal(provisioned.at(-1).device_token,'a'.repeat(64));
++ assert.equal(repaired.info.cloud_status,'verified');
++ checkList.push('An already connected ESP32 with failed cloud authentication receives a fresh device credential and verifies the heartbeat');
++ const loadFreshTransport=authorizedDevices=>{
++  let chooserCalls=0;
++  const freshRoot={...root,navigator:{bluetooth:{getDevices:async()=>authorizedDevices,requestDevice:async()=>{chooserCalls++;return device;}}}};
++  const freshContext=vm.createContext({window:freshRoot,Date:TestDate,TextEncoder,TextDecoder,Uint8Array,atob,console,setTimeout:(fn,ms)=>{now+=ms;queueMicrotask(fn);}});
++  vm.runInContext(fs.readFileSync('public/js/hardware-cloud.js','utf8'),freshContext);
++  return {transport:freshRoot.EcoTrackHardwareCloud,chooserCalls:()=>chooserCalls};
++ };
++ const remembered=loadFreshTransport([device]);
++ assert.equal((await remembered.transport.resume()).device_id,bluetoothInfo.device_id);
++ assert.equal(remembered.chooserCalls(),0);
++ checkList.push('A single previously authorized ESP32 can resume after a page reload without opening the Bluetooth chooser');
++ const ambiguous=loadFreshTransport([device,{name:'EcoTrack-other',gatt:device.gatt}]);
++ assert.equal(await ambiguous.transport.resume(),null);
++ assert.equal(ambiguous.chooserCalls(),0);
++ const unavailable=loadFreshTransport([]);
++ assert.equal(await unavailable.transport.resume(),null);
++ checkList.push('Multiple authorized devices or no remembered device require explicit selection instead of guessing hardware');
+  fs.writeFileSync('reports/cloud-hardware/client-tests.json',JSON.stringify({checks:checkList,passed:checkList.length,physical_hardware_tested:false},null,2));
+  console.log(`Cloud hardware client: ${checkList.length} checks passed.`);
+ }
+--- before/reports/cloud-hardware/SETUP.md
++++ after/reports/cloud-hardware/SETUP.md
+@@ -6,7 +6,7 @@
+ 2. Copy all of `EcoTrackCloudReceiver.ino.txt` into a new Arduino IDE sketch. This is separate from the existing firmware directory. Install ESP32 core 3.3.12, ArduinoJson 7, and IRremoteESP8266 2.9.0. Select ESP32S3 Dev Module and Partition Scheme -> Huge APP (3MB No OTA). Set `IR_RX_PIN` to the real receiver output pin (default GPIO 5). Connect receiver VCC to 3.3V, GND to GND, and OUT to that pin. Upload through Arduino IDE. When using native USB, enable USB CDC On Boot to see Serial output.
+ 3. Fully close EcoTrack and restart it from this project (`npm start`). A page reload does not load the new Electron Bluetooth handlers. Sign in as an administrator.
+ 4. Open AC Controller Devices -> Register -> Connect Nearby ESP32. Choose the actual hardware identifier. The updated sketch pairs without a six-digit PIN. Accept a normal Windows Pair confirmation if it appears; no code from Serial Monitor is required. Wi-Fi provisioning still requires an encrypted Bluetooth connection.
+-5. Enter/select the ESP32's 2.4 GHz Wi-Fi network and password. Click Test Connection and wait for its actual reply. Enter the controller details and register. Registration sends the Supabase public configuration and a device-specific credential over Bluetooth, then verifies the cloud heartbeat. Wi-Fi passwords are stored on the ESP32 and are not sent to Supabase registration or retained in browser storage. A device that was previously paired with different firmware may need its old pairing removed from Windows first.
++5. If the ESP32 already has Wi-Fi, the UI reads its live Bluetooth status and skips completed Bluetooth/Wi-Fi steps to Controller Info. A previously authorized device can reconnect automatically; otherwise select the nearby ESP32 once. Enter its current Wi-Fi password on Controller Info and click Save & Verify Controller to refresh the cloud credential, including after its Supabase registration was deleted. The current sketch requires that password for cloud provisioning, so no Arduino reupload is needed for this UI recovery. For initial Wi-Fi setup or a different network, enter/select the ESP32's 2.4 GHz network and password, click Test Connection, and wait for its actual reply. Then enter the controller details and register. Registration sends the Supabase public configuration and a device-specific credential over Bluetooth, then verifies the cloud heartbeat. Wi-Fi passwords are stored on the ESP32 and are not sent to Supabase registration or retained in browser storage. A device that was previously paired with different firmware may need its old pairing removed from Windows first.
+ 6. Use Ping for a measured UI -> Supabase -> ESP32 -> Supabase -> UI round trip in milliseconds. This includes cloud delivery/polling and is not LAN ICMP latency. Open the registered node's Edit dialog to detect its remote brand, or use IR Studio to learn a real frame. Press the remote toward the receiver while the UI is listening. Auto-detection before cloud registration reports that registration is required.
+ 7. Apply Control Schedules to save the interval, wake, and sleep times in Supabase. The UI reports Queued until hardware delivery. Equal wake/sleep clocks mean continuous operation. Defaults in the sketch do not enable scheduled deep sleep. The configured interval controls real connectivity history; cloud command polling remains responsive. No battery, temperature, pressure, or measured AC power is generated.
+ 

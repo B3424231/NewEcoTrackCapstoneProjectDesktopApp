@@ -1,0 +1,369 @@
+// EcoTrack ESP32-S3 cloud IR receiver. No hardcoded Wi-Fi credentials.
+// Arduino ESP32 core 3.3.12, ArduinoJson 7, IRremoteESP8266 2.9.0.
+// Board: ESP32S3 Dev Module; Partition Scheme: Huge APP (3MB No OTA).
+// IR receiver: VCC=3.3V, GND=GND, OUT=IR_RX_PIN. No IR transmitter/battery.
+// Bluetooth: encrypted Just Works pairing and bonding, with no six-digit PIN.
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
+#include <Preferences.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLESecurity.h>
+#include <ArduinoJson.h>
+#include <IRrecv.h>
+#include <IRutils.h>
+#include <esp_sleep.h>
+#include <mbedtls/base64.h>
+#include <time.h>
+#include <sys/time.h>
+
+constexpr uint16_t IR_RX_PIN = 5;  // Change this to your actual receiver OUT pin.
+constexpr long UTC_OFFSET_SECONDS = 8 * 3600;
+constexpr uint32_t CLOUD_POLL_MS = 2000;
+constexpr uint32_t RECHECK_SLEEP_SECONDS = 900;
+constexpr char SERVICE_UUID[] = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+constexpr char INFO_UUID[] = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+constexpr char WIFI_UUID[] = "1c95d5e3-d8f7-413a-bf3d-7a2e5d7be87e";
+constexpr char VERSION[] = "cloud-ir-receiver-1.1-pinless";
+
+IRrecv receiver(IR_RX_PIN, 1024, 50, true);
+decode_results decoded;
+Preferences prefs;
+BLECharacteristic *infoCharacteristic = nullptr;
+QueueHandle_t provisionQueue;
+struct ProvisionMessage { char json[2049]; };
+portMUX_TYPE infoMutex = portMUX_INITIALIZER_UNLOCKED;
+char infoCache[512] = "{}";
+volatile bool bluetoothConnected = false;
+volatile bool advertiseAgain = false;
+String deviceId, registryId, ssid, password, projectUrl, publicKey, deviceToken;
+String requestId, wifiStatus = "unconfigured", cloudStatus = "unconfigured", lastError;
+String latestCapture, pendingAck, completedCommand, learningId;
+String wakeTime, sleepTime;
+bool captureDirty = false, saveCloudAfterVerify = false;
+uint32_t wifiStarted = 0, lastReconnect = 0, lastCloudPoll = 0, learningDeadline = 0;
+uint32_t bootCount = 0, reportSequence = 1, lastReportMs = 0, lastSleepCheckMs = 0;
+uint32_t intervalMs = 5000, lastStatusPrint = 0, captureSequence = 0;
+
+bool clockReady() { return time(nullptr) > 1700000000; }
+bool validToken(const String &value) {
+  if (value.length() != 64) return false;
+  for (char c : value) if (!(c >= '0' && c <= '9') && !(c >= 'a' && c <= 'f')) return false;
+  return true;
+}
+bool validPublicKey(const String &key) {
+  if (key.startsWith("sb_publishable_")) return key.length() < 512;
+  int first = key.indexOf('.'), second = key.indexOf('.', first + 1);
+  if (first < 0 || second < 0) return false;
+  String body = key.substring(first + 1, second);
+  body.replace('-', '+'); body.replace('_', '/');
+  while (body.length() % 4) body += '=';
+  unsigned char buffer[768]; size_t length = 0;
+  if (mbedtls_base64_decode(buffer, sizeof(buffer) - 1, &length, (const unsigned char *)body.c_str(), body.length()) != 0) return false;
+  buffer[length] = 0;
+  JsonDocument document;
+  return !deserializeJson(document, buffer) && String(document["role"] | "") == "anon";
+}
+int clockMinutes(const String &value) {
+  if (value.length() != 5 || value[2] != ':' || !isDigit(value[0]) || !isDigit(value[1]) || !isDigit(value[3]) || !isDigit(value[4])) return -1;
+  int hour = value.substring(0, 2).toInt(), minute = value.substring(3).toInt();
+  return hour < 24 && minute < 60 ? hour * 60 + minute : -1;
+}
+void updateBleInfo() {
+  JsonDocument document;
+  document["device_id"] = deviceId; document["cloud_protocol"] = 1;
+  if (registryId.length()) document["node_id"] = registryId;
+  document["firmware_version"] = VERSION;
+  document["wifi_status"] = wifiStatus; document["cloud_status"] = cloudStatus;
+  document["request_id"] = requestId;
+  document["error"] = lastError.substring(0, 64);
+  document["capabilities"]["ir_receiver"] = true;
+  document["capabilities"]["ir_transmitter"] = false;
+  if (WiFi.status() == WL_CONNECTED) {
+    document["ip_address"] = WiFi.localIP().toString();
+    document["wifi_ssid"] = WiFi.SSID(); document["rssi"] = WiFi.RSSI();
+  }
+  String json; serializeJson(document, json);
+  if (json.length() > 500) { document.remove("wifi_ssid"); document.remove("error"); json = ""; serializeJson(document, json); }
+  portENTER_CRITICAL(&infoMutex);
+  snprintf(infoCache, sizeof(infoCache), "%s", json.c_str());
+  portEXIT_CRITICAL(&infoMutex);
+}
+class InfoCallbacks : public BLECharacteristicCallbacks {
+  void onRead(BLECharacteristic *characteristic) override {
+    char local[512];
+    portENTER_CRITICAL(&infoMutex); memcpy(local, infoCache, sizeof(local)); portEXIT_CRITICAL(&infoMutex);
+    characteristic->setValue(String(local));
+  }
+};
+class ProvisionCallbacks : public BLECharacteristicCallbacks {
+  String id, assembled;
+  int nextPart = 0, totalParts = 0;
+  void onWrite(BLECharacteristic *characteristic) override {
+    String packet = characteristic->getValue();
+    int one = packet.indexOf(':'), two = packet.indexOf(':', one + 1), three = packet.indexOf(':', two + 1);
+    if (one != 36 || two < 0 || three < 0 || packet.length() > 220) return;
+    String incomingId = packet.substring(0, one);
+    int index = packet.substring(one + 1, two).toInt(), count = packet.substring(two + 1, three).toInt();
+    if (count < 1 || count > 13 || index < 0 || index >= count) return;
+    if (index == 0) { id = incomingId; assembled = ""; nextPart = 0; totalParts = count; }
+    if (id != incomingId || index != nextPart || count != totalParts) return;
+    assembled += packet.substring(three + 1); nextPart++;
+    if (assembled.length() > 2048) { assembled = ""; return; }
+    if (nextPart == totalParts) {
+      JsonDocument check;
+      if (!deserializeJson(check, assembled) && String(check["request_id"] | "") == id) {
+        ProvisionMessage message; snprintf(message.json, sizeof(message.json), "%s", assembled.c_str());
+        xQueueOverwrite(provisionQueue, &message);
+      }
+      assembled = "";
+    }
+  }
+};
+class ServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer *) override { bluetoothConnected = true; }
+  void onDisconnect(BLEServer *) override { bluetoothConnected = false; advertiseAgain = true; }
+};
+class SecurityCallbacks : public BLESecurityCallbacks {
+  bool onSecurityRequest() override { return true; }
+  bool onConfirmPIN(uint32_t) override { return false; }
+#if defined(CONFIG_BLUEDROID_ENABLED)
+  void onAuthenticationComplete(esp_ble_auth_cmpl_t result) override {
+    Serial.println(result.success ? "Bluetooth encrypted pairing completed (no PIN)." : "Bluetooth pairing failed.");
+  }
+#else
+  void onAuthenticationComplete(ble_gap_conn_desc *, int status) override {
+    Serial.println(status == 0 ? "Bluetooth encrypted pairing completed (no PIN)." : "Bluetooth pairing failed.");
+  }
+#endif
+};
+void beginBluetooth() {
+  BLEDevice::init("EcoTrack-" + deviceId); BLEDevice::setMTU(247);
+  BLEDevice::setSecurityCallbacks(new SecurityCallbacks());
+  // Bonding + LE Secure Connections, without PIN/MITM authentication.
+  BLESecurity::setAuthenticationMode(true, false, true);
+  BLESecurity::setCapability(ESP_IO_CAP_NONE);
+  BLEServer *server = BLEDevice::createServer(); server->setCallbacks(new ServerCallbacks());
+  BLEService *service = server->createService(SERVICE_UUID);
+  infoCharacteristic = service->createCharacteristic(INFO_UUID, BLECharacteristic::PROPERTY_READ);
+  infoCharacteristic->setCallbacks(new InfoCallbacks());
+  #if defined(CONFIG_BLUEDROID_ENABLED)
+  BLECharacteristic *writer = service->createCharacteristic(WIFI_UUID, BLECharacteristic::PROPERTY_WRITE);
+  writer->setAccessPermissions(ESP_GATT_PERM_WRITE_ENC);
+#else
+  BLECharacteristic *writer = service->createCharacteristic(WIFI_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_ENC);
+#endif
+  writer->setCallbacks(new ProvisionCallbacks());
+  service->start();
+  BLEAdvertising *advertising = BLEDevice::getAdvertising();
+  advertising->addServiceUUID(SERVICE_UUID); advertising->setScanResponse(true); advertising->start();
+}
+void applyConfig(JsonVariantConst config) {
+  if (config["interval_seconds"].is<unsigned long>()) {
+    unsigned long seconds = config["interval_seconds"];
+    if (seconds >= 1 && seconds <= 86400) {
+      intervalMs = seconds * 1000UL;
+      if (prefs.getULong("interval", 5000) != intervalMs) prefs.putULong("interval", intervalMs);
+    }
+  }
+  String wake = config["wake_time"] | "", sleep = config["sleep_time"] | "";
+  if ((wake.isEmpty() && sleep.isEmpty()) || (clockMinutes(wake) >= 0 && clockMinutes(sleep) >= 0)) {
+    wakeTime = wake; sleepTime = sleep;
+    if (prefs.getString("wake") != wake) prefs.putString("wake", wake);
+    if (prefs.getString("sleep") != sleep) prefs.putString("sleep", sleep);
+  }
+}
+void setAck(const String &id, bool success, JsonVariantConst data = JsonVariantConst(), const String &error = "") {
+  JsonDocument ack;
+  if (!data.isNull()) ack.set(data);
+  ack["command_id"] = id; ack["success"] = success;
+  if (error.length()) ack["error"] = error;
+  pendingAck = ""; serializeJson(ack, pendingAck);
+  prefs.putString("ack", pendingAck); completedCommand = id;
+  prefs.putString("completed", id);
+}
+void collectIR() {
+  if (!receiver.decode(&decoded)) return;
+  if (!decoded.overflow && !decoded.repeat && decoded.rawlen >= 4) {
+    JsonDocument frame;
+    frame["success"] = true; frame["protocol"] = typeToString(decoded.decode_type);
+    frame["raw_type"] = typeToString(decoded.decode_type);
+    frame["hex"] = "0x" + uint64ToString(decoded.value, 16);
+    frame["sequence"] = ++captureSequence; frame["captured_at_ms"] = millis();
+    if (clockReady()) { timeval now; gettimeofday(&now, nullptr); frame["captured_at_epoch_ms"] = (uint64_t)now.tv_sec * 1000ULL + now.tv_usec / 1000; }
+    String raw;
+    for (uint16_t i = 1; i < decoded.rawlen; i++) {
+      if (i > 1) raw += ',';
+      raw += String((uint32_t)decoded.rawbuf[i] * kRawTick);
+    }
+    frame["raw_data"] = raw;
+    latestCapture = ""; serializeJson(frame, latestCapture); captureDirty = true;
+    Serial.printf("Captured IR: %s, %u timings\n", typeToString(decoded.decode_type).c_str(), decoded.rawlen - 1);
+    if (learningId.length()) { setAck(learningId, true, frame.as<JsonVariantConst>()); learningId = ""; }
+  }
+  receiver.resume();
+}
+void handleCommand(JsonVariantConst command) {
+  String id = command["id"] | "", kind = command["kind"] | "";
+  if (id.isEmpty() || id == completedCommand || id == learningId) return;
+  if (kind == "learn_ir") {
+    // Use a frame received after this request was created, even if it arrived during cloud delivery.
+    JsonDocument recent;
+    uint64_t requestedAt = command["created_at_epoch_ms"] | 0ULL;
+    if (requestedAt && !deserializeJson(recent, latestCapture) && (recent["captured_at_epoch_ms"] | 0ULL) >= requestedAt) {
+      setAck(id, true, recent.as<JsonVariantConst>());
+    } else {
+      learningId = id; learningDeadline = millis() + 6000;
+      Serial.println("Learning: press the physical remote toward the IR receiver now.");
+    }
+  }
+  else if (kind == "ping") {
+    JsonDocument result; result["rssi"] = WiFi.RSSI(); result["ip_address"] = WiFi.localIP().toString();
+    result["firmware_version"] = VERSION; setAck(id, true, result.as<JsonVariantConst>());
+  } else if (kind == "configure") {
+    applyConfig(command["payload"]);
+    JsonDocument result; result["interval_ms"] = intervalMs; result["wake_time"] = wakeTime; result["sleep_time"] = sleepTime;
+    setAck(id, true, result.as<JsonVariantConst>());
+  } else { setAck(id, false, JsonVariantConst(), "Receiver-only hardware cannot transmit IR commands."); }
+}
+String isoUtc(time_t seconds) {
+  tm value; gmtime_r(&seconds, &value); char result[25]; strftime(result, sizeof(result), "%Y-%m-%dT%H:%M:%SZ", &value); return String(result);
+}
+bool exchange(const String &sleepingUntil = "") {
+  if (WiFi.status() != WL_CONNECTED || !clockReady() || projectUrl.isEmpty() || !validToken(deviceToken)) return false;
+  JsonDocument request;
+  request["p_device_id"] = deviceId; request["p_token"] = deviceToken;
+  JsonObject status = request["p_status"].to<JsonObject>();
+  bool reportDue = millis() - lastReportMs >= intervalMs;
+  if (reportDue) status["report_id"] = deviceId + "-" + String(bootCount) + "-" + String(reportSequence);
+  status["firmware_version"] = VERSION; status["wifi_ssid"] = WiFi.SSID();
+  status["ip_address"] = WiFi.localIP().toString(); status["rssi"] = WiFi.RSSI();
+  status["capabilities"]["ir_receiver"] = true; status["capabilities"]["ir_transmitter"] = false;
+  status["applied_config"]["interval_seconds"] = intervalMs / 1000;
+  status["applied_config"]["wake_time"] = wakeTime; status["applied_config"]["sleep_time"] = sleepTime;
+  if (sleepingUntil.length()) status["sleeping_until"] = sleepingUntil;
+  JsonDocument capture, ack;
+  if (captureDirty && !deserializeJson(capture, latestCapture)) status["latest_ir"].set(capture.as<JsonVariantConst>());
+  if (pendingAck.length() && !deserializeJson(ack, pendingAck)) request["p_ack"].set(ack.as<JsonVariantConst>());
+  String body; serializeJson(request, body);
+  WiFiClientSecure tls; tls.useBuiltinCACertBundle();
+  HTTPClient http;
+  if (!http.begin(tls, projectUrl + "/rest/v1/rpc/ecotrack_device_exchange")) return false;
+  http.setConnectTimeout(5000); http.setTimeout(5000);
+  http.addHeader("Content-Type", "application/json"); http.addHeader("apikey", publicKey);
+  if (publicKey.startsWith("eyJ")) http.addHeader("Authorization", "Bearer " + publicKey);
+  int code = http.POST(body);
+  JsonDocument response;
+  bool parsed = !deserializeJson(response, http.getString()); http.end();
+  if (code != 200 || !parsed || response["success"] != true) {
+    cloudStatus = "error";
+    lastError = code == 401 || code == 403 ? "Cloud authentication failed. Reprovision this device." : String("Supabase request failed (HTTP ") + code + ").";
+    Serial.println(lastError); return false;
+  }
+  cloudStatus = "verified"; lastError = ""; registryId = response["node_id"] | "";
+  captureDirty = false;
+  if (reportDue) { lastReportMs = millis(); reportSequence++; }
+  if (pendingAck.length()) { pendingAck = ""; prefs.remove("ack"); }
+  applyConfig(response["config"]);
+  if (saveCloudAfterVerify) {
+    prefs.putString("url", projectUrl); prefs.putString("public", publicKey); prefs.putString("token", deviceToken);
+    prefs.putString("node", registryId); saveCloudAfterVerify = false;
+  }
+  if (sleepingUntil.isEmpty() && !response["command"].isNull()) handleCommand(response["command"]);
+  return true;
+}
+void processProvisioning() {
+  ProvisionMessage message;
+  if (!xQueueReceive(provisionQueue, &message, 0)) return;
+  JsonDocument document;
+  if (deserializeJson(document, message.json)) return;
+  requestId = document["request_id"] | ""; lastError = "";
+  String newSSID = document["ssid"] | "", newPassword = document["pass"] | "";
+  if (String(document["device_id"] | "") != deviceId || newSSID.isEmpty() || newSSID.length() > 32 || newPassword.length() < 8 || newPassword.length() > 63) {
+    wifiStatus = "error"; lastError = "Invalid Wi-Fi credentials or device identity."; return;
+  }
+  if (!document["supabase_url"].isNull()) {
+    String url = document["supabase_url"] | "", key = document["supabase_key"] | "", token = document["device_token"] | "";
+    if (!url.startsWith("https://") || url.length() > 160 || !validPublicKey(key) || !validToken(token)) {
+      cloudStatus = "error"; lastError = "Invalid cloud provisioning settings."; return;
+    }
+    while (url.endsWith("/")) url.remove(url.length() - 1);
+    projectUrl = url; publicKey = key; deviceToken = token;
+    cloudStatus = "connecting"; saveCloudAfterVerify = true;
+    pendingAck = ""; completedCommand = ""; prefs.remove("ack"); prefs.remove("completed");
+  }
+  ssid = newSSID; password = newPassword;
+  if (WiFi.status() == WL_CONNECTED && WiFi.SSID() == ssid) { wifiStatus = "connected"; }
+  else {
+    WiFi.disconnect(); WiFi.mode(WIFI_STA); WiFi.begin(ssid.c_str(), password.c_str());
+    wifiStatus = "connecting"; wifiStarted = millis();
+  }
+}
+void manageWifi() {
+  if (WiFi.status() == WL_CONNECTED) {
+    if (wifiStatus != "connected") {
+      wifiStatus = "connected"; lastError = "";
+      configTime(UTC_OFFSET_SECONDS, 0, "pool.ntp.org", "time.google.com");
+      Serial.print("ESP32 Wi-Fi IP: "); Serial.println(WiFi.localIP());
+    }
+    if (prefs.getString("ssid") != ssid) prefs.putString("ssid", ssid);
+    if (prefs.getString("pass") != password) prefs.putString("pass", password);
+    return;
+  }
+  if (ssid.isEmpty()) return;
+  if (wifiStatus == "connecting" && millis() - wifiStarted >= 30000) { wifiStatus = "error"; lastError = "Wi-Fi connection failed. Check the 2.4 GHz network/password."; }
+  if (wifiStatus == "connected") wifiStatus = "connecting";
+  if (millis() - lastReconnect >= 30000) {
+    lastReconnect = millis(); WiFi.begin(ssid.c_str(), password.c_str()); wifiStarted = millis();
+  }
+}
+uint32_t secondsUntilWake() {
+  int wake = clockMinutes(wakeTime), sleep = clockMinutes(sleepTime);
+  if (!clockReady() || wake < 0 || sleep < 0 || wake == sleep) return 0;
+  time_t now = time(nullptr); tm local; localtime_r(&now, &local);
+  int seconds = local.tm_hour * 3600 + local.tm_min * 60 + local.tm_sec;
+  bool awake = wake < sleep ? seconds >= wake * 60 && seconds < sleep * 60 : seconds >= wake * 60 || seconds < sleep * 60;
+  if (awake) return 0;
+  return (wake * 60 - seconds + 86400) % 86400;
+}
+void scheduledSleep() {
+  if (millis() < 15000 || bluetoothConnected || learningId.length() || pendingAck.length() || saveCloudAfterVerify) return;
+  uint32_t until = secondsUntilWake(); if (!until || millis() - lastSleepCheckMs < CLOUD_POLL_MS) return;
+  lastSleepCheckMs = millis();
+  uint32_t duration = min(until, RECHECK_SLEEP_SECONDS);
+  if (WiFi.status() == WL_CONNECTED && !exchange(isoUtc(time(nullptr) + duration))) return;
+  if (!secondsUntilWake() || bluetoothConnected || pendingAck.length()) return;
+  Serial.printf("Sleeping %lu seconds; reconnecting to check the cloud schedule on wake.\n", (unsigned long)duration);
+  Serial.flush(); receiver.disableIRIn(); BLEDevice::deinit(true); WiFi.disconnect(true);
+  esp_sleep_enable_timer_wakeup((uint64_t)duration * 1000000ULL); esp_deep_sleep_start();
+}
+void setup() {
+  Serial.begin(115200); prefs.begin("ecotrack-cloud", false);
+  bootCount = prefs.getUInt("boot", 0) + 1; prefs.putUInt("boot", bootCount);
+  uint64_t mac = ESP.getEfuseMac(); char hardware[32];
+  snprintf(hardware, sizeof(hardware), "esp32s3-%012llx", (unsigned long long)(mac & 0xFFFFFFFFFFFFULL)); deviceId = hardware;
+  ssid = prefs.getString("ssid"); password = prefs.getString("pass");
+  projectUrl = prefs.getString("url"); publicKey = prefs.getString("public"); deviceToken = prefs.getString("token"); registryId = prefs.getString("node");
+  wakeTime = prefs.getString("wake"); sleepTime = prefs.getString("sleep"); intervalMs = prefs.getULong("interval", 5000);
+  pendingAck = prefs.getString("ack"); completedCommand = prefs.getString("completed");
+  provisionQueue = xQueueCreate(1, sizeof(ProvisionMessage));
+  if (!provisionQueue) { Serial.println("Provisioning queue allocation failed."); while (true) delay(1000); }
+  Serial.println("EcoTrack cloud IR receiver: " + deviceId);
+  receiver.enableIRIn(); beginBluetooth();
+  WiFi.mode(WIFI_STA); configTime(UTC_OFFSET_SECONDS, 0, "pool.ntp.org", "time.google.com");
+  if (ssid.length()) { WiFi.begin(ssid.c_str(), password.c_str()); wifiStatus = "connecting"; wifiStarted = millis(); }
+  if (projectUrl.length()) cloudStatus = "connecting";
+  updateBleInfo();
+}
+void loop() {
+  processProvisioning(); manageWifi(); collectIR();
+  if (advertiseAgain) { advertiseAgain = false; BLEDevice::startAdvertising(); }
+  if (learningId.length() && (int32_t)(millis() - learningDeadline) >= 0) { setAck(learningId, false, JsonVariantConst(), "No new IR signal received within six seconds."); learningId = ""; }
+  if (millis() - lastCloudPoll >= min(CLOUD_POLL_MS, intervalMs)) { lastCloudPoll = millis(); exchange(); }
+  if (millis() - lastStatusPrint >= intervalMs) {
+    lastStatusPrint = millis(); Serial.printf("Wi-Fi: %s | Supabase: %s | IR receiver GPIO: %u\n", wifiStatus.c_str(), cloudStatus.c_str(), IR_RX_PIN);
+  }
+  updateBleInfo(); scheduledSleep(); delay(5);
+}

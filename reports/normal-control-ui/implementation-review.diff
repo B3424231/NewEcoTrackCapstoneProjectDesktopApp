@@ -1,0 +1,1051 @@
+--- before/public/aircons.html
++++ after/public/aircons.html
+@@ -33,7 +33,7 @@
+   <script src="./js/eco-network.js"></script>
+   <script src="./js/eco-data-bus.js"></script>
+   <script src="./js/skeletons.js"></script>
+-  <script src="./js/aircon-system.js?v=21"></script>
++  <script src="./js/aircon-system.js?v=22"></script>
+   <script src="./js/shared.js"></script>
+   <script src="./js/global-notifications.js"></script>
+   <style>
+--- before/public/control.html
++++ after/public/control.html
+@@ -48,8 +48,7 @@
+   <script src="./js/eco-network.js"></script>
+   <script src="./js/eco-data-bus.js"></script>
+   <script src="./js/skeletons.js"></script>
+-  <script src="./js/aircon-system.js?v=21"></script>
+-  <script src="./js/ac-capability-verification.js?v=1"></script>
++  <script src="./js/aircon-system.js?v=22"></script>
+ </head>
+ 
+ <body class="app-shell bg-gray-50 dark:bg-[#0a0f1d] text-slate-800 dark:text-slate-100 transition-colors duration-200">
+@@ -180,7 +179,7 @@
+           <!-- Quick State Pill -->
+           <div id="quickStatusPill" class="px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-bold flex items-center gap-1.5 shadow-sm">
+             <span id="quickStatusDot" class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+-            <span id="quickStatusText">UNCONFIRMED</span>
++            <span id="quickStatusText">—</span>
+           </div>
+         </div>
+       </div>
+@@ -215,7 +214,7 @@
+                       <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
+                       <line x1="12" y1="2" x2="12" y2="12"></line>
+                     </svg>
+-                    <span id="masterPowerText">UNCONFIRMED</span>
++                    <span id="masterPowerText">—</span>
+                   </button>
+                 </div>
+               </div>
+@@ -436,7 +435,7 @@
+                     </div>
+ 
+                     <div class="p-2.5 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 flex items-center justify-between text-xs">
+-                      <span class="text-slate-600 dark:text-gray-400 font-medium">Compressor State:</span>
++                      <span class="text-slate-600 dark:text-gray-400 font-medium">Power setting:</span>
+                       <span id="compCompressorStatus" class="font-bold text-slate-500 dark:text-slate-400">STANDBY</span>
+                     </div>
+                   </div>
+@@ -467,7 +466,7 @@
+ 
+             <!-- COMMAND RESULT FEEDBACK FOOTER -->
+             <div id="commandFeedbackBar" class="mt-6 pt-3 border-t border-white/5 flex items-center justify-between text-xs text-gray-400">
+-              <span id="commandStatusText">Ready for command dispatch.</span>
++              <span id="commandStatusText">Ready</span>
+               <span id="commandLatencyText" class="font-mono text-[10px] text-gray-500">Idle</span>
+             </div>
+           </div>
+@@ -485,20 +484,20 @@
+                   </svg>
+                   Aircon Control State & Setpoint
+                 </h3>
+-                <span class="text-[10px] font-mono text-slate-500 dark:text-gray-400">Control Status & Cloud Sync</span>
++                <span class="text-[10px] font-mono text-slate-500 dark:text-gray-400">Current settings</span>
+               </div>
+ 
+               <!-- DUAL STATE COMPARISON -->
+               <div class="grid grid-cols-2 gap-3">
+                 <div class="p-3.5 rounded-xl bg-slate-50 dark:bg-black/25 border border-slate-200 dark:border-white/5">
+-                  <span class="text-[10px] font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wider block">Commanded IR State</span>
+-                  <div id="dispCommandedState" class="text-base font-black text-slate-800 dark:text-white mt-1">UNCONFIRMED</div>
+-                  <span class="text-[10px] text-slate-400 dark:text-gray-500">From IR Transmitter</span>
++                  <span class="text-[10px] font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wider block">Power setting</span>
++                  <div id="dispCommandedState" class="text-base font-black text-slate-800 dark:text-white mt-1">—</div>
++                  <span class="text-[10px] text-slate-400 dark:text-gray-500">Selected power</span>
+                 </div>
+ 
+                 <div class="p-3.5 rounded-xl bg-slate-50 dark:bg-black/25 border border-slate-200 dark:border-white/5">
+                   <span class="text-[10px] font-bold text-teal-600 dark:text-teal-400 uppercase tracking-wider block">Active Mode & Fan</span>
+-                  <div id="dispClassifiedState" class="text-base font-black text-teal-600 dark:text-teal-300 mt-1">UNCONFIRMED</div>
++                  <div id="dispClassifiedState" class="text-base font-black text-teal-600 dark:text-teal-300 mt-1">—</div>
+                   <span class="text-[10px] text-slate-400 dark:text-gray-500">Active Aircon Profile</span>
+                 </div>
+               </div>
+@@ -512,7 +511,7 @@
+                     </div>
+                     <div>
+                       <span class="text-xs font-bold text-slate-800 dark:text-white block">Target Setpoint</span>
+-                      <span class="text-[10px] font-medium text-slate-500 dark:text-gray-400 block mt-0.5">Aircon Remote Setpoint (16°C – 30°C)</span>
++                      <span class="text-[10px] font-medium text-slate-500 dark:text-gray-400 block mt-0.5">Selected temperature</span>
+                     </div>
+                   </div>
+                   <span id="liveSetpointReadout" class="text-2xl font-black text-cyan-700 dark:text-cyan-400 font-mono tracking-tight">—</span>
+@@ -525,7 +524,7 @@
+                     </div>
+                     <div>
+                       <span class="text-xs font-bold text-slate-800 dark:text-white block">Blower Fan & Direction</span>
+-                      <span class="text-[10px] font-medium text-slate-500 dark:text-gray-400 block mt-0.5" id="liveFanSubtext">AC settings unconfirmed</span>
++                      <span class="text-[10px] font-medium text-slate-500 dark:text-gray-400 block mt-0.5" id="liveFanSubtext">—</span>
+                     </div>
+                   </div>
+                   <span id="liveTempReadout" class="text-2xl font-black text-teal-700 dark:text-teal-300 font-mono tracking-tight">—</span>
+@@ -628,12 +627,12 @@
+               </h3>
+               <div class="space-y-3 text-xs">
+                 <div class="p-3 rounded-xl bg-slate-50 dark:bg-black/25 border border-slate-200/60 dark:border-white/5">
+-                  <span class="text-[10px] text-slate-500 dark:text-gray-400 uppercase block font-semibold">Commanded IR State</span>
++                  <span class="text-[10px] text-slate-500 dark:text-gray-400 uppercase block font-semibold">Power setting</span>
+                   <span id="ovCommanded" class="text-sm font-black text-slate-800 dark:text-white mt-1 block">—</span>
+                 </div>
+                 <div class="p-3 rounded-xl bg-slate-50 dark:bg-black/25 border border-slate-200/60 dark:border-white/5">
+                   <span class="text-[10px] text-teal-600 dark:text-teal-400 uppercase block font-semibold">Active Profile State</span>
+-                  <span id="ovOperational" class="text-sm font-black text-teal-600 dark:text-teal-300 mt-1 block">STANDBY / NO DEVICE</span>
++                  <span id="ovOperational" class="text-sm font-black text-teal-600 dark:text-teal-300 mt-1 block">—</span>
+                 </div>
+               </div>
+             </div>
+@@ -868,7 +867,7 @@
+               <div>
+                 <label class="block text-slate-600 dark:text-gray-400 font-semibold mb-1">IR Protocol Adapter</label>
+                 <select id="cfgProtocolSelect" class="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white font-mono focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all">
+-                  <option value="UNKNOWN">UNKNOWN (Learned Raw Replay)</option>
++                  <option value="UNKNOWN">Learn from remote</option>
+                   <option value="KOPPEL_RAW">KOPPEL_RAW</option>
+                   <option value="LG2">LG2 (Dual Inverter)</option>
+                   <option value="DAIKIN216">DAIKIN216</option>
+@@ -1281,8 +1280,8 @@
+ 
+         const activeAc = AirconProfileManager.getById(activeDeviceId) || aircons[0];
+         if (activeAc) {
+-          const activeDescription = window.EcoTrackAirconState.describeAirconState(activeAc.control_snapshot);
+-          const isPowerOn = activeDescription.confirmed && activeDescription.power;
++          const activeDisplay = window.EcoTrackAirconState.displaySettings(activeAc.control_snapshot);
++          const isPowerOn = activeDisplay.power === true;
+           if (selectedAcStatusDot) {
+             selectedAcStatusDot.className = `w-2.5 h-2.5 rounded-full ${isPowerOn ? 'bg-emerald-400 shadow-sm shadow-emerald-400/50' : 'bg-slate-400'} shrink-0`;
+           }
+@@ -1294,11 +1293,11 @@
+             if (isPowerOn) {
+               quickStatusPill.className = 'px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-bold flex items-center gap-1.5 shadow-sm';
+               if (quickStatusDot) quickStatusDot.className = 'w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse';
+-              quickStatusText.textContent = `POWER ON • ${activeAc.state?.temperature || 24}°C • ${(activeAc.state?.mode || 'cool').toUpperCase()}`;
++              quickStatusText.textContent = activeDisplay.summary;
+             } else {
+               quickStatusPill.className = 'px-3 py-1.5 rounded-xl bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-gray-500 dark:text-gray-400 text-xs font-bold flex items-center gap-1.5 shadow-sm';
+               if (quickStatusDot) quickStatusDot.className = 'w-1.5 h-1.5 rounded-full bg-gray-400';
+-              quickStatusText.textContent = activeDescription.confirmed ? 'POWER OFF / STANDBY' : 'UNCONFIRMED';
++              quickStatusText.textContent = activeDisplay.powerLabel;
+             }
+           }
+         }
+@@ -1344,8 +1343,8 @@
+ 
+         filtered.forEach(ac => {
+           const isSelected = ac.device_id === activeDeviceId;
+-          const acDescription = window.EcoTrackAirconState.describeAirconState(ac.control_snapshot);
+-          const isPowerOn = acDescription.confirmed && acDescription.power;
++          const acDisplay = window.EcoTrackAirconState.displaySettings(ac.control_snapshot);
++          const isPowerOn = acDisplay.power === true;
+           const item = document.createElement('div');
+           item.className = `ac-dropdown-item px-3 py-2 rounded-xl flex items-center justify-between gap-3 cursor-pointer transition-all ${
+             isSelected 
+@@ -1367,7 +1366,7 @@
+             </div>
+             <div class="flex items-center gap-2 shrink-0">
+               <span class="text-[10px] font-bold uppercase px-2 py-0.5 rounded ${isPowerOn ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-gray-200 dark:bg-white/10 text-gray-500 dark:text-gray-400'}">
+-                ${!acDescription.confirmed ? 'UNCONFIRMED' : isPowerOn ? (ac.state?.temperature ? `${ac.state.temperature}°C` : 'ON') : 'OFF'}
++                ${isPowerOn && Number.isFinite(acDisplay.temperature) ? `${acDisplay.temperature}°C` : acDisplay.powerLabel}
+               </span>
+               ${isSelected ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" class="text-teal-500"><polyline points="20 6 9 17 4 12"></polyline></svg>' : ''}
+             </div>
+@@ -1518,7 +1517,7 @@
+             if (compTarget) compTarget.textContent = '—';
+             const compCompressor = document.getElementById('compCompressorStatus');
+             if (compCompressor) {
+-              compCompressor.textContent = 'STANDBY';
++              compCompressor.textContent = '—';
+               compCompressor.className = 'font-bold text-slate-400 dark:text-gray-500';
+             }
+             const compNode = document.getElementById('compTargetNode');
+@@ -1541,7 +1540,7 @@
+               remoteSyncBadge.className = 'text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-slate-500/15 text-slate-400 border border-slate-500/30';
+             }
+ 
+-            if (dispCommandedState) dispCommandedState.textContent = 'STANDBY';
++            if (dispCommandedState) dispCommandedState.textContent = '—';
+             if (dispClassifiedState) dispClassifiedState.textContent = 'STANDBY';
+             if (liveSetpointReadout) liveSetpointReadout.textContent = '—';
+             if (liveTempReadout) liveTempReadout.textContent = '—';
+@@ -1569,13 +1568,12 @@
+ 
+         const caps = CapabilityEngine.getCapabilities(device);
+         const state = device.state || {};
+-        const description = window.EcoTrackAirconState.describeAirconState(device.control_snapshot);
+-        const hasSettings = description.confirmed || description.remoteObserved || Boolean(device.control_snapshot?.desired_state && description.label !== 'UNCONFIRMED');
+-        const isPowerOn = state.power;
+-        const powerLabel = description.remoteObserved ? (isPowerOn === true ? 'REMOTE POWER ON' : isPowerOn === false ? 'REMOTE POWER OFF' : 'REMOTE SETTINGS') : description.confirmed ? (isPowerOn ? 'POWER ON' : 'POWER OFF')
+-          : hasSettings ? (isPowerOn ? 'POWER ON REQUESTED' : 'POWER OFF REQUESTED') : 'UNCONFIRMED';
+-        const displayMode = hasSettings && state.mode ? state.mode.toUpperCase() : '—';
+-        const displayFan = hasSettings && state.fan ? state.fan.toUpperCase() : '—';
++        const display = window.EcoTrackAirconState.displaySettings(device.control_snapshot);
++        const hasSettings = Boolean(display.state);
++        const isPowerOn = display.power === true;
++        const powerLabel = display.powerLabel;
++        const displayMode = display.modeLabel;
++        const displayFan = display.fanLabel;
+         const node = NodeService.getNode(device.node_id);
+         const isNodeOnline = node ? (node.status.toLowerCase() === 'connected' || node.status.toLowerCase() === 'online') : false;
+ 
+@@ -1583,7 +1581,7 @@
+         unitNameEl.textContent = device.name;
+         unitBrandBadgeEl.textContent = device.brand;
+         document.querySelectorAll('a[href^="ir-library.html"]:not([href*="learn="])').forEach(link => { link.href = `ir-library.html?id=${encodeURIComponent(activeDeviceId)}`; });
+-        unitDetailsEl.textContent = `${device.model} • Location: ${device.location || 'Unassigned'} • Node: ${device.node_id} • Protocol: ${device.protocol}`;
++        unitDetailsEl.textContent = `${device.model} • Location: ${device.location || 'Unassigned'}`;
+ 
+         // Power button styling
+         if (isPowerOn) {
+@@ -1600,8 +1598,7 @@
+         const minTemp = caps.temperature_min;
+         const maxTemp = caps.temperature_max;
+         const step = caps.temperature_step;
+-        tempRangeHelp.textContent = Number.isFinite(minTemp) ? `Operating range: ${minTemp}°C – ${maxTemp}°C (Step: ${step}°C) · ${caps.feature_status.temperature.status === 'verified_supported'?'Physically verified':'Library supported, unverified'}` : 'Temperature capability unknown · learn the exact remote protocol.';
+-        window.EcoTrackCapabilityVerification?.mount(device,unitDetailsEl);
++        tempRangeHelp.textContent = Number.isFinite(minTemp) ? `Operating range: ${minTemp}°C – ${maxTemp}°C (Step: ${step}°C)` : '—';
+ 
+         tempMinusBtn.disabled = !isPowerOn || !caps.can_transmit || !caps.temperature_controllable || !Number.isFinite(state.temperature) || curTemp - step < minTemp;
+         tempPlusBtn.disabled = !isPowerOn || !caps.can_transmit || !caps.temperature_controllable || !Number.isFinite(state.temperature) || curTemp + step > maxTemp;
+@@ -1619,7 +1616,6 @@
+           } ${!isPowerOn ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`;
+           btn.textContent = m;
+           btn.disabled = !isPowerOn;
+-          window.EcoTrackCapabilityVerification?.annotate(btn,caps.option_status.mode[m]);
+           btn.disabled ||= !caps.can_transmit;
+           btn.addEventListener('click', () => executeCommand('MODE', m));
+           modeButtonsGroup.appendChild(btn);
+@@ -1639,7 +1635,6 @@
+           } ${!isPowerOn ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`;
+           btn.textContent = f;
+           btn.disabled = !isPowerOn;
+-          window.EcoTrackCapabilityVerification?.annotate(btn,caps.option_status.fan[f]);
+           btn.disabled ||= !CapabilityEngine.isSupported(device,'FAN',f);
+           btn.addEventListener('click', () => executeCommand('FAN', f));
+           fanButtonsGroup.appendChild(btn);
+@@ -1668,21 +1663,20 @@
+           if (s.active != null) btn.setAttribute('aria-pressed', String(!!s.active));
+           btn.title = s.active == null ? s.label + ': not yet reported by the IR receiver' : s.label + ': ' + (s.active ? 'ON' : 'OFF');
+           btn.disabled = !isPowerOn;
+-          window.EcoTrackCapabilityVerification?.annotate(btn,caps.feature_status[s.key==='swing'?'swing_vertical':s.key]);
+           btn.disabled ||= !caps.can_transmit;
+           btn.addEventListener('click', () => executeCommand(s.key.toUpperCase(), !s.active));
+           specialButtonsGroup.appendChild(btn);
+         });
+ 
+         // Right Panel Updates
+-        dispCommandedState.textContent = hasSettings ? description.summary : 'UNCONFIRMED';
+-        dispClassifiedState.textContent = description.confirmed ? `${displayMode} • ${displayFan}` : 'UNCONFIRMED';
++        dispCommandedState.textContent = display.powerLabel;
++        dispClassifiedState.textContent = hasSettings ? `${displayMode} • ${displayFan}` : '—';
+ 
+         liveSetpointReadout.textContent = hasSettings && Number.isFinite(state.temperature) ? `${state.temperature}°C` : '—';
+         liveTempReadout.textContent = displayFan;
+         const subtext = document.getElementById('liveFanSubtext');
+         if (subtext) {
+-          subtext.textContent = hasSettings ? `Speed: ${displayFan} • Swing: ${state.swing ? 'ON' : 'OFF'}` : 'AC settings unconfirmed';
++          subtext.textContent = hasSettings ? `Speed: ${displayFan} • Swing: ${state.swing === true ? 'ON' : state.swing === false ? 'OFF' : '—'}` : '—';
+         }
+ 
+         dispNodeId.textContent = device.node_id;
+@@ -1910,8 +1904,7 @@
+ 
+         const compCompressor = document.getElementById('compCompressorStatus');
+         if (compCompressor) {
+-          const desc = window.EcoTrackAirconState ? window.EcoTrackAirconState.describeAirconState(device.control_snapshot) : null;
+-          compCompressor.textContent = desc?.summary || (isPowerOn ? 'ACTIVE' : 'STANDBY');
++          compCompressor.textContent = display.powerLabel;
+           compCompressor.className = isPowerOn ? 'font-bold text-teal-600 dark:text-teal-300' : 'font-bold text-slate-500 dark:text-slate-400';
+         }
+ 
+@@ -1949,9 +1942,10 @@
+         const transmit = controller?.capabilities?.ir_transmitter === true;
+         const monitor = controller?.capabilities?.ir_receiver === true;
+         const message = document.getElementById('hardwareRoleMessage');
+-        if (message) message.textContent = monitor && !transmit
+-          ? 'IR receiver: monitoring physical remote settings. Sending AC commands requires an IR transmitter.'
+-          : transmit ? 'IR transmitter: AC command delivery enabled.' : 'Controller IR capabilities have not been reported.';
++        if (message) {
++          message.hidden = transmit;
++          message.textContent = transmit ? '' : monitor ? 'Monitoring only. Control is unavailable.' : 'Control is unavailable.';
++        }
+         const buttons = [masterPowerBtn, tempMinusBtn, tempPlusBtn,
+           ...modeButtonsGroup.querySelectorAll('button'), ...fanButtonsGroup.querySelectorAll('button'), ...specialButtonsGroup.querySelectorAll('button'),
+           ...document.querySelectorAll('.sim-btn, .test-cmd-btn'),
+@@ -1960,7 +1954,7 @@
+         for (const button of buttons.filter(Boolean)) {
+           if (!transmit || !CapabilityEngine.getCapabilities(device).can_transmit) button.disabled = true;
+           else if (button === masterPowerBtn || button.dataset?.cmd === 'POWER' || ['remPowerBtn','simPowerBtn'].includes(button.id)) button.disabled = !CapabilityEngine.isSupported(device,'POWER');
+-          if(!transmit)button.title='IR transmitter required to send AC commands';
++          if(!transmit)button.title='Control is unavailable for this controller';
+           if(/temp/i.test(button.id) || button.dataset?.cmd==='TEMP')button.disabled ||= !CapabilityEngine.getCapabilities(device).temperature_controllable;
+           button.classList.toggle('opacity-40', button.disabled);
+           button.classList.toggle('cursor-not-allowed', button.disabled);
+@@ -1976,8 +1970,8 @@
+         }
+ 
+         const startTime = Date.now();
+-        commandStatusText.textContent = `Transmitting ${cmdType} to ${activeDeviceId}...`;
+-        commandLatencyText.textContent = 'Sending...';
++        commandStatusText.textContent = 'Updating settings…';
++        commandLatencyText.textContent = 'Updating…';
+ 
+         const res = await CommandManager.dispatch({
+           device_id: activeDeviceId,
+@@ -1988,10 +1982,10 @@
+         const latency = Date.now() - startTime;
+         if (res.success) {
+           pendingFailedCommand = null;
+-          commandStatusText.textContent = `✓ ${res.message}`;
+-          commandLatencyText.textContent = `${latency}ms (Req: ${res.request_id || 'OK'})`;
++          commandStatusText.textContent = '✓ Settings saved.';
++          commandLatencyText.textContent = `${latency} ms`;
+           const compLatency = document.getElementById('compLatency');
+-          if (compLatency) compLatency.textContent = `${latency}ms (Ack: ${res.request_id || 'OK'})`;
++          if (compLatency) compLatency.textContent = `${latency} ms`;
+         } else {
+           commandStatusText.textContent = `✗ ${res.message}`;
+           commandLatencyText.textContent = 'Failed';
+@@ -2384,7 +2378,7 @@
+             if (ovNode) ovNode.textContent = '—';
+             if (ovCmd) ovCmd.textContent = '—';
+             if (ovOp) {
+-              ovOp.textContent = 'STANDBY / NO DEVICE';
++              ovOp.textContent = '—';
+               ovOp.className = 'text-sm font-black text-slate-500 dark:text-gray-400 mt-1 block';
+             }
+             if (capsList) {
+@@ -2468,20 +2462,15 @@
+           if (ovNode) ovNode.textContent = device.node_id || '—';
+ 
+           if (ovCmd) {
+-            const settings = window.EcoTrackAirconState?.selectSettings(device.control_snapshot);
+-            const source = ({remote:'REMOTE',reported:'REPORTED',requested:'REQUESTED',configured:'CONFIGURED'})[settings?.source] || 'UNKNOWN';
+-            const known = Boolean(settings?.state);
+-            ovCmd.textContent = known
+-              ? `${source} POWER ${state.power === true ? 'ON' : state.power === false ? 'OFF' : 'UNKNOWN'} • ${(state.mode || '—').toUpperCase()} ${Number.isFinite(state.temperature) ? state.temperature + '°C' : '—'} • FAN ${(state.fan || '—').toUpperCase()}`
+-              : 'No remote settings or commands reported';
++            ovCmd.textContent = window.EcoTrackAirconState.displaySettings(device.control_snapshot).summary;
+           }
+ 
+           if (ovOp) {
+             if (state.power) {
+-              ovOp.textContent = description?.confirmed ? 'ACTIVE / READY' : (description?.label || 'ACTIVE / READY');
++              ovOp.textContent = window.EcoTrackAirconState.displaySettings(device.control_snapshot).powerLabel;
+               ovOp.className = 'text-sm font-black text-teal-600 dark:text-teal-300 mt-1 block';
+             } else {
+-              ovOp.textContent = description?.confirmed ? 'OFF / STANDBY' : (description?.label || 'STANDBY');
++              ovOp.textContent = window.EcoTrackAirconState.displaySettings(device.control_snapshot).powerLabel;
+               ovOp.className = 'text-sm font-black text-slate-500 dark:text-slate-400 mt-1 block';
+             }
+           }
+@@ -2634,7 +2623,7 @@
+               b.addEventListener('click', async () => {
+                 const cmdType = b.dataset.cmd;
+                 const oldHtml = b.innerHTML;
+-                b.innerHTML = 'Transmitting...';
++                b.textContent = 'Updating…';
+                 b.disabled = true;
+ 
+                 let command = 'POWER';
+@@ -2724,7 +2713,7 @@
+                   <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                   Controller Device Ready & Synchronized
+                 </span>
+-                <p class="text-xs text-slate-600 dark:text-gray-300">Hardware node <strong>${device.node_id}</strong> ${node?.capabilities?.ir_transmitter === true ? 'supports IR control and learning' : 'supports IR receiving and learning; AC control requires an IR transmitter'}. Active profile: <strong>${device.brand} (${device.protocol})</strong>.</p>
++                <p class="text-xs text-slate-600 dark:text-gray-300">Hardware node <strong>${device.node_id}</strong> ${node?.capabilities?.ir_transmitter === true ? 'supports control and remote learning' : 'supports remote learning; control is unavailable'}. Active profile: <strong>${device.brand} (${device.protocol})</strong>.</p>
+                 <div class="mt-3 pt-2 border-t border-emerald-500/20 text-[11px] text-emerald-700 dark:text-emerald-300 flex justify-between">
+                   <span>Connection: Supabase over Wi-Fi</span>
+                   <span>Last heartbeat: ${node?.last_seen ? new Date(node.last_seen).toLocaleTimeString() : 'Not reported'}</span>
+@@ -2767,7 +2756,7 @@
+           document.getElementById('cfgCapTurbo').checked = !!caps.turbo;
+           document.getElementById('cfgCapEco').checked = !!caps.eco;
+           document.getElementById('cfgCapTimer').checked = !!caps.timer;
+-          document.querySelectorAll('[id^=cfgCap]').forEach(el=>{if(el.type==='checkbox'){el.disabled=true;el.title='Use Verify AC features to record physical results.';}});
++          document.querySelectorAll('[id^=cfgCap]').forEach(el=>{if(el.type==='checkbox'){el.disabled=true;el.title='Available features for the current protocol and model.';}});
+         }
+ 
+         if (tabKey === 'logs') {
+--- before/public/dashboard.html
++++ after/public/dashboard.html
+@@ -32,8 +32,7 @@
+   <script src="./js/eco-network.js"></script>
+   <script src="./js/eco-data-bus.js"></script>
+   <script src="./js/skeletons.js"></script>
+-  <script src="./js/aircon-system.js?v=21"></script>
+-  <script src="./js/ac-capability-verification.js?v=1"></script>
++  <script src="./js/aircon-system.js?v=22"></script>
+   <script src="./js/aircon-state.js?v=5"></script>
+ </head>
+ 
+@@ -82,13 +81,13 @@
+           <div class="glass-surface-soft p-3.5 rounded-xl border border-white/5 flex flex-col">
+             <span class="text-[10px] font-bold uppercase tracking-wider text-teal-300">Confirmed ON</span>
+             <span id="kpiActivePower" class="text-2xl font-black text-teal-300 mt-1">3</span>
+-            <span class="text-[10px] text-teal-400/80 mt-0.5" id="kpiActivePowerCaption">Awaiting power feedback</span>
++            <span class="text-[10px] text-teal-400/80 mt-0.5" id="kpiActivePowerCaption">Units with power ON</span>
+           </div>
+ 
+           <div class="glass-surface-soft p-3.5 rounded-xl border border-white/5 flex flex-col">
+             <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Standby / Off</span>
+             <span id="kpiStandby" class="text-2xl font-black text-slate-300 mt-1">1</span>
+-            <span class="text-[10px] text-slate-400 mt-0.5" id="kpiStandbyCaption">Confirmed OFF</span>
++            <span class="text-[10px] text-slate-400 mt-0.5" id="kpiStandbyCaption">Units with power OFF</span>
+           </div>
+ 
+           <div class="glass-surface-soft p-3.5 rounded-xl border border-white/5 flex flex-col">
+@@ -100,13 +99,13 @@
+           <div class="glass-surface-soft p-3.5 rounded-xl border border-white/5 flex flex-col">
+             <span class="text-[10px] font-bold uppercase tracking-wider text-cyan-300">Commands Sent</span>
+             <span id="kpiCommandsSent" class="text-2xl font-black text-cyan-300 mt-1">0</span>
+-            <span class="text-[10px] text-cyan-400/80 mt-0.5">Dispatched Total</span>
++            <span class="text-[10px] text-cyan-400/80 mt-0.5">Recorded actions</span>
+           </div>
+ 
+           <div class="glass-surface-soft p-3.5 rounded-xl border border-white/5 flex flex-col">
+             <span class="text-[10px] font-bold uppercase tracking-wider text-emerald-400">Successful</span>
+             <span id="kpiCommandsSuccess" class="text-2xl font-black text-emerald-400 mt-1">0</span>
+-            <span class="text-[10px] text-emerald-400/80 mt-0.5">IR Transmitted</span>
++            <span class="text-[10px] text-emerald-400/80 mt-0.5">Completed commands</span>
+           </div>
+ 
+           <div class="glass-surface-soft p-3.5 rounded-xl border border-white/5 flex flex-col">
+@@ -420,20 +419,12 @@
+       }
+ 
+       function getDashboardPowerState(ac) {
+-        const state = window.EcoTrackAirconState.describeAirconState(ac.control_snapshot);
++        const observation = window.EcoTrackAirconState.describeAirconState(ac.control_snapshot);
++        const settings = window.EcoTrackAirconState.displaySettings(ac.control_snapshot);
+         const online = !['offline', 'disconnected'].includes(String(ac.status).toLowerCase());
+-        if (state.confirmed && online) return {power:state.power,label:state.power ? 'Active' : 'Standby'};
+-        if (state.remoteObserved) return {
+-          power:online ? state.observedPower : null,
+-          label:(online ? 'Remote ' : 'Last remote ') + (state.observedPower === true ? 'ON' : state.observedPower === false ? 'OFF' : 'settings')
+-        };
+-        const selected = window.EcoTrackAirconState.selectSettings(ac.control_snapshot);
+-        if (selected.source === 'requested' && ['on','off',true,false].includes(selected.state?.power)) {
+-          const on = selected.state.power === true || selected.state.power === 'on';
+-          const result = state.commandStatus === 'FAILED' ? 'failed' : state.commandStatus === 'TRANSMITTED' ? 'sent' : 'requested';
+-          return {power:null,label:(on ? 'ON ' : 'OFF ') + result};
+-        }
+-        return {power:null,label:'Power unconfirmed'};
++        const power = online && observation.confirmed ? observation.power :
++          online && observation.remoteObserved ? observation.observedPower : null;
++        return {power,label:settings.powerLabel};
+       }
+ 
+       function renderDashboard() {
+@@ -458,10 +449,10 @@
+ 
+         document.getElementById('kpiTotalUnits').textContent = total;
+         document.getElementById('kpiOnlineUnits').textContent = onlineCount;
+-        document.getElementById('kpiActivePower').textContent = total && unknownPowerCount === total ? 'Unknown' : activePowerCount;
+-        document.getElementById('kpiStandby').textContent = total && unknownPowerCount === total ? 'Unknown' : standbyCount;
+-        document.getElementById('kpiActivePowerCaption').textContent = unknownPowerCount ? `${unknownPowerCount} awaiting feedback` : 'Units confirmed ON';
+-        document.getElementById('kpiStandbyCaption').textContent = unknownPowerCount ? `${unknownPowerCount} unknown` : 'Units confirmed OFF';
++        document.getElementById('kpiActivePower').textContent = total && unknownPowerCount === total ? '—' : activePowerCount;
++        document.getElementById('kpiStandby').textContent = total && unknownPowerCount === total ? '—' : standbyCount;
++        document.getElementById('kpiActivePowerCaption').textContent = 'Units with power ON';
++        document.getElementById('kpiStandbyCaption').textContent = 'Units with power OFF';
+         document.getElementById('kpiNodesOnline').textContent = `${onlineNodesCount} / ${nodes.length}`;
+         document.getElementById('kpiCommandsSent').textContent = commandsSent;
+         document.getElementById('kpiCommandsSuccess').textContent = commandsSuccess;
+--- before/public/ir-library.html
++++ after/public/ir-library.html
+@@ -31,8 +31,7 @@
+   <script src="./js/icons.js"></script>
+   <script src="./js/eco-network.js"></script>
+   <script src="./js/eco-data-bus.js"></script>
+-  <script src="./js/aircon-system.js?v=21"></script>
+-  <script src="./js/ac-capability-verification.js?v=1"></script>
++  <script src="./js/aircon-system.js?v=22"></script>
+ </head>
+ 
+ <body class="app-shell bg-gray-50 dark:bg-[#0a0f1d] text-slate-800 dark:text-slate-100 transition-colors duration-200">
+@@ -375,9 +374,8 @@
+         // Temp Tag
+         const tempTag = document.createElement('span');
+         tempTag.className = 'px-2.5 py-1 rounded-lg font-mono font-bold bg-teal-50 text-teal-800 border border-teal-200 dark:bg-teal-500/15 dark:text-teal-300 dark:border-teal-500/30';
+-        tempTag.textContent = caps.temperature_step ? `Range: ${caps.min_temp}°C — ${caps.max_temp}°C · ${caps.temperature_step}° steps · unverified unless confirmed` : 'Temperature capability unknown';
++        tempTag.textContent = caps.temperature_step ? `Range: ${caps.min_temp}°C — ${caps.max_temp}°C · ${caps.temperature_step}° steps` : '—';
+         container.appendChild(tempTag);
+-        if(currentDevice)window.EcoTrackCapabilityVerification?.mount(currentDevice,container);
+ 
+         for(const [id,values] of [['testModeSelect',caps.modes],['testFanSelect',caps.fans]]){const select=document.getElementById(id),chosen=select?.value;if(select){select.innerHTML='';values.forEach(value=>{const option=document.createElement('option');option.value=value;option.textContent=value.toUpperCase();select.appendChild(option);});if(values.includes(chosen))select.value=chosen;select.disabled=!caps.can_transmit;}}
+         // Modes
+@@ -488,7 +486,7 @@
+         document.getElementById('learnedFramePanel').classList.remove('hidden');
+         document.getElementById('learnedFrameRaw').value = frame.raw_data || '';
+         document.getElementById('learnedFrameRaw').placeholder = frame.raw_data ? '' : 'Decoded state received. Use Auto-Detect to capture raw timings for learning.';
+-        document.getElementById('learnedFrameSummary').textContent = `Captured ${frame.raw_type || frame.protocol || 'unknown protocol'} remote frame • ${frame.hex || 'raw timings'}`;
++        document.getElementById('learnedFrameSummary').textContent = `Captured ${frame.raw_type || frame.protocol || 'unrecognized signal'} remote frame • ${frame.hex || 'raw timings'}`;
+       });
+ 
+       // Auto-Detect via Remote button
+@@ -511,7 +509,7 @@
+           if (res?.success && res.raw_data) {
+             document.getElementById('learnedFramePanel').classList.remove('hidden');
+             document.getElementById('learnedFrameRaw').value = res.raw_data;
+-            document.getElementById('learnedFrameSummary').textContent = `Captured ${res.raw_type || 'unknown protocol'} remote frame • ${res.hex || 'raw timings'}`;
++            document.getElementById('learnedFrameSummary').textContent = `Captured ${res.raw_type || 'unrecognized signal'} remote frame • ${res.hex || 'raw timings'}`;
+           }
+           if (res && res.success && res.protocol) {
+             studioDirty = true;
+@@ -578,7 +576,7 @@
+         });
+ 
+         if (res && res.success) {
+-          showToast(res.message || `Full-state request queued for ${currentDevice.node_id}.`, 'success');
++          showToast('Settings saved.', 'success');
+         } else {
+           showToast(res?.message || 'Intent dispatch failed.', 'error');
+         }
+--- before/public/ir-profiles.html
++++ after/public/ir-profiles.html
+@@ -32,8 +32,7 @@
+   <script src="./js/eco-network.js"></script>
+   <script src="./js/eco-data-bus.js"></script>
+   <script src="./js/skeletons.js"></script>
+-  <script src="./js/aircon-system.js?v=21"></script>
+-  <script src="./js/ac-capability-verification.js?v=1"></script>
++  <script src="./js/aircon-system.js?v=22"></script>
+ </head>
+ 
+ <body class="app-shell bg-gray-50 dark:bg-[#0a0f1d] text-slate-800 dark:text-slate-100 transition-colors duration-200">
+@@ -316,7 +315,7 @@
+           <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" class="text-teal-600 dark:text-teal-400">
+             <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/>
+           </svg>
+-          <span>${caps.temperature_step ? caps.min_temp + "°C – " + caps.max_temp + "°C · " + caps.temperature_step + "° steps" : "Temperature unknown"}</span>
++          <span>${caps.temperature_step ? caps.min_temp + "°C – " + caps.max_temp + "°C · " + caps.temperature_step + "° steps" : "—"}</span>
+         `;
+         row1.appendChild(tempTag);
+ 
+@@ -330,7 +329,6 @@
+           });
+         }
+         capsContainer.appendChild(row1);
+-        if(device)window.EcoTrackCapabilityVerification?.mount(device,capsContainer);
+ 
+         // Row 2: Features & Fan Speeds
+         const row2 = document.createElement('div');
+--- before/public/logs.html
++++ after/public/logs.html
+@@ -307,7 +307,7 @@
+   <script src="./js/skeletons.js?v=1"></script>
+   <script src="./js/icons.js"></script>
+   <script src="./js/maintenance-modal.js?v=68"></script>
+-  <script src="./js/aircon-system.js?v=21"></script>
++  <script src="./js/aircon-system.js?v=22"></script>
+ </head>
+ 
+ <body class="app-shell bg-gray-50 dark:bg-[#070d1b] transition-colors duration-200">
+--- before/public/nodes.html
++++ after/public/nodes.html
+@@ -102,8 +102,7 @@
+   <script src="./js/eco-network.js"></script>
+   <script src="./js/eco-data-bus.js"></script>
+   <script src="./js/skeletons.js"></script>
+-  <script src="./js/aircon-system.js?v=21"></script>
+-  <script src="./js/ac-capability-verification.js?v=1"></script>
++  <script src="./js/aircon-system.js?v=22"></script>
+ </head>
+ 
+ <body class="app-shell bg-gray-50 dark:bg-[#0a0f1d] text-slate-800 dark:text-slate-100 transition-colors duration-200">
+@@ -3085,7 +3084,6 @@
+         document.getElementById('viewAirconBrand').textContent = node.brand || remoteProfile?.brand || 'Unspecified';
+         document.getElementById('viewIrProtocol').textContent = node.protocol_name || remoteProfile?.protocol_name || remoteProfile?.protocol || 'Unavailable';
+ 
+-        if(remoteProfile)window.EcoTrackCapabilityVerification?.mount(remoteProfile,document.getElementById('viewIrProtocol').closest('.controller-details-row'));
+         if (viewModal) viewModal.classList.remove('hidden');
+       }
+ 
+--- before/public/scheduler.html
++++ after/public/scheduler.html
+@@ -154,12 +154,12 @@
+   </script>
+   <script src="./js/supabase-client.js"></script>
+   <script src="./js/hardware-cloud.js?v=9"></script>
+-  <script src="./js/aircon-system.js?v=21"></script>
++  <script src="./js/aircon-system.js?v=22"></script>
+   <script src="./js/node-sync.js"></script>
+   <script src="./js/shared.js"></script>
+   <script src="./js/global-notifications.js"></script>
+   <script src="./js/sidebar.js"></script>
+-  <script src="./js/scheduler.js?v=22"></script>
++  <script src="./js/scheduler.js?v=23"></script>
+ </body>
+ 
+ </html>
+--- before/public/staff.html
++++ after/public/staff.html
+@@ -18,7 +18,7 @@
+   <script src="./js/supabase.umd.js"></script>
+   <script src="./js/supabase-client.js"></script>
+   <script src="./js/hardware-cloud.js?v=1"></script>
+-  <script src="./js/aircon-system.js?v=21"></script>
++  <script src="./js/aircon-system.js?v=22"></script>
+   <script src="./js/maintenance-modal.js?v=68"></script>
+   <style>
+     .no-scrollbar::-webkit-scrollbar {
+--- before/public/telemetry.html
++++ after/public/telemetry.html
+@@ -459,7 +459,7 @@
+   <script src="./js/global-notifications.js"></script>
+   <script src="./js/sidebar.js"></script>
+   <script src="./js/aircon-state.js"></script>
+-  <script src="./js/aircon-system.js?v=21"></script>
++  <script src="./js/aircon-system.js?v=22"></script>
+   <script src="./js/telemetry-new.js"></script>
+ </body>
+ 
+--- before/scripts/test_capability_verification_render.js
++++ after/scripts/test_capability_verification_render.js
+@@ -32,31 +32,27 @@
+  async rpc(name,args){if(window.fixtureFail)throw Error('Supabase temporarily unavailable');if(name==='ecotrack_admin_edit_controller')return fixtureApi.edit(args);if(name!=='ecotrack_verify_ac_capabilities')throw Error('Unexpected RPC');return {data:await fixtureApi.verify(args),error:null};}};
+  window.EcoTrackHardwareCloud={listStatus:async()=> (await fixtureApi.read('ecotrack_device_state')).map(row=>({...row,connection_status:'online'})),describe:()=> 'online',
+  control:async(_node,payload)=>{const result=await fixtureApi.control(payload);return {command_id:result.id,commanded_at:result.created_at};}};
+- `+read('public/js/aircon-system.js')+read('public/js/ac-capability-verification.js')+'\ntrue;');
+- await win.webContents.executeJavaScript(`(async()=>{await EcoTrackAirconSystem.syncWithDatabase();const until=Date.now()+6000;while(!EcoTrackAirconSystem.AirconProfileManager.getById('AC-Office')){if(Date.now()>until)throw Error('Initial AC sync did not complete');await new Promise(r=>setTimeout(r,20));}const render=()=>EcoTrackCapabilityVerification.mount(EcoTrackAirconSystem.AirconProfileManager.getById('AC-Office'),document.getElementById('anchor'));EcoTrackAirconSystem.AirconEvents.on('devices:synced',render);render();document.querySelector('.ac-capability-summary button').click();return true;})()`);
++ `+read('public/js/aircon-system.js')+'\ntrue;');
++ await win.webContents.executeJavaScript(`(async()=>{await EcoTrackAirconSystem.syncWithDatabase();const until=Date.now()+6000;while(!EcoTrackAirconSystem.AirconProfileManager.getById('AC-Office')){if(Date.now()>until)throw Error('Initial AC sync did not complete');await new Promise(r=>setTimeout(r,20));}return true;})()`);
+  const checks=[];
+- let result=await win.webContents.executeJavaScript(`(()=>{const d=document.querySelector('dialog'),rows=[...d.querySelectorAll('.ac-verify-result')];const row=rows.find(r=>r.querySelector('label span').textContent==='Turbo');row.querySelector('button').click();return {title:d.querySelector('h2').textContent,source:row.querySelector('small').textContent,overflow:d.scrollWidth>d.clientWidth};})()`);
+- assert.equal(result.title,'Verify AC features');assert(result.source.includes('unverified'));assert(!result.overflow);
+- // Wait for the actual PostgreSQL queue write; it must not verify a feature.
+- await win.webContents.executeJavaScript("new Promise(r=>setTimeout(r,400))");
++ let result=await win.webContents.executeJavaScript("({panel:!!document.querySelector('.ac-capability-summary'),dialog:!!document.querySelector('dialog'),api:typeof window.EcoTrackCapabilityVerification})");
++ assert(!result.panel&&!result.dialog);assert.equal(result.api,'undefined');
++ checks.push('The removed verification component is absent; existing capability data and engine remain available.');
++ // The normal command path still uses the real SQL RPC and cannot invent physical verification.
++ await win.webContents.executeJavaScript("(async()=>{const result=await EcoTrackAirconSystem.CommandManager.dispatch({device_id:'AC-Office',command:'TURBO',value:true});if(!result.success)throw Error(result.message);return true;})()");
+  let stored=(await db.query('SELECT capability_profile FROM aircons WHERE id=$1',[aid])).rows[0].capability_profile;
+  assert.deepEqual(stored,{});assert.equal((await db.query('SELECT count(*) n FROM ecotrack_device_commands WHERE kind=\'ac_intent\'')).rows[0].n,1);
+- checks.push('Native guided test queues a real SQL-validated command without claiming physical support or automatically verifying it.');
+- await win.webContents.executeJavaScript(`(()=>{const d=document.querySelector('dialog'),row=[...d.querySelectorAll('.ac-verify-result')].find(r=>r.querySelector('label span').textContent==='Turbo');row.querySelector('select').value='verified_unsupported';d.querySelector('form').requestSubmit();return true;})()`);
+- await win.webContents.executeJavaScript(`new Promise((resolve,reject)=>{const end=Date.now()+5000;function check(){if(!document.querySelector('dialog'))return resolve();if(Date.now()>end)return reject(Error('Verification not saved: '+document.querySelector('.ac-verify-status').textContent));setTimeout(check,20);}check();})`);
++ checks.push('Normal control still queues an actual SQL-validated command without automatically marking physical support.');
++ await win.webContents.executeJavaScript(`(async()=>{await EcoTrackAirconSystem.CapabilityEngine.verify('AC-Office',{protocol:'TCL112AC',remote_model:null,model_verified:false,ac_model:'',features:{turbo:{status:'verified_unsupported'}},options:{mode:{},fan:{}}},0);return true;})()`);
+  stored=(await db.query('SELECT capability_profile,name,brand FROM aircons WHERE id=$1',[aid])).rows[0];
+  assert.equal(stored.capability_profile.features.turbo.status,'verified_unsupported');assert.equal(stored.name,'Matrix');assert.equal(stored.brand,'Matrix');
+- result=await win.webContents.executeJavaScript("({turbo:EcoTrackAirconSystem.CapabilityEngine.getCapabilities(EcoTrackAirconSystem.AirconProfileManager.getById('AC-Office')).turbo,summary:document.querySelector('.ac-capability-summary p').textContent})");
+- assert.equal(result.turbo,false);assert(result.summary.includes('1 physically verified'));
+- checks.push('An explicit human result persists with confidence and refreshes shared controls immediately, preserving the custom physical name and manufacturer.');
+- await win.webContents.executeJavaScript("document.querySelector('.ac-capability-summary button').click();window.fixtureFail=true;document.querySelector('dialog form').requestSubmit();true;");
+- await win.webContents.executeJavaScript("new Promise(r=>setTimeout(r,100))");
+- result=await win.webContents.executeJavaScript("({open:document.querySelector('dialog').open,message:document.querySelector('.ac-verify-status').textContent,busy:document.querySelector('dialog button[type=submit]').disabled})");
+- assert(result.open&&result.message.includes('unavailable')&&!result.busy);
++ result=await win.webContents.executeJavaScript("({turbo:EcoTrackAirconSystem.CapabilityEngine.getCapabilities(EcoTrackAirconSystem.AirconProfileManager.getById('AC-Office')).turbo})");
++ assert.equal(result.turbo,false);
++ checks.push('Existing backend capability persistence still updates shared controls and preserves the custom name and manufacturer.');
++ result=await win.webContents.executeJavaScript(`(async()=>{window.fixtureFail=true;try{await EcoTrackAirconSystem.CapabilityEngine.verify('AC-Office',{protocol:'TCL112AC',remote_model:null,model_verified:false,ac_model:'',features:{},options:{mode:{},fan:{}}},1);return {accepted:true};}catch(error){return {accepted:false,message:error.message};}finally{window.fixtureFail=false;}})()`);
++ assert.equal(result.accepted,false);assert(result.message.includes('unavailable'));
+  assert.equal((await db.query('SELECT capability_profile FROM aircons WHERE id=$1',[aid])).rows[0].capability_profile.revision,1);
+- checks.push('Supabase failure keeps the dialog open, restores controls and leaves confirmed results intact.');
+- await win.webContents.executeJavaScript("window.fixtureFail=false;document.getAnimations().forEach(a=>a.finish());true;");
+- fs.writeFileSync(path.join(out,'verification-dialog.png'),(await win.webContents.capturePage()).toPNG());
++ checks.push('Backend errors remain visible to callers and cannot mutate already saved results.');
+  await win.webContents.executeJavaScript(`(async()=>{await EcoTrackAirconSystem.NodeService.editDevice('esp32s3-001122334455',{name:'Hall controller',aircon_name:'Matrix Hall',room_id:null,brand:'Matrix',aircon_type:'Split Type (Inverter)',protocol_name:'TCL112AC'});return true;})()`);
+  result=await win.webContents.executeJavaScript("({controller:EcoTrackAirconSystem.NodeService.getNode('esp32s3-001122334455').name,ac:EcoTrackAirconSystem.AirconProfileManager.getById('AC-Office').name,binding:EcoTrackAirconSystem.AirconProfileManager.getById('AC-Office').node_id,turbo:EcoTrackAirconSystem.AirconProfileManager.getById('AC-Office').capabilities.turbo})");
+  assert.equal(result.controller,'Hall controller');assert.equal(result.ac,'Matrix Hall');assert.equal(result.binding,id);assert.equal(result.turbo,false);
+@@ -64,5 +60,5 @@
+  assert(result.error.includes('air conditioner name'));assert.equal(result.name,'Hall controller');assert.equal((await db.query('SELECT name FROM nodes WHERE id=$1',[nid])).rows[0].name,'Hall controller');
+  checks.push('Shared controller edit persists distinct controller/AC names atomically, keeps bindings and verification, and rolls back invalid edits.');
+  assert.deepEqual(errors,[]);win.destroy();await db.close();
+- fs.writeFileSync(path.join(out,'verification-native-results.json'),JSON.stringify({passed:checks.length,checks,actual_isolated_postgresql:true,physical_hardware_tested:false},null,2));console.log('Guided verification: '+checks.length+' native/PostgreSQL scenarios passed.');app.exit(0);
++ fs.writeFileSync(path.join(out,'verification-native-results.json'),JSON.stringify({passed:checks.length,checks,actual_isolated_postgresql:true,physical_hardware_tested:false},null,2));console.log('Retained capability backend: '+checks.length+' native/PostgreSQL scenarios passed.');app.exit(0);
+ }).catch(e=>{console.error(e);app.exit(1);});
+--- before/scripts/test_ir_capabilities.js
++++ after/scripts/test_ir_capabilities.js
+@@ -3,7 +3,7 @@
+ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+ const root=path.resolve(__dirname,'..');
+ const harness=fs.readFileSync(path.join(__dirname,'test_page_connections.js'),'utf8').split('async function run(){')[0];
+-const scenario="\nasync function runTurbo() {\n const apps=pages.map(makePage),a=apps[0].system;\n const manager=a.AirconProfileManager,clock=Date.now();\n let sequence=0;\n const capabilities={power:true,temperature:true,min_temp:16,max_temp:31,modes:['cool','dry','fan','auto','heat'],fans:['low','medium','high','auto','quiet'],swing:true,turbo:true,eco:true,sleep:false,timer:false};\n const capture=(state,extra={})=>({protocol:'TCL112AC',frame_kind:'full_state',raw_count:227,raw_data:'3000,1650,500',sequence:++sequence,received_at:new Date(clock+sequence*1000).toISOString(),state:{power:true,temp:24,mode:'cool',fan:'high',...state},...extra});\n async function sync(frame){db.ecotrack_device_state[0].latest_ir=frame;for(const app of apps)await app.system.syncWithDatabase();}\n const all=(fn)=>apps.forEach(app=>fn(app.system.AirconProfileManager.getById(asset),app));\n assert.equal(a.CapabilityEngine.getCapabilities('TCL112AC').turbo,true);\n assert.equal(a.CapabilityEngine.getCapabilities('TCL96AC').turbo,false);\n assert.equal(a.CapabilityEngine.getCapabilities('TCL').turbo,false);\n checks.push('Turbo is supported by the exact detected TCL112AC protocol; a manufacturer name or TCL96AC does not invent support.');\n await sync(capture({}, {hex:'0x23CB2601002403070500000080C8',state:{power:true,temp:24,mode:'cool',fan:'turbo'}}));\n all(profile=>{assert.equal(profile.protocol_name,'TCL112AC');assert.equal(profile.configured_protocol,'DAIKIN2');assert.equal(profile.capabilities.turbo,true);assert.equal(profile.state.fan,'high');assert.equal(profile.state.turbo,false);});\n assert.equal(db.aircons[0].protocol_name,'DAIKIN2');\n checks.push('Six page engines follow received TCL112AC rather than an incorrect saved brand, without rewriting the database profile.');\n checks.push('Legacy kMax fan is High; a checksummed packet with Turbo OFF stays OFF across all six pages.');\n const cached={protocol_name:'generic_ac',capabilities:{turbo:false},control_snapshot:manager.getById(asset).control_snapshot};\n assert.equal(a.CapabilityEngine.getCapabilities(cached).turbo,true);\n checks.push('Old Generic capability cache cannot hide a feature supported by the received protocol.');\n await sync(capture({}, {hex:'0x23CB2601002423073D0000008020',state:{power:true,temp:24,mode:'cool',fan:'turbo'}}));\n all(profile=>{assert.equal(profile.state.fan,'high');assert.equal(profile.state.turbo,true);assert.equal(profile.state.swing,true);});\n checks.push('Legacy Turbo ON is taken from the independent Turbo bit, together with the received swing flag.');\n const dashboard=read('public/dashboard.html');\n const updater=dashboard.slice(dashboard.indexOf('      function updateSingleCardDom('),dashboard.indexOf('      function wireCardListeners('));\n const power=dashboard.slice(dashboard.indexOf('      function getDashboardPowerState('),dashboard.indexOf('      function renderDashboard('));\n vm.runInContext(updater+power,apps[0].context);\n const fields=new Map(),card=element();card.querySelector=s=>{if(!fields.has(s))fields.set(s,element());return fields.get(s);};\n apps[0].context.card=card;apps[0].context.profile=manager.getById(asset);apps[0].context.node=a.NodeService.getNode(deviceId);\n vm.runInContext('updateSingleCardDom(card,profile,node)',apps[0].context);\n assert.equal(fields.get('.ac-fan-val').textContent,'HIGH · TURBO');\n checks.push('Production dashboard separates High fan from active Turbo.');\n const modeFunction=read('public/js/scheduler.js').match(/function getSchedulerControlMode\\(node\\) \\{[\\s\\S]*?\\n\\}/)[0];\n vm.runInContext(\"function schedulerSelectedSettings(){return window.EcoTrackAirconState.selectSettings(profile.control_snapshot);}\"+modeFunction,apps[0].context);\n assert.equal(vm.runInContext('getSchedulerControlMode(node)',apps[0].context),'COOL / HIGH FAN / TURBO (remote)');\n checks.push('Production Schedule mode summary includes the actual received Turbo flag separately from High fan.');\n\n const off=capture({turbo:false,swing:false,eco:true},{ac_capabilities:capabilities});\n await sync(off);all(profile=>{assert.equal(profile.state.turbo,false);assert.equal(profile.state.swing,false);assert.equal(profile.state.eco,true);assert.equal(profile.capabilities.sleep,false);assert.equal(profile.capabilities.timer,false);});\n checks.push('Explicit receiver flags update Turbo, Swing and Eco, while the receiver manifest excludes unsupported functions.');\n await sync({protocol:'TCL112AC',frame_kind:'settings_only',raw_count:227,raw_data:'3000,1650,500',state:{power:true,fan:'turbo',turbo:true},last_decoded:off});\n all(profile=>assert.equal(profile.state.turbo,false));\n await sync({protocol:'UNKNOWN',raw_count:198,raw_data:'450,800,500'});\n all(profile=>{assert.equal(profile.state.turbo,false);assert.equal(profile.protocol_name,'TCL112AC');assert.equal(profile.capabilities.turbo,true);});\n checks.push('Auxiliary packets and noise preserve the last full observation and supported controls.');\n const helper=apps[0].window.EcoTrackAirconState;\n const truncated=helper.remoteObservation(capture({}, {hex:'0x1234',state:{power:true,temp:24,mode:'cool',fan:'turbo'}}),stamp());\n assert.equal(truncated.observed_remote_state.fan,'high');assert.equal(truncated.observed_remote_state.turbo,null);\n const invalid=helper.remoteObservation(capture({}, {hex:'0x23CB2601002423073D0000008021',state:{power:true,temp:24,mode:'cool',fan:'turbo'}}),stamp());\n assert.equal(invalid.observed_remote_state.turbo,null);\n checks.push('Truncated or corrupt legacy packets leave Turbo unknown instead of inferring it from fan speed.');\n const explicit=helper.remoteObservation(capture({turbo:false},{hex:'0x23CB2601002423073D0000008020'}),stamp());\n assert.equal(explicit.observed_remote_state.turbo,false);\n checks.push('Explicit firmware-decoded fields take priority over the compatibility reader.');\n const upper=helper.remoteObservation(capture({turbo:true},{protocol:undefined,raw_type:' tcl112ac '}),stamp());\n assert.equal(upper.observed_remote_protocol,'TCL112AC');\n checks.push('Receiver protocol identifiers normalize case and accept raw_type when protocol is absent.');\n await sync(capture({turbo:false,swing:false,eco:false},{ac_capabilities:capabilities}));\n const beforeMismatch=db.ecotrack_device_commands.length;\n const mismatch=await a.CommandManager.dispatch({device_id:asset,protocol:'DAIKIN2',command:'TEMP',value:25});\n assert.equal(mismatch.code,'DETECTED_PROTOCOL_MISMATCH');assert.equal(db.ecotrack_device_commands.length,beforeMismatch);\n checks.push('Manual protocol overrides that contradict the receiver are rejected without a cloud command.');\n let result=await a.CommandManager.dispatch({device_id:asset,command:'TURBO',value:true});assert.equal(result.success,true);\n let command=db.ecotrack_device_commands.at(-1);assert.equal(command.payload.protocol,'TCL112AC');assert.equal(command.payload.state.turbo,'on');assert.equal(command.payload.state.fan,'high');assert.equal(command.status,'queued');\n result=await a.CommandManager.dispatch({device_id:asset,command:'TURBO',value:false});assert.equal(result.success,true);\n command=db.ecotrack_device_commands.at(-1);assert.equal(command.payload.protocol,'TCL112AC');assert.equal(command.payload.state.turbo,'off');\n checks.push('Turbo ON and OFF dispatch separate flags using the detected protocol, with normal High fan and honest Queued delivery.');\n await sync(capture({turbo:false},{ac_capabilities:{...capabilities,turbo:false}}));\n const count=db.ecotrack_device_commands.length;\n const blocked=await a.CommandManager.dispatch({device_id:asset,command:'TURBO',value:true});\n assert.equal(blocked.code,'UNSUPPORTED_CAPABILITY');assert.equal(db.ecotrack_device_commands.length,count);\n all(profile=>assert.equal(profile.capabilities.turbo,false));\n checks.push('A receiver manifest denying Turbo hides and rejects it without queuing a command.');\n const bad=helper.remoteObservation(capture({turbo:false},{ac_capabilities:{turbo:'true',fans:['<script>'],min_temp:32,max_temp:10}}),stamp());\n assert.equal(bad.observed_remote_capabilities,null);\n checks.push('Malformed capability strings, fan names and temperature ranges cannot enable controls.');\n await sync(capture({turbo:false},{protocol:'DAIKIN2',ac_capabilities:undefined}));\n all(profile=>{assert.equal(profile.protocol_name,'DAIKIN2');assert(profile.capabilities.fans.includes('quiet'));assert.equal(profile.state.turbo,false);});\n checks.push('A new valid received protocol replaces the previous capability family across all six engines.');\n return {passed:checks.length,checks,live_database_modified:false,physical_hardware_tested:false};\n}\nrunTurbo()\n";
++const scenario="\nasync function runTurbo() {\n const apps=pages.map(makePage),a=apps[0].system;\n const manager=a.AirconProfileManager,clock=Date.now();\n let sequence=0;\n const capabilities={power:true,temperature:true,min_temp:16,max_temp:31,modes:['cool','dry','fan','auto','heat'],fans:['low','medium','high','auto','quiet'],swing:true,turbo:true,eco:true,sleep:false,timer:false};\n const capture=(state,extra={})=>({protocol:'TCL112AC',frame_kind:'full_state',raw_count:227,raw_data:'3000,1650,500',sequence:++sequence,received_at:new Date(clock+sequence*1000).toISOString(),state:{power:true,temp:24,mode:'cool',fan:'high',...state},...extra});\n async function sync(frame){db.ecotrack_device_state[0].latest_ir=frame;for(const app of apps)await app.system.syncWithDatabase();}\n const all=(fn)=>apps.forEach(app=>fn(app.system.AirconProfileManager.getById(asset),app));\n assert.equal(a.CapabilityEngine.getCapabilities('TCL112AC').turbo,true);\n assert.equal(a.CapabilityEngine.getCapabilities('TCL96AC').turbo,false);\n assert.equal(a.CapabilityEngine.getCapabilities('TCL').turbo,false);\n checks.push('Turbo is supported by the exact detected TCL112AC protocol; a manufacturer name or TCL96AC does not invent support.');\n await sync(capture({}, {hex:'0x23CB2601002403070500000080C8',state:{power:true,temp:24,mode:'cool',fan:'turbo'}}));\n all(profile=>{assert.equal(profile.protocol_name,'TCL112AC');assert.equal(profile.configured_protocol,'DAIKIN2');assert.equal(profile.capabilities.turbo,true);assert.equal(profile.state.fan,'high');assert.equal(profile.state.turbo,false);});\n assert.equal(db.aircons[0].protocol_name,'DAIKIN2');\n checks.push('Six page engines follow received TCL112AC rather than an incorrect saved brand, without rewriting the database profile.');\n checks.push('Legacy kMax fan is High; a checksummed packet with Turbo OFF stays OFF across all six pages.');\n const cached={protocol_name:'generic_ac',capabilities:{turbo:false},control_snapshot:manager.getById(asset).control_snapshot};\n assert.equal(a.CapabilityEngine.getCapabilities(cached).turbo,true);\n checks.push('Old Generic capability cache cannot hide a feature supported by the received protocol.');\n await sync(capture({}, {hex:'0x23CB2601002423073D0000008020',state:{power:true,temp:24,mode:'cool',fan:'turbo'}}));\n all(profile=>{assert.equal(profile.state.fan,'high');assert.equal(profile.state.turbo,true);assert.equal(profile.state.swing,true);});\n checks.push('Legacy Turbo ON is taken from the independent Turbo bit, together with the received swing flag.');\n const dashboard=read('public/dashboard.html');\n const updater=dashboard.slice(dashboard.indexOf('      function updateSingleCardDom('),dashboard.indexOf('      function wireCardListeners('));\n const power=dashboard.slice(dashboard.indexOf('      function getDashboardPowerState('),dashboard.indexOf('      function renderDashboard('));\n vm.runInContext(updater+power,apps[0].context);\n const fields=new Map(),card=element();card.querySelector=s=>{if(!fields.has(s))fields.set(s,element());return fields.get(s);};\n apps[0].context.card=card;apps[0].context.profile=manager.getById(asset);apps[0].context.node=a.NodeService.getNode(deviceId);\n vm.runInContext('updateSingleCardDom(card,profile,node)',apps[0].context);\n assert.equal(fields.get('.ac-fan-val').textContent,'HIGH · TURBO');\n checks.push('Production dashboard separates High fan from active Turbo.');\n const modeFunction=read('public/js/scheduler.js').match(/function getSchedulerControlMode\\(node\\) \\{[\\s\\S]*?\\n\\}/)[0];\n vm.runInContext(\"function schedulerSelectedSettings(){return window.EcoTrackAirconState.selectSettings(profile.control_snapshot);}\"+modeFunction,apps[0].context);\n assert.equal(vm.runInContext('getSchedulerControlMode(node)',apps[0].context),'COOL / HIGH FAN / TURBO');\n checks.push('Production Schedule mode summary includes the actual received Turbo flag separately from High fan.');\n\n const off=capture({turbo:false,swing:false,eco:true},{ac_capabilities:capabilities});\n await sync(off);all(profile=>{assert.equal(profile.state.turbo,false);assert.equal(profile.state.swing,false);assert.equal(profile.state.eco,true);assert.equal(profile.capabilities.sleep,false);assert.equal(profile.capabilities.timer,false);});\n checks.push('Explicit receiver flags update Turbo, Swing and Eco, while the receiver manifest excludes unsupported functions.');\n await sync({protocol:'TCL112AC',frame_kind:'settings_only',raw_count:227,raw_data:'3000,1650,500',state:{power:true,fan:'turbo',turbo:true},last_decoded:off});\n all(profile=>assert.equal(profile.state.turbo,false));\n await sync({protocol:'UNKNOWN',raw_count:198,raw_data:'450,800,500'});\n all(profile=>{assert.equal(profile.state.turbo,false);assert.equal(profile.protocol_name,'TCL112AC');assert.equal(profile.capabilities.turbo,true);});\n checks.push('Auxiliary packets and noise preserve the last full observation and supported controls.');\n const helper=apps[0].window.EcoTrackAirconState;\n const truncated=helper.remoteObservation(capture({}, {hex:'0x1234',state:{power:true,temp:24,mode:'cool',fan:'turbo'}}),stamp());\n assert.equal(truncated.observed_remote_state.fan,'high');assert.equal(truncated.observed_remote_state.turbo,null);\n const invalid=helper.remoteObservation(capture({}, {hex:'0x23CB2601002423073D0000008021',state:{power:true,temp:24,mode:'cool',fan:'turbo'}}),stamp());\n assert.equal(invalid.observed_remote_state.turbo,null);\n checks.push('Truncated or corrupt legacy packets leave Turbo unknown instead of inferring it from fan speed.');\n const explicit=helper.remoteObservation(capture({turbo:false},{hex:'0x23CB2601002423073D0000008020'}),stamp());\n assert.equal(explicit.observed_remote_state.turbo,false);\n checks.push('Explicit firmware-decoded fields take priority over the compatibility reader.');\n const upper=helper.remoteObservation(capture({turbo:true},{protocol:undefined,raw_type:' tcl112ac '}),stamp());\n assert.equal(upper.observed_remote_protocol,'TCL112AC');\n checks.push('Receiver protocol identifiers normalize case and accept raw_type when protocol is absent.');\n await sync(capture({turbo:false,swing:false,eco:false},{ac_capabilities:capabilities}));\n const beforeMismatch=db.ecotrack_device_commands.length;\n const mismatch=await a.CommandManager.dispatch({device_id:asset,protocol:'DAIKIN2',command:'TEMP',value:25});\n assert.equal(mismatch.code,'DETECTED_PROTOCOL_MISMATCH');assert.equal(db.ecotrack_device_commands.length,beforeMismatch);\n checks.push('Manual protocol overrides that contradict the receiver are rejected without a cloud command.');\n let result=await a.CommandManager.dispatch({device_id:asset,command:'TURBO',value:true});assert.equal(result.success,true);\n let command=db.ecotrack_device_commands.at(-1);assert.equal(command.payload.protocol,'TCL112AC');assert.equal(command.payload.state.turbo,'on');assert.equal(command.payload.state.fan,'high');assert.equal(command.status,'queued');\n result=await a.CommandManager.dispatch({device_id:asset,command:'TURBO',value:false});assert.equal(result.success,true);\n command=db.ecotrack_device_commands.at(-1);assert.equal(command.payload.protocol,'TCL112AC');assert.equal(command.payload.state.turbo,'off');\n checks.push('Turbo ON and OFF dispatch separate flags using the detected protocol, with normal High fan and honest Queued delivery.');\n await sync(capture({turbo:false},{ac_capabilities:{...capabilities,turbo:false}}));\n const count=db.ecotrack_device_commands.length;\n const blocked=await a.CommandManager.dispatch({device_id:asset,command:'TURBO',value:true});\n assert.equal(blocked.code,'UNSUPPORTED_CAPABILITY');assert.equal(db.ecotrack_device_commands.length,count);\n all(profile=>assert.equal(profile.capabilities.turbo,false));\n checks.push('A receiver manifest denying Turbo hides and rejects it without queuing a command.');\n const bad=helper.remoteObservation(capture({turbo:false},{ac_capabilities:{turbo:'true',fans:['<script>'],min_temp:32,max_temp:10}}),stamp());\n assert.equal(bad.observed_remote_capabilities,null);\n checks.push('Malformed capability strings, fan names and temperature ranges cannot enable controls.');\n await sync(capture({turbo:false},{protocol:'DAIKIN2',ac_capabilities:undefined}));\n all(profile=>{assert.equal(profile.protocol_name,'DAIKIN2');assert(profile.capabilities.fans.includes('quiet'));assert.equal(profile.state.turbo,false);});\n checks.push('A new valid received protocol replaces the previous capability family across all six engines.');\n return {passed:checks.length,checks,live_database_modified:false,physical_hardware_tested:false};\n}\nrunTurbo()\n";
+ (async()=>{
+  const result=await vm.runInNewContext(harness+scenario,{require,__dirname,console,performance,process,TextEncoder,TextDecoder,URLSearchParams,Uint8Array,structuredClone});
+  fs.mkdirSync(path.join(root,'reports/tcl-turbo'),{recursive:true});
+--- before/scripts/test_ir_capabilities_render.js
++++ after/scripts/test_ir_capabilities_render.js
+@@ -51,7 +51,7 @@
+    repaintFixture();
+    true;
+   `);
+-  const results=await win.webContents.executeJavaScript("(async()=>{\n const checks=[],turbo=()=>[...document.querySelectorAll('#specialButtonsGroup button')].find(b=>b.textContent==='Turbo');\n async function until(fn){const end=Date.now()+7000;while(!fn()){if(Date.now()>end)throw Error('Timed out waiting for automatic receiver update');await new Promise(resolve=>setTimeout(resolve,25));}}\n await until(()=>turbo()?.dataset.currentState==='off');\n if(document.querySelector('.ac-fan-val').textContent!=='HIGH')throw Error('High fan is mislabeled Turbo');\n if([...document.querySelectorAll('#fanButtonsGroup button')].some(b=>b.textContent==='turbo'))throw Error('Turbo appears as a normal TCL fan speed');\n checks.push('Production controls show supported Turbo separately from High fan, initially OFF.');\n if([...document.querySelectorAll('#specialButtonsGroup button')].some(b=>['Sleep','Timer'].includes(b.textContent)))throw Error('Unsupported receiver controls rendered');\n checks.push('Unsupported special functions are excluded by the receiver manifest.');\n turbo().click();await pendingCommand;\n if(requestLog.at(-1)?.protocol!=='TCL112AC'||requestLog.at(-1)?.state.turbo!=='on')throw Error('Native Turbo button did not dispatch detected protocol and flag');\n checks.push('Native Turbo button uses the shared command engine and a separate Turbo flag.');\n fixtureDb.states[0].latest_ir={protocol:'TCL112AC',sequence:2,frame_kind:'full_state',raw_count:227,raw_data:'3000,1650,500',received_at:new Date().toISOString(),state:{power:true,temp:25,mode:'auto',fan:'high',turbo:true,swing:true,eco:false},ac_capabilities:capabilityManifest};\n const began=Date.now();await until(()=>EcoTrackAirconSystem.AirconProfileManager.getById('AC-Fixture')?.control_snapshot?.observed_remote_state?.turbo===true&&turbo()?.getAttribute('aria-pressed')==='true'&&document.querySelector('.ac-fan-val').textContent==='HIGH · TURBO'&&document.querySelector('.ac-status-badge').textContent.includes('Remote ON'));\n if(document.querySelector('.ac-swing-val').textContent!=='ON')throw Error('Received swing did not follow Turbo frame');\n checks.push('Received Turbo ON activates the actual control and dashboard automatically without reloading.');\n return {checks,elapsed_ms:Date.now()-began,passed:checks.length};\n})()");
++  const results=await win.webContents.executeJavaScript("(async()=>{\n const checks=[],turbo=()=>[...document.querySelectorAll('#specialButtonsGroup button')].find(b=>b.textContent==='Turbo');\n async function until(fn){const end=Date.now()+7000;while(!fn()){if(Date.now()>end)throw Error('Timed out waiting for automatic receiver update');await new Promise(resolve=>setTimeout(resolve,25));}}\n await until(()=>turbo()?.dataset.currentState==='off');\n if(document.querySelector('.ac-fan-val').textContent!=='HIGH')throw Error('High fan is mislabeled Turbo');\n if([...document.querySelectorAll('#fanButtonsGroup button')].some(b=>b.textContent==='turbo'))throw Error('Turbo appears as a normal TCL fan speed');\n checks.push('Production controls show supported Turbo separately from High fan, initially OFF.');\n if([...document.querySelectorAll('#specialButtonsGroup button')].some(b=>['Sleep','Timer'].includes(b.textContent)))throw Error('Unsupported receiver controls rendered');\n checks.push('Unsupported special functions are excluded by the receiver manifest.');\n turbo().click();await pendingCommand;\n if(requestLog.at(-1)?.protocol!=='TCL112AC'||requestLog.at(-1)?.state.turbo!=='on')throw Error('Native Turbo button did not dispatch detected protocol and flag');\n checks.push('Native Turbo button uses the shared command engine and a separate Turbo flag.');\n fixtureDb.states[0].latest_ir={protocol:'TCL112AC',sequence:2,frame_kind:'full_state',raw_count:227,raw_data:'3000,1650,500',received_at:new Date().toISOString(),state:{power:true,temp:25,mode:'auto',fan:'high',turbo:true,swing:true,eco:false},ac_capabilities:capabilityManifest};\n const began=Date.now();await until(()=>EcoTrackAirconSystem.AirconProfileManager.getById('AC-Fixture')?.control_snapshot?.observed_remote_state?.turbo===true&&turbo()?.getAttribute('aria-pressed')==='true'&&document.querySelector('.ac-fan-val').textContent==='HIGH · TURBO'&&document.querySelector('.ac-status-badge').textContent.trim()==='ON');\n if(document.querySelector('.ac-swing-val').textContent!=='ON')throw Error('Received swing did not follow Turbo frame');\n checks.push('Received Turbo ON activates the actual control and dashboard automatically without reloading.');\n return {checks,elapsed_ms:Date.now()-began,passed:checks.length};\n})()");
+   for(const theme of ['light','dark']){
+    await win.webContents.executeJavaScript("document.documentElement.classList.toggle('dark',"+(theme==='dark')+");document.getAnimations().forEach(a=>a.finish());new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));");
+    const bodyColor=await win.webContents.executeJavaScript("new Promise(resolve=>setTimeout(()=>resolve(getComputedStyle(document.body).backgroundColor),150));");
+--- before/scripts/test_ir_realtime.js
++++ after/scripts/test_ir_realtime.js
+@@ -3,5 +3,5 @@
+ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+ const fixture=fs.readFileSync(path.join(__dirname,'test_page_connections.js'),'utf8');
+ const harness=fixture.slice(0,fixture.indexOf('async function run(){'));
+-const scenario="\nasync function testImmediateEvents() {\n const apps=pages.map(makePage), clock=Date.now();\n db.ecotrack_device_state[0].last_seen=new Date(clock).toISOString();\n for(const app of apps) { for(const fn of app.listeners.get('supabase:ready')||[])fn(); }\n await flush();await flush();\n for(const app of apps)await app.system.syncWithDatabase();\n await flush();\n const channels=realtime.filter(c=>c.name==='realtime_aircon_nodes');\n const broadcasts=realtime.filter(c=>c.name==='ecotrack:hardware');\n assert.equal(channels.length,6);assert.equal(broadcasts.length,6);\n const captured=(offset,state)=>({...copy(db.ecotrack_device_state[0]),last_seen:new Date(clock+offset).toISOString(),\n latest_ir:{protocol:'TCL112AC',frame_kind:'full_state',boot_count:7,sequence:offset,raw_count:227,captured_at_epoch_ms:clock+offset,\n received_at:new Date(clock+offset).toISOString(),state:{power:true,temp:25,mode:'auto',fan:'high',turbo:false,swing:false,eco:false,source:'ir_receiver',...state},\n ac_capabilities:{power:true,temperature:true,min_temp:16,max_temp:31,modes:['cool','dry','fan','auto','heat'],fans:['low','medium','high','auto','quiet'],turbo:true,swing:true,eco:true,sleep:false,timer:false}}});\n const deliver=(row,type='postgres') => (type==='postgres'?channels:broadcasts).forEach(c=>c.handlers.find(h=>type==='postgres'?h.filter.table==='ecotrack_device_state':h.filter.event==='device_state').callback(type==='postgres'?{eventType:'UPDATE',new:copy(row)}:{payload:{version:1,row:copy(row)}}));\n let paints=0;for(const app of apps)app.system.AirconEvents.on('hardware:updated',()=>paints++);\n reads.length=0;writes.length=0;\n const off=captured(50,{power:false,temp:23,mode:'dry',fan:'low',turbo:true,swing:true});\n deliver(off);\n for(const app of apps){const ac=app.system.AirconProfileManager.getById(asset);assert.equal(ac.state.power,false);assert.equal(ac.state.temperature,23);assert.equal(ac.state.mode,'dry');assert.equal(ac.state.fan,'low');assert.equal(ac.state.turbo,true);assert.equal(ac.protocol_name,'TCL112AC');assert.equal(ac.capabilities.turbo,true);}\n assert.equal(reads.length,0);assert.equal(writes.length,0);assert.equal(paints,6);\n checks.push('A compact Postgres event updates power, temperature, mode, fan, Turbo and receiver capabilities across six engines immediately, with zero database fetches or writes.');\n deliver(off,'broadcast');assert.equal(paints,6);\n checks.push('Private Broadcast and Postgres delivery of the same observation produce one update per page.');\n const on=captured(100,{power:true,temp:26,mode:'cool',fan:'medium',turbo:false,swing:false});\n deliver(on,'broadcast');assert.equal(paints,12);assert.equal(reads.length,0);\n for(const app of apps)assert.equal(app.system.AirconProfileManager.getById(asset).state.power,true);\n checks.push('Private Broadcast updates the UI directly without waiting for the fallback polling timer.');\n deliver(off);assert.equal(paints,12);\n for(const app of apps)assert.equal(app.system.AirconProfileManager.getById(asset).state.temperature,26);\n checks.push('Delayed older OFF events cannot overwrite a newer ON observation.');\n const heartbeat={...copy(on),last_seen:new Date(clock+150).toISOString()};deliver(heartbeat);\n for(const app of apps)assert.equal(app.system.AirconProfileManager.getById(asset).control_snapshot.observed_remote_at,new Date(clock+100).toISOString());\n checks.push('A heartbeat refreshes connection indicators while preserving the original IR observation timestamp.');\n // Exercise the production dashboard card updater on the fast event.\n const html=read('public/dashboard.html');\n const dashboardCode=html.slice(html.indexOf('      function updateSingleCardDom('),html.indexOf('      function wireCardListeners('))+\n html.slice(html.indexOf('      function getDashboardPowerState('),html.indexOf('      function renderDashboard('));\n vm.runInContext(dashboardCode,apps[0].context);\n const fields=new Map(),card=element();card.querySelector=s=>{if(!fields.has(s))fields.set(s,element());return fields.get(s);};\n apps[0].context.card=card;\n apps[0].system.AirconEvents.on('hardware:updated',()=>{\n  apps[0].context.profile=apps[0].system.AirconProfileManager.getById(asset);\n  apps[0].context.node=apps[0].system.NodeService.getNode(deviceId);\n  vm.runInContext('updateSingleCardDom(card,profile,node)',apps[0].context);\n });\n deliver(captured(200,{power:false,temp:22,mode:'fan',fan:'high',turbo:true}));\n assert(fields.get('.ac-status-badge').innerHTML.includes('Remote OFF'));\n assert.equal(fields.get('.ac-fan-val').textContent,'HIGH \u00b7 TURBO');\n assert.equal(fields.get('.target-temp-val').textContent,22);\n checks.push('The production dashboard DOM changes to Remote OFF, received temperature and independent Turbo on the fast event.');\n // A database read that started before an event must not undo that event.\n const app=apps[0],cloud=app.window.EcoTrackHardwareCloud,list=cloud.listStatus;\n let release;cloud.listStatus=async()=>{const stale=copy(db.ecotrack_device_state);await new Promise(resolve=>release=resolve);return stale.map(row=>({...row,connection_status:'online'}));};\n const pending=app.system.syncWithDatabase();while(!release)await flush();\n deliver(captured(250,{power:true,temp:27,mode:'heat',fan:'quiet',turbo:false}),'broadcast');\n release();await pending;cloud.listStatus=list;\n assert.equal(app.system.AirconProfileManager.getById(asset).state.temperature,27);\n checks.push('An in-flight stale database response cannot roll back a newer received observation.');\n // A fresh authoritative read still detects a disconnected controller.\n db.ecotrack_device_state[0]={...captured(300,{power:false}),last_seen:new Date(Date.now()-60000).toISOString()};\n await app.system.syncWithDatabase();assert.equal(app.system.NodeService.getNode(deviceId).status,'Offline');\n checks.push('A fresh database recovery read still detects offline hardware.');\n for(const page of apps)page.timers.clear();\n reads.length=0;\n const nodeChannel=channels[0].handlers.find(h=>h.filter.table==='nodes');\n nodeChannel.callback({eventType:'UPDATE',new:{...copy(db.nodes[0]),rssi:-60,updated:new Date().toISOString(),status:'online'}});\n assert.equal(app.timers.size,0);assert.equal(reads.length,0);\n checks.push('A connection-only nodes heartbeat does not refetch the registry.');\n const unknown={...captured(400,{power:true}),node_id:'unregistered',device_id:'esp32s3-ffffffffffff'};\n deliver(unknown);\n assert.equal(app.system.AirconProfileManager.getAll().length,1);\n assert.equal(app.system.NodeService.getNodes().length,1);\n checks.push('An unknown controller event schedules reconciliation without creating a profile or controller.');\n\n // Exercise the production scheduler's fast handler without loading or rebuilding its forms.\n const schedule=apps[2],labels=new Map();\n const input=id=>{if(!labels.has(id))labels.set(id,element());return labels.get(id);};\n input('wake-'+deviceId).value='05:00';input('sleep-'+deviceId).value='05:00';input('interval-val-'+deviceId).value='30';\n const powerLabel=input('power'),tempLabel=input('target'),modeLabel=input('mode');\n powerLabel.dataset.schedulerPowerMode=encodeURIComponent(deviceId);\n tempLabel.dataset.schedulerTargetTemp=encodeURIComponent(deviceId);\n modeLabel.dataset.schedulerControlMode=encodeURIComponent(deviceId);\n schedule.doc.getElementById=input;\n schedule.doc.querySelectorAll=selector=>selector==='[data-scheduler-power-mode]'?[powerLabel]:selector==='[data-scheduler-target-temp]'?[tempLabel]:selector==='[data-scheduler-control-mode]'?[modeLabel]:[];\n schedule.context.fixtureScheduleNode={id:deviceId,name:deviceId,pb_id:'db-node',cloud_state:copy(on)};\n schedule.context.fixtureScheduleAircons=copy(db.aircons);\n vm.runInContext('const sb=window.supabaseClient;let savedRooms={r1:{nodes:[fixtureScheduleNode]}};let currentRoomNodes=[];let schedulerAirconRecords=fixtureScheduleAircons;let schedulerAirconRefreshVersion=0;',schedule.context);\n const schedulerSource=read('public/js/scheduler.js');\n vm.runInContext(schedulerSource.slice(schedulerSource.indexOf('function getSchedulerControlSnapshot('),schedulerSource.indexOf('async function refreshSchedulerAirconSettings(')),schedule.context);\n schedule.system.AirconEvents.on('hardware:updated',payload=>{schedule.context.fixturePayload=payload;vm.runInContext('refreshSchedulerHardware(fixturePayload)',schedule.context);});\n reads.length=0;\n deliver(captured(450,{power:false,temp:21,mode:'dry',fan:'high',turbo:true}),'broadcast');\n assert.equal(powerLabel.textContent,'REMOTE OFF');assert.equal(tempLabel.textContent,'21 \\u00b0C (remote)');\n assert.equal(modeLabel.textContent,'DRY / HIGH FAN / TURBO (remote)');\n assert.equal(reads.length,0);\n checks.push('The production scheduler immediately follows received power, target temperature, mode, fan and Turbo without fetching database records.');\n assert.equal(input('wake-'+deviceId).value,'05:00');assert.equal(input('sleep-'+deviceId).value,'05:00');assert.equal(input('interval-val-'+deviceId).value,'30');\n checks.push('Fast schedule updates preserve unsaved wake/sleep times and report interval inputs.');\n // Repeating the same physical setting after a newer UI request is a fresh observation.\n const profiles=app.system.AirconProfileManager.getAll();\n profiles[0].control_snapshot={...profiles[0].control_snapshot,desired_state:{power:'on',temp:28,mode:'cool',fan:'auto'},commanded_at:new Date(clock+475).toISOString()};\n storage.setItem('ecoTrack_aircons',JSON.stringify(profiles));\n deliver(captured(500,{power:false,temp:21,mode:'dry',fan:'high',turbo:true}));\n assert.equal(app.system.AirconProfileManager.getById(asset).state.temperature,21);\n assert.equal(app.system.AirconProfileManager.getById(asset).state.power,false);\n checks.push('A fresh repeated physical setting overrides a newer requested UI setting; equality of decoded values does not suppress it.');\n const sketch=read('reports/cloud-hardware/EcoTrackCloudReceiver.ino.txt');\n assert(sketch.includes('cloud-ir-controller-1.8-capabilities'));\n assert(sketch.indexOf('  uploadRemoteObservation();')<sketch.indexOf('  if (legacyIrUpload || millis() - lastCloudPoll'));\n assert(sketch.includes('cloudHttp.setReuse(true)'));\n assert(sketch.includes('latestDecodedCapture'));\n checks.push('The delivered receiver sketch attempts a compact decoded observation before scheduled heartbeat polling and enables HTTP keep-alive.');\n return {passed:checks.length,checks,live_database_modified:false,physical_hardware_tested:false};\n}\ntestImmediateEvents().then(report=>{fs.mkdirSync(path.join(root,'reports/ir-latency'),{recursive:true});fs.writeFileSync(path.join(root,'reports/ir-latency/realtime-tests.json'),JSON.stringify(report,null,2)+'\\n');console.log('Immediate IR events: '+report.passed+' checks passed.');}).catch(error=>{console.error(error);process.exitCode=1;});\n";
++const scenario="\nasync function testImmediateEvents() {\n const apps=pages.map(makePage), clock=Date.now();\n db.ecotrack_device_state[0].last_seen=new Date(clock).toISOString();\n for(const app of apps) { for(const fn of app.listeners.get('supabase:ready')||[])fn(); }\n await flush();await flush();\n for(const app of apps)await app.system.syncWithDatabase();\n await flush();\n const channels=realtime.filter(c=>c.name==='realtime_aircon_nodes');\n const broadcasts=realtime.filter(c=>c.name==='ecotrack:hardware');\n assert.equal(channels.length,6);assert.equal(broadcasts.length,6);\n const captured=(offset,state)=>({...copy(db.ecotrack_device_state[0]),last_seen:new Date(clock+offset).toISOString(),\n latest_ir:{protocol:'TCL112AC',frame_kind:'full_state',boot_count:7,sequence:offset,raw_count:227,captured_at_epoch_ms:clock+offset,\n received_at:new Date(clock+offset).toISOString(),state:{power:true,temp:25,mode:'auto',fan:'high',turbo:false,swing:false,eco:false,source:'ir_receiver',...state},\n ac_capabilities:{power:true,temperature:true,min_temp:16,max_temp:31,modes:['cool','dry','fan','auto','heat'],fans:['low','medium','high','auto','quiet'],turbo:true,swing:true,eco:true,sleep:false,timer:false}}});\n const deliver=(row,type='postgres') => (type==='postgres'?channels:broadcasts).forEach(c=>c.handlers.find(h=>type==='postgres'?h.filter.table==='ecotrack_device_state':h.filter.event==='device_state').callback(type==='postgres'?{eventType:'UPDATE',new:copy(row)}:{payload:{version:1,row:copy(row)}}));\n let paints=0;for(const app of apps)app.system.AirconEvents.on('hardware:updated',()=>paints++);\n reads.length=0;writes.length=0;\n const off=captured(50,{power:false,temp:23,mode:'dry',fan:'low',turbo:true,swing:true});\n deliver(off);\n for(const app of apps){const ac=app.system.AirconProfileManager.getById(asset);assert.equal(ac.state.power,false);assert.equal(ac.state.temperature,23);assert.equal(ac.state.mode,'dry');assert.equal(ac.state.fan,'low');assert.equal(ac.state.turbo,true);assert.equal(ac.protocol_name,'TCL112AC');assert.equal(ac.capabilities.turbo,true);}\n assert.equal(reads.length,0);assert.equal(writes.length,0);assert.equal(paints,6);\n checks.push('A compact Postgres event updates power, temperature, mode, fan, Turbo and receiver capabilities across six engines immediately, with zero database fetches or writes.');\n deliver(off,'broadcast');assert.equal(paints,6);\n checks.push('Private Broadcast and Postgres delivery of the same observation produce one update per page.');\n const on=captured(100,{power:true,temp:26,mode:'cool',fan:'medium',turbo:false,swing:false});\n deliver(on,'broadcast');assert.equal(paints,12);assert.equal(reads.length,0);\n for(const app of apps)assert.equal(app.system.AirconProfileManager.getById(asset).state.power,true);\n checks.push('Private Broadcast updates the UI directly without waiting for the fallback polling timer.');\n deliver(off);assert.equal(paints,12);\n for(const app of apps)assert.equal(app.system.AirconProfileManager.getById(asset).state.temperature,26);\n checks.push('Delayed older OFF events cannot overwrite a newer ON observation.');\n const heartbeat={...copy(on),last_seen:new Date(clock+150).toISOString()};deliver(heartbeat);\n for(const app of apps)assert.equal(app.system.AirconProfileManager.getById(asset).control_snapshot.observed_remote_at,new Date(clock+100).toISOString());\n checks.push('A heartbeat refreshes connection indicators while preserving the original IR observation timestamp.');\n // Exercise the production dashboard card updater on the fast event.\n const html=read('public/dashboard.html');\n const dashboardCode=html.slice(html.indexOf('      function updateSingleCardDom('),html.indexOf('      function wireCardListeners('))+\n html.slice(html.indexOf('      function getDashboardPowerState('),html.indexOf('      function renderDashboard('));\n vm.runInContext(dashboardCode,apps[0].context);\n const fields=new Map(),card=element();card.querySelector=s=>{if(!fields.has(s))fields.set(s,element());return fields.get(s);};\n apps[0].context.card=card;\n apps[0].system.AirconEvents.on('hardware:updated',()=>{\n  apps[0].context.profile=apps[0].system.AirconProfileManager.getById(asset);\n  apps[0].context.node=apps[0].system.NodeService.getNode(deviceId);\n  vm.runInContext('updateSingleCardDom(card,profile,node)',apps[0].context);\n });\n deliver(captured(200,{power:false,temp:22,mode:'fan',fan:'high',turbo:true}));\n assert(fields.get('.ac-status-badge').innerHTML.includes('OFF'));\n assert.equal(fields.get('.ac-fan-val').textContent,'HIGH \u00b7 TURBO');\n assert.equal(fields.get('.target-temp-val').textContent,22);\n checks.push('The production dashboard DOM changes to Remote OFF, received temperature and independent Turbo on the fast event.');\n // A database read that started before an event must not undo that event.\n const app=apps[0],cloud=app.window.EcoTrackHardwareCloud,list=cloud.listStatus;\n let release;cloud.listStatus=async()=>{const stale=copy(db.ecotrack_device_state);await new Promise(resolve=>release=resolve);return stale.map(row=>({...row,connection_status:'online'}));};\n const pending=app.system.syncWithDatabase();while(!release)await flush();\n deliver(captured(250,{power:true,temp:27,mode:'heat',fan:'quiet',turbo:false}),'broadcast');\n release();await pending;cloud.listStatus=list;\n assert.equal(app.system.AirconProfileManager.getById(asset).state.temperature,27);\n checks.push('An in-flight stale database response cannot roll back a newer received observation.');\n // A fresh authoritative read still detects a disconnected controller.\n db.ecotrack_device_state[0]={...captured(300,{power:false}),last_seen:new Date(Date.now()-60000).toISOString()};\n await app.system.syncWithDatabase();assert.equal(app.system.NodeService.getNode(deviceId).status,'Offline');\n checks.push('A fresh database recovery read still detects offline hardware.');\n for(const page of apps)page.timers.clear();\n reads.length=0;\n const nodeChannel=channels[0].handlers.find(h=>h.filter.table==='nodes');\n nodeChannel.callback({eventType:'UPDATE',new:{...copy(db.nodes[0]),rssi:-60,updated:new Date().toISOString(),status:'online'}});\n assert.equal(app.timers.size,0);assert.equal(reads.length,0);\n checks.push('A connection-only nodes heartbeat does not refetch the registry.');\n const unknown={...captured(400,{power:true}),node_id:'unregistered',device_id:'esp32s3-ffffffffffff'};\n deliver(unknown);\n assert.equal(app.system.AirconProfileManager.getAll().length,1);\n assert.equal(app.system.NodeService.getNodes().length,1);\n checks.push('An unknown controller event schedules reconciliation without creating a profile or controller.');\n\n // Exercise the production scheduler's fast handler without loading or rebuilding its forms.\n const schedule=apps[2],labels=new Map();\n const input=id=>{if(!labels.has(id))labels.set(id,element());return labels.get(id);};\n input('wake-'+deviceId).value='05:00';input('sleep-'+deviceId).value='05:00';input('interval-val-'+deviceId).value='30';\n const powerLabel=input('power'),tempLabel=input('target'),modeLabel=input('mode');\n powerLabel.dataset.schedulerPowerMode=encodeURIComponent(deviceId);\n tempLabel.dataset.schedulerTargetTemp=encodeURIComponent(deviceId);\n modeLabel.dataset.schedulerControlMode=encodeURIComponent(deviceId);\n schedule.doc.getElementById=input;\n schedule.doc.querySelectorAll=selector=>selector==='[data-scheduler-power-mode]'?[powerLabel]:selector==='[data-scheduler-target-temp]'?[tempLabel]:selector==='[data-scheduler-control-mode]'?[modeLabel]:[];\n schedule.context.fixtureScheduleNode={id:deviceId,name:deviceId,pb_id:'db-node',cloud_state:copy(on)};\n schedule.context.fixtureScheduleAircons=copy(db.aircons);\n vm.runInContext('const sb=window.supabaseClient;let savedRooms={r1:{nodes:[fixtureScheduleNode]}};let currentRoomNodes=[];let schedulerAirconRecords=fixtureScheduleAircons;let schedulerAirconRefreshVersion=0;',schedule.context);\n const schedulerSource=read('public/js/scheduler.js');\n vm.runInContext(schedulerSource.slice(schedulerSource.indexOf('function getSchedulerControlSnapshot('),schedulerSource.indexOf('async function refreshSchedulerAirconSettings(')),schedule.context);\n schedule.system.AirconEvents.on('hardware:updated',payload=>{schedule.context.fixturePayload=payload;vm.runInContext('refreshSchedulerHardware(fixturePayload)',schedule.context);});\n reads.length=0;\n deliver(captured(450,{power:false,temp:21,mode:'dry',fan:'high',turbo:true}),'broadcast');\n assert.equal(powerLabel.textContent,'OFF');assert.equal(tempLabel.textContent,'21 \\u00b0C');\n assert.equal(modeLabel.textContent,'DRY / HIGH FAN / TURBO');\n assert.equal(reads.length,0);\n checks.push('The production scheduler immediately follows received power, target temperature, mode, fan and Turbo without fetching database records.');\n assert.equal(input('wake-'+deviceId).value,'05:00');assert.equal(input('sleep-'+deviceId).value,'05:00');assert.equal(input('interval-val-'+deviceId).value,'30');\n checks.push('Fast schedule updates preserve unsaved wake/sleep times and report interval inputs.');\n // Repeating the same physical setting after a newer UI request is a fresh observation.\n const profiles=app.system.AirconProfileManager.getAll();\n profiles[0].control_snapshot={...profiles[0].control_snapshot,desired_state:{power:'on',temp:28,mode:'cool',fan:'auto'},commanded_at:new Date(clock+475).toISOString()};\n storage.setItem('ecoTrack_aircons',JSON.stringify(profiles));\n deliver(captured(500,{power:false,temp:21,mode:'dry',fan:'high',turbo:true}));\n assert.equal(app.system.AirconProfileManager.getById(asset).state.temperature,21);\n assert.equal(app.system.AirconProfileManager.getById(asset).state.power,false);\n checks.push('A fresh repeated physical setting overrides a newer requested UI setting; equality of decoded values does not suppress it.');\n const sketch=read('reports/cloud-hardware/EcoTrackCloudReceiver.ino.txt');\n assert(sketch.includes('cloud-ir-controller-1.8-capabilities'));\n assert(sketch.indexOf('  uploadRemoteObservation();')<sketch.indexOf('  if (legacyIrUpload || millis() - lastCloudPoll'));\n assert(sketch.includes('cloudHttp.setReuse(true)'));\n assert(sketch.includes('latestDecodedCapture'));\n checks.push('The delivered receiver sketch attempts a compact decoded observation before scheduled heartbeat polling and enables HTTP keep-alive.');\n return {passed:checks.length,checks,live_database_modified:false,physical_hardware_tested:false};\n}\ntestImmediateEvents().then(report=>{fs.mkdirSync(path.join(root,'reports/ir-latency'),{recursive:true});fs.writeFileSync(path.join(root,'reports/ir-latency/realtime-tests.json'),JSON.stringify(report,null,2)+'\\n');console.log('Immediate IR events: '+report.passed+' checks passed.');}).catch(error=>{console.error(error);process.exitCode=1;});\n";
+ vm.runInNewContext(harness+'const flush=()=>new Promise(resolve=>setImmediate(resolve));\n'+scenario,{require,__dirname,process,console,setImmediate,setTimeout,clearTimeout,setInterval,clearInterval,structuredClone,URLSearchParams,TextEncoder,TextDecoder,performance},{filename:'ir-realtime-fixtures.js'});
+--- before/scripts/test_ir_realtime_render.js
++++ after/scripts/test_ir_realtime_render.js
+@@ -71,7 +71,7 @@
+     };
+     const elapsed=deliverRemote({power:true,temp:22,mode:'dry',fan:'high',turbo:true,swing:true,eco:false});
+     if(turbo().getAttribute('aria-pressed')!=='true')throw Error('Turbo was not activated immediately');
+-    if(!document.querySelector('.ac-status-badge').textContent.includes('Remote ON'))throw Error('Remote ON was not shown immediately');
++    if(document.querySelector('.ac-status-badge').textContent.trim()!=='ON')throw Error('Remote ON was not shown immediately');
+     if(document.querySelector('.target-temp-val').textContent!=='22')throw Error('Received temperature did not update');
+     if(document.querySelector('.ac-mode-val').textContent!=='DRY'||!document.querySelector('.ac-fan-val').textContent.includes('TURBO'))throw Error('Received mode/fan/Turbo mismatch');
+     if(document.querySelector('.ac-swing-val').textContent!=='ON')throw Error('Received swing mismatch');
+@@ -88,7 +88,7 @@
+    (()=>{
+     const elapsed=deliverRemote({power:false,temp:24,mode:'fan',fan:'low',turbo:false,swing:false,eco:false},true);
+     const turbo=[...document.querySelectorAll('#specialButtonsGroup button')].find(b=>b.textContent==='Turbo');
+-    if(!document.querySelector('.ac-status-badge').textContent.includes('Remote OFF'))throw Error('Broadcast OFF was not shown immediately');
++    if(document.querySelector('.ac-status-badge').textContent.trim()!=='OFF')throw Error('Broadcast OFF was not shown immediately');
+     if(document.querySelector('.target-temp-val').textContent!=='24'||document.querySelector('.ac-mode-val').textContent!=='FAN'||document.querySelector('.ac-fan-val').textContent!=='LOW')throw Error('Broadcast settings did not update');
+     if(turbo.getAttribute('aria-pressed')!=='false')throw Error('Turbo was not cleared');
+     if(document.querySelector('.power-toggle-btn').getAttribute('data-current-power')!=='0')throw Error('Power toggle still shows ON');
+--- before/scripts/test_multi_brand_control_render.js
++++ after/scripts/test_multi_brand_control_render.js
+@@ -14,24 +14,37 @@
+  window.dbFixture={aircons:[{id:'ac-ui',asset_tag:'AC-UI',name:'Matrix',brand:'Matrix',protocol_name:'TCL112AC',node_id:'node-ui',controller_node_id:'node-ui',model:'Split Type (Inverter)'}],nodes:[{id:'node-ui',name:'ESP32 UI',room_id:null}],rooms:[],floors:[],buildings:[]};
+  window.hardwareFixture=[{node_id:'node-ui',device_id:'esp32s3-001122334455',last_seen:new Date().toISOString(),capabilities:{ir_receiver:true,ir_transmitter:true},connection_status:'online',latest_ir:{protocol:'TCL112AC',raw_count:227,frame_kind:'full_state',sequence:1,received_at:new Date().toISOString(),state:{power:true,temp:24.5,mode:'cool',fan:'high',turbo:false,source:'ir_receiver'}}}];
+  window.supabaseClient={from(table){fixtureReads++;let key,value;const q={select(){return q},order(){return q},eq(k,v){key=k;value=v;return q},async maybeSingle(){return {data:dbFixture[table].find(r=>!key||r[key]===value),error:null}},then(a,b){return Promise.resolve({data:dbFixture[table]||[],error:null}).then(a,b)}};return q;}};
+- window.EcoTrackHardwareCloud={listStatus:async()=>structuredClone(hardwareFixture),describe:()=> 'online',control:async(_node,payload)=>{fixtureWrites.push(structuredClone(payload));return {command_id:'fixture-queued',commanded_at:new Date().toISOString()};}};
+- `+read('public/js/aircon-system.js')+read('public/js/ac-capability-verification.js')+`
++ window.EcoTrackHardwareCloud={listStatus:async()=>structuredClone(hardwareFixture),describe:()=> 'online',control:async(_node,payload)=>{if(window.fixtureControlFail)throw Error('Controller connection unavailable');fixtureWrites.push(structuredClone(payload));return {command_id:'fixture-queued',commanded_at:new Date().toISOString()};}};
++ `+read('public/js/aircon-system.js')+`
+  const {AirconProfileManager,CapabilityEngine,CommandManager,NodeService}=EcoTrackAirconSystem;let activeDeviceId='AC-UI';
+- function executeCommand(command,value){window.pendingCommand=CommandManager.dispatch({device_id:activeDeviceId,command,value});return pendingCommand;}
++ function executeCommand(command,value){window.pendingCommand=applySettings(command,value);return pendingCommand;}
++ function openCommandErrorModal(result){window.lastControlError=result;}
+  `+section('      // Dynamic Aircon Dropdown Elements','      // Centralized Control Layout Mode Manager')+
++ html.match(/function renderDeviceDropdown\([\s\S]*?\n      \}/)[0]+html.match(/function renderDropdownItems\([\s\S]*?\n      \}/)[0]+
+  section('      function renderControlPanel()','      // Pending command tracking')+
+  section('      function enforceControllerCapabilities(device)','      async function executeCommand(')+
++ 'const applySettings = '+html.match(/async function executeCommand\([\s\S]*?\n      \}/)[0]+';'+
++
+  section('      // Temperature Clickers','      // Remote Layout Buttons')+'\ntrue;');
+  await win.webContents.executeJavaScript("(async()=>{await EcoTrackAirconSystem.syncWithDatabase();const end=Date.now()+5000;while(!AirconProfileManager.getById('AC-UI')){if(Date.now()>end)throw Error('Fixture sync failed');await new Promise(r=>setTimeout(r,20));}renderControlPanel();return true;})()");
+  const checks=[];
+- let result=await win.webContents.executeJavaScript("({name:unitNameEl.textContent,range:tempRangeHelp.textContent,temp:tempValueDisplay.textContent,fans:[...fanButtonsGroup.children].map(b=>b.textContent),hasHelp:!!document.querySelector('.ac-capability-summary'),canAdjust:!tempPlusBtn.disabled})");
+- assert.equal(result.name,'Matrix');assert(result.range.includes('16°C')&&result.range.includes('31°C')&&result.range.includes('0.5°C')&&result.range.includes('unverified'));
+- assert.equal(result.temp,'24.5');assert(result.hasHelp&&result.canAdjust&&!result.fans.includes('turbo'));
++ let result=await win.webContents.executeJavaScript("({name:unitNameEl.textContent,range:tempRangeHelp.textContent,temp:tempValueDisplay.textContent,fans:[...fanButtonsGroup.children].map(b=>b.textContent),hasHelp:!!document.querySelector('.ac-capability-summary'),canAdjust:!tempPlusBtn.disabled,power:masterPowerText.textContent,side:dispCommandedState.textContent,role:document.getElementById('hardwareRoleMessage').textContent})");
++ assert.equal(result.name,'Matrix');assert(result.range.includes('16°C')&&result.range.includes('31°C')&&result.range.includes('0.5°C')&&!result.range.includes('unverified'));
++ assert.equal(result.temp,'24.5');assert(!result.hasHelp&&result.canAdjust&&!result.fans.includes('turbo'));assert.equal(result.power,'ON');assert.equal(result.side,'ON');assert.equal(result.role,'');
+  await win.webContents.executeJavaScript("tempPlusBtn.click();pendingCommand.then(()=>renderControlPanel());true;");
+  await win.webContents.executeJavaScript("pendingCommand");
+  result=await win.webContents.executeJavaScript('fixtureWrites.at(-1)');
+  assert.equal(result.state.temp,25);assert.equal(result.requested_feature,'TEMP');
+- checks.push('Production Control panel preserves custom manufacturer/name, labels unverified features and sends actual half-degree increments.');
++ assert.equal(await win.webContents.executeJavaScript('commandStatusText.textContent'),'✓ Settings saved.');
++ const beforeFailure=result.state.temp;
++ await win.webContents.executeJavaScript('window.fixtureControlFail=true;tempPlusBtn.click();true;');await win.webContents.executeJavaScript('pendingCommand');
++ assert((await win.webContents.executeJavaScript('commandStatusText.textContent')).includes('unavailable'));
++ assert.equal(await win.webContents.executeJavaScript("AirconProfileManager.getById('AC-UI').state.temperature"),beforeFailure);
++ await win.webContents.executeJavaScript('window.fixtureControlFail=false;true;');
++ checks.push('Plain action feedback keeps backend errors visible and does not apply a failed setting.');
++ await win.webContents.executeJavaScript('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
++ fs.mkdirSync(path.join(root,'reports/normal-control-ui'),{recursive:true});fs.writeFileSync(path.join(root,'reports/normal-control-ui/control-desktop.png'),(await win.webContents.capturePage()).toPNG());
++ checks.push('Production Control panel preserves custom manufacturer/name, shows normal control labels and sends actual half-degree increments.');
+  await win.webContents.executeJavaScript(`(async()=>{hardwareFixture[0].last_seen=new Date(Date.now()+2000).toISOString();hardwareFixture[0].latest_ir={protocol:'FUJITSU_AC',remote_model:3,raw_count:260,frame_kind:'full_state',sequence:2,received_at:new Date(Date.now()+2000).toISOString(),state:{power:true,temp:24.25,mode:'cool',fan:'low',turbo:false,source:'ir_receiver'}};await EcoTrackAirconSystem.syncWithDatabase();renderControlPanel();return true;})()`);
+  result=await win.webContents.executeJavaScript("({range:tempRangeHelp.textContent,temp:tempValueDisplay.textContent,turbo:[...specialButtonsGroup.children].some(b=>b.textContent==='Turbo'),fans:[...fanButtonsGroup.children].map(b=>b.textContent)})");
+  assert(result.range.includes('0.25°C'));assert.equal(result.temp,'24.25');assert(result.turbo&&result.fans.includes('quiet'));
+@@ -42,7 +55,8 @@
+  checks.push('Fan mode disables temperature adjustments; Cool presets use their own minimum and display their actual setpoints.');
+  await win.webContents.executeJavaScript(`(async()=>{dbFixture.aircons=[{id:'unknown-unit',asset_tag:'AC-UNKNOWN',name:'Unknown unit',brand:'Custom maker',protocol_name:'UNKNOWN',node_id:'node-ui',controller_node_id:'node-ui',model:'Window'}];hardwareFixture[0].latest_ir={};activeDeviceId='AC-UNKNOWN';await EcoTrackAirconSystem.syncWithDatabase();renderControlPanel();return true;})()`);
+  result=await win.webContents.executeJavaScript("({power:masterPowerBtn.disabled,temp:tempPlusBtn.disabled,modes:modeButtonsGroup.children.length,fans:fanButtonsGroup.children.length,range:tempRangeHelp.textContent,protocol:AirconProfileManager.getById('AC-UNKNOWN').protocol_name})");
+- assert(result.power&&result.temp&&result.modes===0&&result.fans===0);assert.equal(result.protocol,'UNKNOWN');assert(result.range.includes('unknown'));
++ assert(result.power&&result.temp&&result.modes===0&&result.fans===0);assert.equal(result.protocol,'UNKNOWN');assert.equal(result.range,'—');
++ assert.equal(await win.webContents.executeJavaScript('masterPowerText.textContent'),'—');
+  checks.push('A different unknown AC on the same controller does not inherit the previous profile or fabricate controls.');
+  const dashboard=read('public/dashboard.html'),cut=(a,b)=>dashboard.slice(dashboard.indexOf(a),dashboard.indexOf(b,dashboard.indexOf(a)));
+  await win.webContents.executeJavaScript(cut('      function updateSingleCardDom(','      function wireCardListeners(')+cut('      function getDashboardPowerState(','      function renderDashboard(')+cut('      function wireCardListeners(','      function getDashboardPowerState(')+'\ntrue;');
+--- before/scripts/test_page_connections.js
++++ after/scripts/test_page_connections.js
+@@ -257,9 +257,9 @@
+     assert.equal(label.remoteObserved,true);assert.equal(label.confirmed,false);assert.equal(label.power,null);
+   }
+   await vm.runInContext('loadSchedulerWithSWR(true)',apps[2].context);
+-  assert.equal(vm.runInContext('getSchedulerTargetTemperature(savedRooms.__unassigned_controllers__.nodes[0])',apps[2].context),'22 °C (remote)');
+-  assert.equal(vm.runInContext('getSchedulerControlMode(savedRooms.__unassigned_controllers__.nodes[0])',apps[2].context),'DRY / HIGH FAN (remote)');
+-  assert.equal(vm.runInContext('getSchedulerPowerMode(savedRooms.__unassigned_controllers__.nodes[0])',apps[2].context),'REMOTE ON');
++  assert.equal(vm.runInContext('getSchedulerTargetTemperature(savedRooms.__unassigned_controllers__.nodes[0])',apps[2].context),'22 °C');
++  assert.equal(vm.runInContext('getSchedulerControlMode(savedRooms.__unassigned_controllers__.nodes[0])',apps[2].context),'DRY / HIGH FAN');
++  assert.equal(vm.runInContext('getSchedulerPowerMode(savedRooms.__unassigned_controllers__.nodes[0])',apps[2].context),'ON');
+   checks.push('Decoded remote temperature, mode, fan and power agree in all six engines and Schedules while remaining observations, with transmission disabled.');
+   const nodesHtml=read('public/nodes.html');
+   vm.runInContext(nodesHtml.slice(nodesHtml.indexOf('      function controllerIrSummary('),nodesHtml.indexOf('      function renderNodes(')),apps[4].context);
+@@ -288,15 +288,15 @@
+     assert.equal(profile.state.power,false);assert.equal(profile.state.temperature,24);
+     assert.equal(app.window.EcoTrackAirconState.describeAirconState(profile.control_snapshot).label,'REMOTE OFF');
+   }
+-  assert(fields.get('.ac-status-badge').innerHTML.includes('Remote OFF'));
++  assert(fields.get('.ac-status-badge').innerHTML.includes('OFF'));
+   assert.equal(fields.get('.power-toggle-btn').getAttribute('data-current-power'),'0');
+   await vm.runInContext('loadSchedulerWithSWR(true)',apps[2].context);
+-  assert.equal(vm.runInContext('getSchedulerPowerMode(savedRooms.__unassigned_controllers__.nodes[0])',apps[2].context),'REMOTE OFF');
++  assert.equal(vm.runInContext('getSchedulerPowerMode(savedRooms.__unassigned_controllers__.nodes[0])',apps[2].context),'OFF');
+   checks.push('A TCL112AC OFF cloud event changes all six page states, the dashboard card/toggle and Schedule power without a reload.');
+   db.ecotrack_device_state[0].latest_ir={...offFrame,sequence:3,received_at:onTime,state:{power:true,temp:25,mode:'fan',fan:'low'}};
+   const writesBeforeRefresh=writes.length,readsBeforeRefresh=reads.length;
+   [...apps[0].intervals.values()].find(timer=>timer.ms===5000).fn();await flush();
+-  assert.equal(manager.getById(asset).state.power,true);assert(fields.get('.ac-status-badge').innerHTML.includes('Remote ON'));
++  assert.equal(manager.getById(asset).state.power,true);assert(fields.get('.ac-status-badge').innerHTML.includes('ON'));
+   assert.equal(String(fields.get('.target-temp-val').textContent),'25');
+   assert.equal(writes.length,writesBeforeRefresh);assert(reads.length>readsBeforeRefresh);
+   checks.push('With real-time events missing, the timer imports a later remote ON and new setpoint into the open card using reads only.');
+@@ -315,9 +315,9 @@
+   db.aircons[0].desired_state={power:'off',temp:25,mode:'cool',fan:'auto'};db.aircons[0].commanded_at=new Date(Date.now()+8000).toISOString();db.aircons[0].command_status='queued';
+   db.ecotrack_device_state[0].latest_ir={...offFrame,sequence:3,received_at:onTime,state:{power:true,temp:25,mode:'fan',fan:'low'}};
+   [...apps[0].intervals.values()].find(timer=>timer.ms===5000).fn();await flush();
+-  assert.equal(manager.getById(asset).state.power,false);assert(fields.get('.ac-status-badge').innerHTML.includes('OFF requested'));
++  assert.equal(manager.getById(asset).state.power,false);assert(fields.get('.ac-status-badge').innerHTML.includes('OFF'));
+   db.aircons[0].command_status='transmitted';[...apps[0].intervals.values()].find(timer=>timer.ms===5000).fn();await flush();
+-  assert(fields.get('.ac-status-badge').innerHTML.includes('OFF sent'));
++  assert(fields.get('.ac-status-badge').innerHTML.includes('OFF'));
+   checks.push('A newer UI OFF request replaces an older remote ON; the open card advances from requested to sent on the ESP32 receipt.');
+   const helper=apps[0].window.EcoTrackAirconState;
+   const stableSnapshot=copy(manager.getById(asset).control_snapshot);
+@@ -328,13 +328,13 @@
+   const tclOff={protocol:'TCL112AC',frame_kind:'full_state',raw_data:'3000,1650,500',raw_count:227,sequence:40,hex:'0x23CB2601002003074000000080CB',captured_at_epoch_ms:Date.now()+13000,received_at:new Date(Date.now()+13000).toISOString(),state:{power:false,temp:24,mode:'cool',fan:'auto'}};
+   db.ecotrack_device_state[0].latest_ir=tclOff;
+   [...apps[0].intervals.values()].find(timer=>timer.ms===5000).fn();await flush();
+-  assert.equal(manager.getById(asset).state.power,false);assert(fields.get('.ac-status-badge').innerHTML.includes('Remote OFF'));
++  assert.equal(manager.getById(asset).state.power,false);assert(fields.get('.ac-status-badge').innerHTML.includes('OFF'));
+   const actualOffTime=manager.getById(asset).control_snapshot.observed_remote_at;
+   db.ecotrack_device_state[0].latest_ir={protocol:'TCL112AC',frame_kind:'settings_only',raw_count:227,raw_data:'3000,1650,500',sequence:41,received_at:new Date(Date.now()+14000).toISOString(),state:{power:true,temp:23,mode:'fan',fan:'low'},last_decoded:tclOff};
+   [...apps[0].intervals.values()].find(timer=>timer.ms===5000).fn();await flush();
+   for(const app of apps)assert.equal(app.system.AirconProfileManager.getById(asset).state.power,false);
+   assert.equal(manager.getById(asset).control_snapshot.observed_remote_at,actualOffTime);
+-  assert(fields.get('.ac-status-badge').innerHTML.includes('Remote OFF'));
++  assert(fields.get('.ac-status-badge').innerHTML.includes('OFF'));
+   checks.push('A full TCL OFF stays OFF across all six pages when an auxiliary packet carries the previous ON fields; auxiliary power is never a fresh reading.');
+   const delayed=helper.remoteObservation({...tclOff,captured_at_epoch_ms:Date.parse('2026-10-09T15:00:00Z'),received_at:'2026-10-09T15:00:10Z'},'2026-10-09T15:00:10Z');
+   assert.equal(delayed.observed_remote_at,'2026-10-09T15:00:00.000Z');
+--- before/public/js/ac-capability-verification.js
++++ after/public/js/ac-capability-verification.js
+@@ -1,97 +0,0 @@
+-(function(root){
+- 'use strict';
+- let dialog=null;
+- const labels={power:'Power',temperature:'Temperature',turbo:'Turbo',quiet:'Quiet',eco:'Eco',swing_vertical:'Vertical swing',swing_horizontal:'Horizontal swing',sleep:'Sleep',display:'Display',filter:'Filter',clean:'Clean',beep:'Beep',timer:'Timer',i_feel:'I Feel'};
+- function element(tag,text,className){const el=document.createElement(tag);if(text!=null)el.textContent=text;if(className)el.className=className;return el;}
+- function field(label,el,parent){const row=element('label',null,'ac-verify-field');row.append(element('span',label),el);parent.append(row);return el;}
+- function summary(device){
+-  const caps=root.EcoTrackAirconSystem.CapabilityEngine.getCapabilities(device);
+-  if(!caps.can_transmit)return caps.protocol_name==='UNKNOWN'?'Protocol not identified · raw learning available':'Choose the exact remote model before transmitting.';
+-  const verified=Object.values(caps.feature_status).filter(f=>f.status.startsWith('verified_')).length;
+-  return caps.protocol_name+(caps.model_name?' · '+caps.model_name:'')+' · '+verified+' physically verified feature results. Other available controls are library supported and unverified.';
+- }
+- function mount(device,anchor){
+-  if(!anchor)return;
+-  let panel=anchor.parentElement.querySelector('.ac-capability-summary');
+-  if(!panel){panel=element('div',null,'ac-capability-summary');const note=element('p');note.setAttribute('role','status');const button=element('button','Verify AC features');button.type='button';panel.append(note,button);anchor.insertAdjacentElement('afterend',panel);}
+-  panel.querySelector('p').textContent=summary(device);
+-  const button=panel.querySelector('button');button.onclick=()=>open(device.device_id);
+-  button.disabled=!device.aircon_id;
+- }
+- function annotate(button,status){
+-  if(!status)return;
+-  button.dataset.capabilityStatus=status.status;
+-  button.title=(button.title?button.title+' · ':'')+(status.status==='verified_supported'?'Physically verified':status.status==='verified_unsupported'?'Physically unsupported':status.status==='library_unverified'?'Library supported · physical operation unverified':'Capability unknown');
+- }
+- function open(deviceId){
+-  const system=root.EcoTrackAirconSystem,device=system.AirconProfileManager.getById(deviceId);
+-  if(!device)return;
+-  if(dialog?.open){dialog.focus();return;}
+-  const caps=system.AcCapabilityRegistry.resolve(device),previous=device.capability_profile||{},revision=previous.revision||0;
+-  dialog=element('dialog',null,'ac-verify-dialog');dialog.setAttribute('aria-labelledby','acVerifyTitle');
+-  const heading=element('h2','Verify AC features');heading.id='acVerifyTitle';
+-  const intro=element('p','Test one feature at a time and watch the physical AC. A queued or transmitted command is not physical confirmation. Results are optional and can be corrected later.','ac-verify-help');
+-  const form=element('form'),status=element('p',null,'ac-verify-status');status.setAttribute('role','status');status.setAttribute('aria-live','polite');
+-  const identity=element('fieldset'),legend=element('legend',device.name+' · '+device.brand+' · '+caps.protocol);identity.append(legend);
+-  const models=element('select');models.append(new Option(caps.model_name?'Decoder / existing: '+caps.model_name:'Unknown / choose the exact model',caps.remote_model||''));
+-  for(const [id,name] of Object.entries(caps.models||{}))if(Number(id)!==caps.remote_model)models.append(new Option(name,id));
+-  field('Remote model',models,identity);models.value=String(caps.remote_model||'');
+-  const modelConfirm=element('input');modelConfirm.type='checkbox';modelConfirm.checked=previous.model_verified===true;
+-  field('I checked the remote’s printed model',modelConfirm,identity);
+-  const physical=element('input');physical.maxLength=100;physical.value=previous.ac_model||'';field('Physical AC model (optional)',physical,identity);
+-  form.append(identity);
+-  const results=element('fieldset');results.append(element('legend','Physical test results'));
+-  const selections={},optionSelections={mode:{},fan:{}};
+-  const library=system.AcCapabilityRegistry.resolve({...device,capability_profile:{},control_snapshot:{observed_remote_protocol:caps.protocol,observed_remote_model:caps.remote_model}});
+-  function resultRow(label,result,feature,kind,option){
+-    const row=element('div',null,'ac-verify-result'),select=element('select');
+-    for(const [value,label] of [['','Not physically verified'],['verified_supported','Works on this AC'],['verified_unsupported','Does not work on this AC']])select.append(new Option(label,value));
+-    select.value=['verified_supported','verified_unsupported'].includes(result?.status)?result.status:'';
+-    field(label,select,row);
+-    if(feature && feature!=='temperature'){
+-      const test=element('button','Test ON'),off=element('button','Test OFF');
+-      for(const [btn,value] of [[test,true],[off,false]]){btn.type='button';btn.disabled=!caps.features[feature]||!caps.can_transmit;btn.addEventListener('click',async()=>{
+-        btn.disabled=true;status.textContent='Sending test request…';
+-        try{const res=await system.CommandManager.dispatch({device_id:deviceId,command:feature==='swing_vertical'?'SWING':feature.toUpperCase(),value});status.textContent=res.success?res.message+' Watch the AC, then select a physical result.':res.message;}
+-        catch(error){status.textContent=error.message;}finally{btn.disabled=false;}
+-      });}
+-      row.append(test,off);
+-    }else if(kind){
+-      const btn=element('button','Test '+option);btn.type='button';btn.disabled=!caps.can_transmit;
+-      btn.addEventListener('click',async()=>{btn.disabled=true;try{const res=await system.CommandManager.dispatch({device_id:deviceId,command:kind.toUpperCase(),value:option});status.textContent=res.message+' Record a result only after watching the AC.';}catch(error){status.textContent=error.message;}finally{btn.disabled=false;}});row.append(btn);
+-    }
+-    const note=element('small',result?.status==='verified_supported'?'Physically verified':result?.status==='verified_unsupported'?'Physically unsupported':result?.status==='library_unverified'?'Library supported · unverified':'Unknown / encoder unavailable');
+-    row.append(note);results.append(row);return select;
+-  }
+-  for(const feature of system.AcCapabilityRegistry.data.features)selections[feature]=resultRow(labels[feature]||feature,caps.feature_status[feature],feature);
+-  for(const [kind,options] of [['mode',library.modes],['fan',Object.keys(library.fan_map)]])
+-    for(const option of options)optionSelections[kind][option]=resultRow(kind.toUpperCase()+' · '+option,caps.option_status[kind]?.[option],null,kind,option);
+-  form.append(results);
+-  const temperatures=element('fieldset');temperatures.append(element('legend','Verified temperature constraints'));
+-  const min=element('input'),max=element('input'),step=element('input'),rangeConfirm=element('input');rangeConfirm.type='checkbox';rangeConfirm.checked=previous.temperature?.status==='verified_supported';
+-  for(const [el,key,label] of [[min,'min','Minimum °C'],[max,'max','Maximum °C'],[step,'step','Increment °C']]){
+-    el.type='number';el.step=caps.temperature?.step||'any';el.value=previous.temperature?.[key]??caps.temperature?.[key]??'';el.disabled=!caps.temperature;
+-    field(label,el,temperatures);
+-  }
+-  field('I physically checked this range and increment',rangeConfirm,temperatures);form.append(temperatures);
+-  const footer=element('div',null,'ac-verify-footer'),cancel=element('button','Close'),save=element('button','Save verified results');
+-  cancel.type='button';cancel.onclick=()=>dialog.close();save.type='submit';footer.append(cancel,save);form.append(status,footer);
+-  form.addEventListener('submit',async event=>{
+-    event.preventDefault();
+-    const profile={protocol:caps.protocol,remote_model:models.value?Number(models.value):null,model_verified:modelConfirm.checked,ac_model:physical.value.trim(),features:{},options:{mode:{},fan:{}}};
+-    for(const [key,select] of Object.entries(selections))if(select.value)profile.features[key]={status:select.value};
+-    for(const [kind,values] of Object.entries(optionSelections))for(const [name,select] of Object.entries(values))if(select.value)profile.options[kind][name]={status:select.value};
+-    if(rangeConfirm.checked)profile.temperature={status:'verified_supported',min:Number(min.value),max:Number(max.value),step:Number(step.value)};
+-    if(rangeConfirm.checked&&(!min.value||!max.value||!step.value)){status.textContent='Enter the verified minimum, maximum and step.';return;}
+-    save.disabled=true;cancel.disabled=true;status.textContent='Saving verified results to Supabase…';
+-    try{await system.CapabilityEngine.verify(deviceId,profile,revision);status.textContent='Verified results saved.';root.EcoToast?.show('AC verification results saved.','success');dialog.close();}
+-    catch(error){status.textContent=error.message||'Results were not saved.';}
+-    finally{save.disabled=false;cancel.disabled=false;}
+-  });
+-  dialog.append(heading,intro,form);document.body.append(dialog);dialog.addEventListener('close',()=>{dialog.remove();dialog=null;},{once:true});dialog.showModal();
+- }
+- const style=element('style',`
+- .ac-capability-summary{font-size:11px;line-height:1.5;margin-top:8px;color:#64748b;display:flex;flex-wrap:wrap;align-items:center;gap:8px}.ac-capability-summary p{flex:1;min-width:160px}.ac-capability-summary button,.ac-verify-dialog button{border:1px solid #14b8a6;border-radius:8px;padding:6px 10px;font-weight:600;color:#0f766e;background:#f0fdfa;cursor:pointer}.ac-verify-dialog{border:1px solid #14b8a6;border-radius:20px;padding:24px;width:min(700px,calc(100vw - 32px));max-height:90vh;overflow-y:auto;background:#fff;color:#18392b}.ac-verify-dialog::backdrop{background:#020617ad;backdrop-filter:blur(4px)}.ac-verify-dialog h2{font-size:20px;font-weight:700}.ac-verify-help,.ac-verify-status{font-size:12px;line-height:1.6;margin:8px 0 16px}.ac-verify-dialog fieldset{border:1px solid #e2e8f0;border-radius:12px;padding:12px;margin:12px 0}.ac-verify-dialog legend{font-weight:600;font-size:12px}.ac-verify-field{display:grid;grid-template-columns:minmax(150px,1fr) minmax(100px,1fr);align-items:center;gap:10px;font-size:12px;margin:8px 0}.ac-verify-dialog select,.ac-verify-dialog input:not([type=checkbox]){background:#f8fafc;color:inherit;border:1px solid #cbd5e1;border-radius:8px;padding:7px;min-width:0;width:100%}.ac-verify-result{padding:8px 0;border-bottom:1px solid #e2e8f0}.ac-verify-result button{font-size:11px;margin:0 6px 6px 0}.ac-verify-result small{display:block;font-size:10px;color:#64748b}.ac-verify-footer{display:flex;justify-content:flex-end;gap:10px;position:sticky;bottom:-24px;background:inherit;padding:12px 0}.ac-verify-dialog button:disabled{opacity:.45;cursor:not-allowed}.dark .ac-verify-dialog{background:#0c1427;color:#e2e8f0}.dark .ac-verify-dialog input,.dark .ac-verify-dialog select{background:#0f172a;border-color:#334155}.dark .ac-verify-dialog button{background:#134e4a;color:#99f6e4}.dark .ac-verify-result,.dark .ac-verify-dialog fieldset{border-color:#334155}@media(max-width:500px){.ac-verify-field{grid-template-columns:1fr}.ac-verify-dialog{padding:16px}}
+- `);document.head.append(style);
+- root.EcoTrackCapabilityVerification={open,mount,annotate,summary};
+-})(window);
+--- before/public/js/aircon-state.js
++++ after/public/js/aircon-state.js
+@@ -6,6 +6,7 @@
+ exports.describeAirconState = describeAirconState;
+ exports.remoteObservation = remoteObservation;
+ exports.selectSettings = selectSettings;
++exports.displaySettings = displaySettings;
+ function parseAirconSnapshot(value) {
+     if (typeof value === 'string') {
+         try {
+@@ -104,6 +105,21 @@
+     return {state:keys.length?state:null,source:sources.power||sources.mode||sources.temp||sources.fan||sources[keys[0]]||'unknown',field_sources:sources};
+ }
+ 
++function displaySettings(value) {
++    const state=selectSettings(value).state;
++    const power=powerValue(state?.power);
++    const mode=String(state?.mode||'').trim().toLowerCase();
++    const fan=String(state?.fan||'').trim().toLowerCase();
++    const modeLabel=['cool','dry','fan','auto','heat'].includes(mode)?mode.toUpperCase():'—';
++    const fanLabel=['low','medium','high','max','auto','quiet','silent','turbo'].includes(fan)?fan.toUpperCase():'—';
++    const powerLabel=power===true?'ON':power===false?'OFF':'—';
++    const temperature=Number.isFinite(state?.temp)?state.temp:null;
++    const summary=[powerLabel==='—'?null:powerLabel,modeLabel==='—'?null:modeLabel,
++        temperature===null?null:temperature+'°C',fanLabel==='—'?null:fanLabel+' FAN',
++        state?.turbo===true?'TURBO':null].filter(Boolean).join(' · ')||'—';
++    return {state,power,powerLabel,modeLabel,fanLabel,temperature,summary};
++}
++
+ /** Commands describe selected settings; only reported feedback describes operation. */
+ function describeAirconState(value) {
+     const snapshot = parseAirconSnapshot(value);
+--- before/public/js/aircon-system.js
++++ after/public/js/aircon-system.js
+@@ -6,6 +6,7 @@
+ exports.describeAirconState = describeAirconState;
+ exports.remoteObservation = remoteObservation;
+ exports.selectSettings = selectSettings;
++exports.displaySettings = displaySettings;
+ function parseAirconSnapshot(value) {
+     if (typeof value === 'string') {
+         try {
+@@ -102,6 +103,21 @@
+     }
+     const keys=Object.keys(state);
+     return {state:keys.length?state:null,source:sources.power||sources.mode||sources.temp||sources.fan||sources[keys[0]]||'unknown',field_sources:sources};
++}
++
++function displaySettings(value) {
++    const state=selectSettings(value).state;
++    const power=powerValue(state?.power);
++    const mode=String(state?.mode||'').trim().toLowerCase();
++    const fan=String(state?.fan||'').trim().toLowerCase();
++    const modeLabel=['cool','dry','fan','auto','heat'].includes(mode)?mode.toUpperCase():'—';
++    const fanLabel=['low','medium','high','max','auto','quiet','silent','turbo'].includes(fan)?fan.toUpperCase():'—';
++    const powerLabel=power===true?'ON':power===false?'OFF':'—';
++    const temperature=Number.isFinite(state?.temp)?state.temp:null;
++    const summary=[powerLabel==='—'?null:powerLabel,modeLabel==='—'?null:modeLabel,
++        temperature===null?null:temperature+'°C',fanLabel==='—'?null:fanLabel+' FAN',
++        state?.turbo===true?'TURBO':null].filter(Boolean).join(' · ')||'—';
++    return {state,power,powerLabel,modeLabel,fanLabel,temperature,summary};
+ }
+ 
+ /** Commands describe selected settings; only reported feedback describes operation. */
+--- before/public/js/scheduler.js
++++ after/public/js/scheduler.js
+@@ -72,24 +72,22 @@
+   return window.EcoTrackAirconState?.selectSettings(getSchedulerControlSnapshot(node)) || {state:null,source:'unknown'};
+ }
+ function getSchedulerTargetTemperature(node) {
+-  const {state,source} = schedulerSelectedSettings(node);
+-  return Number.isFinite(state?.temp) ? state.temp + ' °C' + (source === 'remote' ? ' (remote)' : '') : 'No IR setpoint';
++  const {state}=schedulerSelectedSettings(node);
++  return Number.isFinite(state?.temp)?state.temp+' °C':'—';
+ }
+ function getSchedulerPowerMode(node) {
+-  const {state,source} = schedulerSelectedSettings(node);
+-  const power = state?.power === true || state?.power === 'on' ? 'ON' : state?.power === false || state?.power === 'off' ? 'OFF' : null;
+-  if (!power) return 'Unknown';
+-  return source === 'remote' ? 'REMOTE ' + power : source === 'requested' ? power + ' REQUESTED' : source === 'configured' ? power + ' SETTING' : power;
++  const {state}=schedulerSelectedSettings(node);
++  return state?.power===true||state?.power==='on'?'ON':state?.power===false||state?.power==='off'?'OFF':'—';
+ }
+ function getSchedulerControlMode(node) {
+-  const {state,source} = schedulerSelectedSettings(node);
+-  const mode = String(state?.mode || '').trim().toLowerCase();
+-  const fan = String(state?.fan || '').trim().toLowerCase();
+-  if (!['cool','dry','fan','auto','heat'].includes(mode)) return 'No IR mode';
+-  const fanLabel = ['low','medium','high','max','auto','quiet','silent','turbo'].includes(fan) ? fan.toUpperCase() + ' FAN' : 'FAN UNKNOWN';
+-  return mode.toUpperCase() + ' / ' + fanLabel + (state.turbo === true ? ' / TURBO' : '') + (source === 'remote' ? ' (remote)' : '');
+-}
+-
++  const {state}=schedulerSelectedSettings(node);
++  const mode=String(state?.mode||'').trim().toLowerCase(),fan=String(state?.fan||'').trim().toLowerCase();
++  const parts=[];
++  if(['cool','dry','fan','auto','heat'].includes(mode))parts.push(mode.toUpperCase());
++  if(['low','medium','high','max','auto','quiet','silent','turbo'].includes(fan))parts.push(fan.toUpperCase()+' FAN');
++  if(state?.turbo===true)parts.push('TURBO');
++  return parts.join(' / ')||'—';
++}
+ 
+ function refreshSchedulerHardware(payload) {
+   const cached = window.EcoTrackAirconSystem?.NodeService?.getDevices?.() || [];

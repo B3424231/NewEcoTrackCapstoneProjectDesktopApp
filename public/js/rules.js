@@ -1,7 +1,20 @@
 // ===== RULES ENGINE LOGIC =====
 
+// Auto-purge stale violation history on initialization (requested reset)
+try {
+  if (!localStorage.getItem('ecoTrack_violationHistoryCleaned_v1')) {
+    if (typeof clearStoredViolationAuditHistory === 'function') {
+      clearStoredViolationAuditHistory();
+    } else {
+      localStorage.removeItem('ecoTrack_violation_audit_history');
+      localStorage.removeItem('ecoTrack_violationAuditHistory');
+    }
+    localStorage.setItem('ecoTrack_violationHistoryCleaned_v1', 'true');
+  }
+} catch (_) {}
+
 // Initialize Database Clients
-const sb = window.supabaseClient || window.sb;
+let sb = window.supabaseClient || window.sb;
 const pb = window.pb || (typeof PocketBase === 'function' ? new PocketBase() : null);
 
 let rules = [];
@@ -20,7 +33,11 @@ let currentRankingsData = { rooms: [], floors: [], buildings: [] };
 let currentRankingTab = 'rooms';
 let currentViolationHistory = [];
 let violationHistoryCurrentPage = 1;
-const violationHistoryPageSize = 10;
+const violationHistoryPageSize = 20;
+let rulesCurrentPage = 1;
+const RULES_PAGE_SIZE = 20;
+let currentRankingPage = 1;
+const RANKING_PAGE_SIZE = 20;
 let violationHistorySearchQuery = '';
 let violationHistorySeverityFilter = 'all';
 
@@ -47,12 +64,16 @@ function formatTime12h(timeStr) {
 }
 
 async function initializeRulesPage() {
+  if (!sb) sb = window.supabaseClient || window.sb;
   // Load rooms and nodes
   await loadRoomsAndNodes();
   
   // Setup event listeners
   const viewActiveRulesBtn = document.getElementById('viewActiveRulesBtn');
   if (viewActiveRulesBtn) viewActiveRulesBtn.addEventListener('click', openActiveRulesModal);
+
+  const headerAddRuleBtn = document.getElementById('headerAddRuleBtn');
+  if (headerAddRuleBtn) headerAddRuleBtn.addEventListener('click', openRuleModal);
 
   const closeActiveRulesModalEl = document.getElementById('closeActiveRulesModal');
   if (closeActiveRulesModalEl) closeActiveRulesModalEl.addEventListener('click', closeActiveRulesModal);
@@ -92,6 +113,9 @@ async function initializeRulesPage() {
 
   const clearRulesBtn = document.getElementById('clearRulesBtn');
   if (clearRulesBtn) clearRulesBtn.addEventListener('click', requestClearAllRules);
+
+  const deactivateAllRulesBtn = document.getElementById('deactivateAllRulesBtn');
+  if (deactivateAllRulesBtn) deactivateAllRulesBtn.addEventListener('click', deactivateAllRules);
   
   // Filter buttons setup
   document.querySelectorAll('.ruleFilterBtn').forEach(btn => {
@@ -101,9 +125,28 @@ async function initializeRulesPage() {
       });
       e.target.className = 'ruleFilterBtn px-4 py-1.5 bg-[#18392B] dark:bg-[#10b981] text-white border border-[#18392B] dark:border-[#10b981]/20 rounded-[10px] text-xs font-bold transition-colors cursor-pointer';
       currentFilter = e.target.dataset.filter || 'all';
+      rulesCurrentPage = 1;
       displayRules();
     });
   });
+
+  // Setup Active Rules Modal Pagination Buttons
+  const rPrevBtn = document.getElementById('rulesPrevPageBtn');
+  if (rPrevBtn) {
+    rPrevBtn.addEventListener('click', () => {
+      if (rulesCurrentPage > 1) {
+        rulesCurrentPage--;
+        displayRules();
+      }
+    });
+  }
+  const rNextBtn = document.getElementById('rulesNextPageBtn');
+  if (rNextBtn) {
+    rNextBtn.addEventListener('click', () => {
+      rulesCurrentPage++;
+      displayRules();
+    });
+  }
   
   // Close modal when clicking outside
   const ruleModal = document.getElementById('ruleModal');
@@ -148,18 +191,21 @@ async function initializeRulesPage() {
   if (tabRooms) {
     tabRooms.addEventListener('click', () => {
       currentRankingTab = 'rooms';
+      currentRankingPage = 1;
       renderViolationRankings();
     });
   }
   if (tabFloors) {
     tabFloors.addEventListener('click', () => {
       currentRankingTab = 'floors';
+      currentRankingPage = 1;
       renderViolationRankings();
     });
   }
   if (tabBuildings) {
     tabBuildings.addEventListener('click', () => {
       currentRankingTab = 'buildings';
+      currentRankingPage = 1;
       renderViolationRankings();
     });
   }
@@ -218,8 +264,53 @@ async function initializeRulesPage() {
     });
   }
 
+  // Setup Clear Violation History Modal & Button
+  const clearVHistBtn = document.getElementById('clearViolationHistoryBtn');
+  if (clearVHistBtn) {
+    clearVHistBtn.addEventListener('click', showClearViolationHistoryModal);
+  }
+
+  const cancelClearVHistBtn = document.getElementById('cancelClearViolationHistoryBtn');
+  if (cancelClearVHistBtn) {
+    cancelClearVHistBtn.addEventListener('click', hideClearViolationHistoryModal);
+  }
+
+  const confirmClearVHistBtn = document.getElementById('confirmClearViolationHistoryBtn');
+  if (confirmClearVHistBtn) {
+    confirmClearVHistBtn.addEventListener('click', executeClearViolationHistory);
+  }
+
+  const clearVModal = document.getElementById('confirmClearViolationHistoryModal');
+  if (clearVModal) {
+    clearVModal.addEventListener('click', (e) => {
+      if (e.target.id === 'confirmClearViolationHistoryModal') {
+        hideClearViolationHistoryModal();
+      }
+    });
+  }
+
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+      const confirmDeleteModal = document.getElementById('confirmDeleteModal');
+      if (confirmDeleteModal && !confirmDeleteModal.classList.contains('hidden') && confirmDeleteModal.style.display !== 'none') {
+        cancelDelete();
+        return;
+      }
+      const clearModal = document.getElementById('confirmClearViolationHistoryModal');
+      if (clearModal && !clearModal.classList.contains('hidden') && clearModal.style.display !== 'none') {
+        hideClearViolationHistoryModal();
+        return;
+      }
+      const ruleModal = document.getElementById('ruleModal');
+      if (ruleModal && ruleModal.style.display !== 'none') {
+        closeRuleModal();
+        return;
+      }
+      const activeRulesModal = document.getElementById('activeRulesModal');
+      if (activeRulesModal && activeRulesModal.style.display !== 'none') {
+        closeActiveRulesModal();
+        return;
+      }
       closeViolationDetailModal();
     }
   });
@@ -237,12 +328,54 @@ async function initializeRulesPage() {
     });
   }, true);
 
-  // Load rules from DB
-  await loadRulesFromDB();
-  displayRules();
+  // Data fetching via EcoDataBus with Stale-While-Revalidate caching
+  async function loadRulesWithSWR(forceRefresh = false) {
+    if (window.EcoDataBus) {
+      if (!window.EcoDataBus.getCached('rules:data') && window.EcoTrackSkeletons) {
+        window.EcoTrackSkeletons.renderTableSkeleton('rulesTableBody', { rows: 5, cols: 9, colWidths: ['w-12', 'w-36', 'w-24', 'w-28', 'w-20', 'w-24', 'w-24', 'w-20', 'w-20'] });
+        window.EcoTrackSkeletons.renderTableSkeleton('violationAuditTableBody', { rows: 5, cols: 7, colWidths: ['w-16', 'w-28', 'w-24', 'w-48', 'w-24', 'w-20', 'w-24'] });
+      }
 
-  // Initialize and render Rule Compliance Benchmarking
-  await initRuleComplianceBenchmarking();
+      await window.EcoDataBus.query('rules:data', async () => {
+        await loadRulesFromDB();
+        return rules;
+      }, { forceRefresh });
+    } else {
+      await loadRulesFromDB();
+      displayRules();
+      await initRuleComplianceBenchmarking();
+    }
+  }
+
+  if (window.EcoDataBus) {
+    window.EcoDataBus.onQuery('rules:data', {
+      onStart: ({ isBackground }) => {
+        if (!isBackground && window.EcoTrackSkeletons) {
+          window.EcoTrackSkeletons.renderTableSkeleton('rulesTableBody', { rows: 5, cols: 9, colWidths: ['w-12', 'w-36', 'w-24', 'w-28', 'w-20', 'w-24', 'w-24', 'w-20', 'w-20'] });
+          window.EcoTrackSkeletons.renderTableSkeleton('violationAuditTableBody', { rows: 5, cols: 7, colWidths: ['w-16', 'w-28', 'w-24', 'w-48', 'w-24', 'w-20', 'w-24'] });
+        }
+      },
+      onSuccess: async (payload) => {
+        if (payload && Array.isArray(payload.data)) {
+          rules = payload.data;
+        }
+        displayRules();
+        await initRuleComplianceBenchmarking();
+        const rBody = document.getElementById('rulesTableBody');
+        const vBody = document.getElementById('violationAuditTableBody');
+        if (rBody) { rBody.classList.remove('eco-content-fade-in'); void rBody.offsetWidth; rBody.classList.add('eco-content-fade-in'); }
+        if (vBody) { vBody.classList.remove('eco-content-fade-in'); void vBody.offsetWidth; vBody.classList.add('eco-content-fade-in'); }
+      }
+    });
+
+    window.EcoDataBus.on('data:invalidated', (p) => {
+      if (p && p.key === 'rules:data') {
+        loadRulesWithSWR(true);
+      }
+    });
+  }
+
+  await loadRulesWithSWR();
 
   // Background polling for benchmark stats updates
   if (!window._ruleBenchmarkInterval) {
@@ -343,7 +476,23 @@ async function loadRoomsAndNodes() {
     let buildingRecords = [];
     let nodeRecords = [];
 
-    if (sb) {
+    let ipcLoaded = false;
+    if (window.electron && typeof window.electron.invoke === 'function') {
+      try {
+        const sRes = await window.electron.invoke('scheduler-fetch-data');
+        if (sRes && sRes.success) {
+          roomRecords = sRes.rooms || [];
+          floorRecords = sRes.floors || [];
+          buildingRecords = sRes.buildings || [];
+          nodeRecords = sRes.nodes || [];
+          ipcLoaded = true;
+        }
+      } catch (ipcErr) {
+        console.warn('IPC scheduler-fetch-data error in loadRoomsAndNodes:', ipcErr);
+      }
+    }
+
+    if (!ipcLoaded && sb) {
       const [rRes, fRes, bRes, nRes] = await Promise.all([
         sb.from('rooms').select('*').order('created', { ascending: false }),
         sb.from('floors').select('*').order('created'),
@@ -370,6 +519,12 @@ async function loadRoomsAndNodes() {
     });
     
     roomRecords.forEach(record => {
+      // Exclude any anomalous records or entries matching hardware nodes rather than physical rooms
+      const normRecordName = (record.name || '').trim().toLowerCase();
+      if (!record.id || !record.name || normRecordName.startsWith('node-') || String(record.id).startsWith('node_')) {
+        return;
+      }
+
       const roomNodes = nodeRecords
         .filter(n => n.room_id === record.id)
         .map(n => ({
@@ -404,11 +559,14 @@ async function loadRoomsAndNodes() {
       };
       
       roomNodes.forEach(node => {
-        nodes[node.id] = {
+        const nodeObj = {
           ...node,
           floorName: floorName,
           buildingName: buildingName
         };
+        nodes[node.id] = nodeObj;
+        if (node.name) nodes[node.name] = nodeObj;
+        if (node.pb_id) nodes[node.pb_id] = nodeObj;
       });
     });
   } catch (error) {
@@ -416,12 +574,40 @@ async function loadRoomsAndNodes() {
   }
 }
 
+function getRoom(idOrName) {
+  if (!idOrName) return null;
+  const key = String(idOrName).trim();
+  if (rooms[key]) return rooms[key];
+  const lower = key.toLowerCase();
+  for (const rId in rooms) {
+    const r = rooms[rId];
+    if (r && r.name && r.name.toLowerCase() === lower) {
+      return r;
+    }
+  }
+  return null;
+}
+
 async function loadRulesFromDB() {
   try {
     let records = [];
     let ruleNodes = [];
 
-    if (sb) {
+    let ipcLoaded = false;
+    if (window.electron && typeof window.electron.invoke === 'function') {
+      try {
+        const rData = await window.electron.invoke('rules-fetch-data');
+        if (rData && rData.success) {
+          records = rData.rules || [];
+          ruleNodes = rData.ruleNodes || [];
+          ipcLoaded = true;
+        }
+      } catch (ipcErr) {
+        console.warn('IPC rules-fetch-data error in loadRulesFromDB:', ipcErr);
+      }
+    }
+
+    if (!ipcLoaded && sb) {
       const [rulesRes, rnRes] = await Promise.all([
         sb.from('rules').select('*').order('created', { ascending: false }),
         sb.from('rule_nodes').select('*, node:nodes(*)')
@@ -448,10 +634,11 @@ async function loadRulesFromDB() {
         room: r.room_id || ''
       };
 
-      if (ruleObj.room && rooms[ruleObj.room]) {
-        ruleObj.roomName = rooms[ruleObj.room].name;
-        ruleObj.buildingName = rooms[ruleObj.room].buildingName || 'N/A';
-        ruleObj.floorName = rooms[ruleObj.room].floorName || 'N/A';
+      const roomObj = getRoom(ruleObj.room);
+      if (roomObj) {
+        ruleObj.roomName = roomObj.name;
+        ruleObj.buildingName = roomObj.buildingName || 'N/A';
+        ruleObj.floorName = roomObj.floorName || 'N/A';
       } else {
         ruleObj.buildingName = 'N/A';
         ruleObj.floorName = 'N/A';
@@ -529,17 +716,26 @@ function onBuildingSelected() {
   floorSelect.innerHTML = '<option value="">Choose a floor...</option>';
   roomSelect.innerHTML = '<option value="">Choose a room...</option>';
   if (roomNodeSelect) roomNodeSelect.innerHTML = '<option value="">Choose node(s)...</option>';
-  if (nodeSelect) nodeSelect.innerHTML = '<option value="">Choose an AC sensor...</option>';
+  if (nodeSelect) nodeSelect.innerHTML = '<option value="">Choose an AC control...</option>';
   
   if (!buildingId) return;
-  for (const bId in floors) {
-    if (floors[bId].building_id === buildingId) {
-      const option = document.createElement('option');
-      option.value = bId;
-      option.textContent = floors[bId].name;
-      floorSelect.appendChild(option);
-    }
-  }
+  const seenFloorIds = new Set();
+  const seenFloorNames = new Set();
+
+  Object.values(floors).forEach(floor => {
+    if (!floor || floor.building_id !== buildingId) return;
+    if (seenFloorIds.has(floor.id)) return;
+    const normName = (floor.name || '').trim().toLowerCase();
+    if (!normName || seenFloorNames.has(normName)) return;
+
+    seenFloorIds.add(floor.id);
+    seenFloorNames.add(normName);
+
+    const option = document.createElement('option');
+    option.value = floor.id;
+    option.textContent = floor.name;
+    floorSelect.appendChild(option);
+  });
 }
 
 function onFloorSelected() {
@@ -550,41 +746,61 @@ function onFloorSelected() {
   
   roomSelect.innerHTML = '<option value="">Choose a room...</option>';
   if (roomNodeSelect) roomNodeSelect.innerHTML = '<option value="">Choose node(s)...</option>';
-  if (nodeSelect) nodeSelect.innerHTML = '<option value="">Choose an AC sensor...</option>';
+  if (nodeSelect) nodeSelect.innerHTML = '<option value="">Choose an AC control...</option>';
   
   if (!floorId) return;
-  for (const rId in rooms) {
-    if (rooms[rId].floor_id === floorId) {
-      const option = document.createElement('option');
-      option.value = rId;
-      option.textContent = rooms[rId].name;
-      roomSelect.appendChild(option);
+  const seenRoomIds = new Set();
+  const seenRoomNames = new Set();
+
+  Object.values(rooms).forEach(room => {
+    if (!room || room.floor_id !== floorId) return;
+    if (seenRoomIds.has(room.id)) return;
+    const normName = (room.name || '').trim().toLowerCase();
+    if (!normName || seenRoomNames.has(normName)) return;
+
+    // Filter out any hardware nodes or anomalous non-rooms
+    if (nodes[room.id] || nodes[room.name] || normName.startsWith('node-') || String(room.id).startsWith('node_')) {
+      return;
     }
-  }
+
+    seenRoomIds.add(room.id);
+    seenRoomNames.add(normName);
+
+    const option = document.createElement('option');
+    option.value = room.id;
+    option.textContent = room.name;
+    roomSelect.appendChild(option);
+  });
 }
+
 function onRoomSelected(e) {
-  const roomId = e.target.value;
+  const roomId = e ? (e.target ? e.target.value : e) : document.getElementById('ruleRoom').value;
   const roomNodeSelect = document.getElementById('ruleRoomNode');
   const batteryNodeSelect = document.getElementById('ruleNode');
   
   if (roomNodeSelect) roomNodeSelect.innerHTML = '<option value="">Choose node(s)...</option>';
-  if (batteryNodeSelect) batteryNodeSelect.innerHTML = '<option value="">Choose an AC sensor...</option>';
+  if (batteryNodeSelect) batteryNodeSelect.innerHTML = '<option value="">Choose an AC control...</option>';
   
   if (!roomId) return;
   
-  const room = rooms[roomId];
-  if (room && room.nodes) {
+  const room = getRoom(roomId);
+  if (room && room.nodes && Array.isArray(room.nodes)) {
+    const seenNodeKeys = new Set();
     room.nodes.forEach(node => {
+      const nodeKey = node.id || node.name;
+      if (!nodeKey || seenNodeKeys.has(nodeKey)) return;
+      seenNodeKeys.add(nodeKey);
+
       if (roomNodeSelect) {
         const option = document.createElement('option');
-        option.value = node.id;
-        option.textContent = node.name;
+        option.value = nodeKey;
+        option.textContent = node.name || nodeKey;
         roomNodeSelect.appendChild(option);
       }
       if (batteryNodeSelect) {
         const option = document.createElement('option');
-        option.value = node.id;
-        option.textContent = node.name;
+        option.value = nodeKey;
+        option.textContent = node.name || nodeKey;
         batteryNodeSelect.appendChild(option);
       }
     });
@@ -593,7 +809,7 @@ function onRoomSelected(e) {
 
 function updateRoomNodesSelection() {
   const roomId = document.getElementById('ruleRoom').value;
-  onRoomSelected({ target: { value: roomId } });
+  onRoomSelected(roomId);
 }
 
 function openActiveRulesModal() {
@@ -630,17 +846,31 @@ function openRuleModal() {
   document.getElementById('ruleEndTime').value = '';
   document.getElementById('ruleEnabled').checked = true;
   
-  // Populate building select
+  // Populate building select with deduplication
   const buildingSelect = document.getElementById('ruleBuilding');
   buildingSelect.innerHTML = '<option value="">Choose a building...</option>';
-  for (const bId in buildings) {
+  const seenBldIds = new Set();
+  const seenBldNames = new Set();
+  Object.values(buildings).forEach(bld => {
+    if (!bld || seenBldIds.has(bld.id)) return;
+    const normName = (bld.name || '').trim().toLowerCase();
+    if (!normName || seenBldNames.has(normName)) return;
+
+    seenBldIds.add(bld.id);
+    seenBldNames.add(normName);
+
     const option = document.createElement('option');
-    option.value = bId;
-    option.textContent = buildings[bId].name;
+    option.value = bld.id;
+    option.textContent = bld.name;
     buildingSelect.appendChild(option);
-  }
+  });
+
   document.getElementById('ruleFloor').innerHTML = '<option value="">Choose a floor...</option>';
   document.getElementById('ruleRoom').innerHTML = '<option value="">Choose a room...</option>';
+  const roomNodeSelect = document.getElementById('ruleRoomNode');
+  if (roomNodeSelect) roomNodeSelect.innerHTML = '<option value="">Choose node(s)...</option>';
+  const nodeSelect = document.getElementById('ruleNode');
+  if (nodeSelect) nodeSelect.innerHTML = '<option value="">Choose an AC control...</option>';
   
   document.getElementById('locationSelection').classList.add('hidden');
   document.getElementById('roomNodesSelection').classList.add('hidden');
@@ -664,39 +894,6 @@ function closeRuleModal() {
   document.getElementById('ruleValue').value = '';
   document.getElementById('ruleUnit').value = '';
   document.getElementById('ruleDuration').value = '5';
-  document.getElementById('ruleStartDate').value = '';
-  document.getElementById('ruleStartTime').value = '';
-  document.getElementById('ruleEndDate').value = '';
-  document.getElementById('ruleEndTime').value = '';
-  document.getElementById('ruleEnabled').checked = true;
-}
-
-function saveRule() {
-  const type = document.getElementById('ruleType').value;
-  const condition = document.getElementById('ruleCondition').value;
-  const value = parseFloat(document.getElementById('ruleValue').value);
-  const unit = document.getElementById('ruleUnit').value;
-  const enabled = document.getElementById('ruleEnabled').checked;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
   document.getElementById('ruleStartDate').value = '';
   document.getElementById('ruleStartTime').value = '';
   document.getElementById('ruleEndDate').value = '';
@@ -731,7 +928,9 @@ async function saveRule() {
 
   const buildingId = document.getElementById('ruleBuilding').value;
   const floorId = document.getElementById('ruleFloor').value;
-  const roomId = document.getElementById('ruleRoom').value;
+  const rawRoomId = document.getElementById('ruleRoom').value;
+  const canonicalRoom = getRoom(rawRoomId);
+  const roomId = canonicalRoom ? canonicalRoom.id : rawRoomId;
 
   let selectedNodes = [];
   let singleNode = '';
@@ -745,10 +944,14 @@ async function saveRule() {
     if (nodeSelect) {
       selectedNodes = Array.from(nodeSelect.selectedOptions).map(opt => opt.value).filter(Boolean);
     }
+    // If no specific nodes highlighted in multi-select, default to all controls in the room
+    if (selectedNodes.length === 0 && canonicalRoom && Array.isArray(canonicalRoom.nodes)) {
+      selectedNodes = canonicalRoom.nodes.map(n => n.id || n.name).filter(Boolean);
+    }
   } else if (type === 'battery') {
     singleNode = document.getElementById('ruleNode').value;
     if (!singleNode) {
-      showNotification('⚠️ Please select an AC sensor');
+      showNotification('⚠️ Please select an AC control');
       return;
     }
     selectedNodes = [singleNode];
@@ -803,43 +1006,77 @@ async function saveRule() {
     
     dbData.room_id = ruleData.room || null;
 
-    let ruleId;
-    if (sb) {
+    let ruleId = null;
+    let targetNodes = [];
+    if (ruleData.type === 'temperature' && ruleData.nodes) {
+      targetNodes = ruleData.nodes;
+    } else if (ruleData.type === 'battery' && ruleData.node) {
+      targetNodes = [ruleData.node];
+    }
+    const targetNodeDbIds = targetNodes.map(hwId => nodes[hwId]?.pb_id || hwId).filter(Boolean);
+
+    const ruleToEdit = currentEditingId ? rules.find(r => r.id === currentEditingId) : null;
+    const targetId = ruleToEdit?.pbId || ruleToEdit?.id || currentEditingId;
+
+    if (window.electron && typeof window.electron.invoke === 'function') {
+      try {
+        const res = await window.electron.invoke('rule-save', {
+          rule: dbData,
+          targetNodes: targetNodeDbIds,
+          isEdit: Boolean(currentEditingId),
+          editId: targetId
+        });
+        if (res && res.success && res.ruleId) {
+          ruleId = res.ruleId;
+          ruleData.pbId = ruleId;
+          ruleData.id = ruleId;
+        }
+      } catch (ipcErr) {
+        console.warn('IPC rule-save error, fallback to sb:', ipcErr);
+      }
+    }
+
+    if (!ruleId && sb) {
       if (currentEditingId) {
-        const ruleToEdit = rules.find(r => r.id === currentEditingId);
-        const targetId = ruleToEdit?.pbId || ruleToEdit?.id || currentEditingId;
         await sb.from('rules').update(dbData).eq('id', targetId);
         ruleId = targetId;
         ruleData.pbId = ruleId;
       } else {
-        const { data: newRecord, error } = await sb.from('rules').insert([dbData]).select().single();
+        const { data: newRecord } = await sb.from('rules').insert([dbData]).select().single();
         ruleId = newRecord ? newRecord.id : ('rul_' + Date.now());
         ruleData.pbId = ruleId;
       }
       
-      // Handle rule_nodes junction table
       try {
         await sb.from('rule_nodes').delete().eq('rule_id', ruleId);
-      } catch (e) {
-        console.warn("Failed to delete old rule_nodes", e);
-      }
-      
-      let targetNodes = [];
-      if (ruleData.type === 'temperature' && ruleData.nodes) {
-        targetNodes = ruleData.nodes;
-      } else if (ruleData.type === 'battery' && ruleData.node) {
-        targetNodes = [ruleData.node];
-      }
-      
-      for (const hwNodeId of targetNodes) {
-        const nodeObj = nodes[hwNodeId];
-        if (nodeObj && nodeObj.pb_id) {
-          await sb.from('rule_nodes').insert([{
-            rule_id: ruleId,
-            node_id: nodeObj.pb_id
-          }]);
+        for (const hwNodeId of targetNodes) {
+          const nodeObj = nodes[hwNodeId];
+          if (nodeObj && nodeObj.pb_id) {
+            await sb.from('rule_nodes').insert([{
+              rule_id: ruleId,
+              node_id: nodeObj.pb_id
+            }]);
+          }
         }
+      } catch (e) {
+        console.warn("Failed to delete/insert old rule_nodes", e);
       }
+    }
+
+    const roomObj = getRoom(ruleData.room);
+    if (roomObj) {
+      ruleData.roomName = roomObj.name;
+      ruleData.buildingName = roomObj.buildingName || 'N/A';
+      ruleData.floorName = roomObj.floorName || 'N/A';
+    } else {
+      ruleData.buildingName = 'N/A';
+      ruleData.floorName = 'N/A';
+    }
+
+    if (ruleData.type === 'temperature' && Array.isArray(ruleData.nodes)) {
+      ruleData.nodeNames = ruleData.nodes.map(nId => nodes[nId]?.name || nId);
+    } else if (ruleData.type === 'battery' && ruleData.node) {
+      ruleData.nodeName = nodes[ruleData.node]?.name || ruleData.node;
     }
 
     if (currentEditingId) {
@@ -854,6 +1091,11 @@ async function saveRule() {
     }
     
     closeRuleModal();
+    window.EcoDataBus?.invalidate('rules:data');
+    window.dispatchEvent(new CustomEvent('rules:updated', { detail: { ruleId, enabled: ruleData.enabled } }));
+    if (typeof window.invalidateRulesCache === 'function') {
+      window.invalidateRulesCache();
+    }
     displayRules();
     initRuleComplianceBenchmarking();
     
@@ -891,16 +1133,23 @@ function editRule(ruleId) {
     document.getElementById('roomNodesSelection').classList.remove('hidden');
     document.getElementById('nodeSelection').classList.add('hidden');
     
-    const roomData = rule.room ? rooms[rule.room] : null;
+    const roomData = getRoom(rule.room);
     if (roomData) {
       const buildingSelect = document.getElementById('ruleBuilding');
       buildingSelect.innerHTML = '<option value="">Choose a building...</option>';
-      for (const bId in buildings) {
+      const seenBldIds = new Set();
+      const seenBldNames = new Set();
+      Object.values(buildings).forEach(b => {
+        if (!b || seenBldIds.has(b.id)) return;
+        const normName = (b.name || '').trim().toLowerCase();
+        if (!normName || seenBldNames.has(normName)) return;
+        seenBldIds.add(b.id);
+        seenBldNames.add(normName);
         const option = document.createElement('option');
-        option.value = bId;
-        option.textContent = buildings[bId].name;
+        option.value = b.id;
+        option.textContent = b.name;
         buildingSelect.appendChild(option);
-      }
+      });
       const buildingId = roomData.building_id || '';
       buildingSelect.value = buildingId;
       
@@ -911,8 +1160,8 @@ function editRule(ruleId) {
         
         if (floorId) {
           onFloorSelected();
-          document.getElementById('ruleRoom').value = rule.room;
-          onRoomSelected({ target: { value: rule.room } });
+          document.getElementById('ruleRoom').value = roomData.id;
+          onRoomSelected(roomData.id);
         }
       }
     } else {
@@ -934,30 +1183,35 @@ function editRule(ruleId) {
     document.getElementById('roomNodesSelection').classList.add('hidden');
     
     const nodeData = rule.node ? nodes[rule.node] : null;
-    if (nodeData && nodeData.room) {
-      const roomData = rooms[nodeData.room];
-      if (roomData) {
-        const buildingSelect = document.getElementById('ruleBuilding');
-        buildingSelect.innerHTML = '<option value="">Choose a building...</option>';
-        for (const bId in buildings) {
-          const option = document.createElement('option');
-          option.value = bId;
-          option.textContent = buildings[bId].name;
-          buildingSelect.appendChild(option);
-        }
-        const buildingId = roomData.building_id || '';
-        buildingSelect.value = buildingId;
+    const roomData = nodeData && nodeData.room ? getRoom(nodeData.room) : getRoom(rule.room);
+    if (roomData) {
+      const buildingSelect = document.getElementById('ruleBuilding');
+      buildingSelect.innerHTML = '<option value="">Choose a building...</option>';
+      const seenBldIds = new Set();
+      const seenBldNames = new Set();
+      Object.values(buildings).forEach(b => {
+        if (!b || seenBldIds.has(b.id)) return;
+        const normName = (b.name || '').trim().toLowerCase();
+        if (!normName || seenBldNames.has(normName)) return;
+        seenBldIds.add(b.id);
+        seenBldNames.add(normName);
+        const option = document.createElement('option');
+        option.value = b.id;
+        option.textContent = b.name;
+        buildingSelect.appendChild(option);
+      });
+      const buildingId = roomData.building_id || '';
+      buildingSelect.value = buildingId;
+      
+      if (buildingId) {
+        onBuildingSelected();
+        const floorId = roomData.floor_id || '';
+        document.getElementById('ruleFloor').value = floorId;
         
-        if (buildingId) {
-          onBuildingSelected();
-          const floorId = roomData.floor_id || '';
-          document.getElementById('ruleFloor').value = floorId;
-          
-          if (floorId) {
-            onFloorSelected();
-            document.getElementById('ruleRoom').value = nodeData.room;
-            onRoomSelected({ target: { value: nodeData.room } });
-          }
+        if (floorId) {
+          onFloorSelected();
+          document.getElementById('ruleRoom').value = roomData.id;
+          onRoomSelected(roomData.id);
         }
       }
     }
@@ -1001,6 +1255,8 @@ function showDeleteConfirmModal() {
   const modal = document.getElementById('confirmDeleteModal');
   if (modal) {
     modal.classList.remove('hidden');
+    modal.style.display = 'flex';
+    modal.style.zIndex = '99999';
     setTimeout(() => {
       modal.classList.add('opacity-100');
     }, 10);
@@ -1012,36 +1268,91 @@ function hideDeleteConfirmModal() {
   if (modal) {
     modal.classList.add('hidden');
     modal.classList.remove('opacity-100');
+    modal.style.display = 'none';
   }
 }
 
 async function confirmDelete() {
   if (pendingDeleteAllRules) {
     const ids = rules.map(r => r.pbId || r.id).filter(Boolean);
-    if (sb && ids.length) {
+
+    // Optimistically wipe rules array and update UI immediately
+    rules = [];
+    displayRules();
+    initRuleComplianceBenchmarking();
+    hideDeleteConfirmModal();
+    pendingDeleteAllRules = false;
+
+    // Delete in DB across IPC / Supabase
+    let deletedSuccess = false;
+    if (window.electron && typeof window.electron.invoke === 'function' && ids.length) {
+      try {
+        const res = await window.electron.invoke('rule-delete', ids);
+        if (res && res.success) deletedSuccess = true;
+      } catch (ipcErr) {
+        console.warn('IPC rule-delete error, fallback to sb:', ipcErr);
+      }
+    }
+
+    if (!deletedSuccess && sb && ids.length) {
       try {
         await sb.from('rule_nodes').delete().in('rule_id', ids);
         await sb.from('rules').delete().in('id', ids);
+        deletedSuccess = true;
       } catch (e) {
         console.warn('Failed to clear rules from Supabase:', e);
       }
     }
-    rules = [];
-    displayRules();
-    initRuleComplianceBenchmarking();
-    showNotification('✓ All rules cleared');
-    pendingDeleteAllRules = false;
-    hideDeleteConfirmModal();
+
+    // Clean tracking cache
+    if (window.violationTracking) {
+      window.violationTracking = {};
+    }
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && (k.startsWith('ecoTrack_violation_start_') || k.startsWith('ecoTrack_alert_triggered_'))) {
+          localStorage.removeItem(k);
+        }
+      }
+    } catch (_) {}
+
+    window.EcoDataBus?.invalidate('rules:data');
+    window.dispatchEvent(new CustomEvent('rules:updated'));
+    if (typeof window.invalidateRulesCache === 'function') {
+      window.invalidateRulesCache();
+    }
+
+    showNotification('✓ All rules cleared successfully');
     return;
   }
 
   if (pendingDeleteRuleId) {
     const target = rules.find(r => r.id === pendingDeleteRuleId);
     const targetId = target?.pbId || target?.id || pendingDeleteRuleId;
-    if (sb && targetId) {
+    const ruleType = target?.type || 'Rule';
+
+    // Optimistically remove from array and update UI immediately
+    rules = rules.filter(r => r.id !== pendingDeleteRuleId && r.pbId !== pendingDeleteRuleId);
+    displayRules();
+    initRuleComplianceBenchmarking();
+    hideDeleteConfirmModal();
+
+    let deletedSuccess = false;
+    if (window.electron && typeof window.electron.invoke === 'function' && targetId) {
+      try {
+        const res = await window.electron.invoke('rule-delete', [targetId]);
+        if (res && res.success) deletedSuccess = true;
+      } catch (ipcErr) {
+        console.warn('IPC rule-delete error, fallback to sb:', ipcErr);
+      }
+    }
+
+    if (!deletedSuccess && sb && targetId) {
       try {
         await sb.from('rule_nodes').delete().eq('rule_id', targetId);
         await sb.from('rules').delete().eq('id', targetId);
+        deletedSuccess = true;
       } catch (err) {
         console.warn('Failed to delete rule from Supabase:', err);
       }
@@ -1050,20 +1361,86 @@ async function confirmDelete() {
     // Clean tracking cache
     if (window.violationTracking) {
       Object.keys(window.violationTracking).forEach(k => {
-        if (k.startsWith(`${pendingDeleteRuleId}_`)) {
+        if (k.startsWith(`${pendingDeleteRuleId}_`) || (targetId && k.startsWith(`${targetId}_`))) {
           delete window.violationTracking[k];
         }
       });
     }
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && (k.includes(pendingDeleteRuleId) || (targetId && k.includes(targetId)))) {
+          localStorage.removeItem(k);
+        }
+      }
+    } catch (_) {}
 
-    rules = rules.filter(r => r.id !== pendingDeleteRuleId);
-    displayRules();
-    initRuleComplianceBenchmarking();
-    showNotification('✓ Rule deleted');
     pendingDeleteRuleId = null;
+    window.EcoDataBus?.invalidate('rules:data');
+    window.dispatchEvent(new CustomEvent('rules:updated'));
+    if (typeof window.invalidateRulesCache === 'function') {
+      window.invalidateRulesCache();
+    }
+    showNotification(`✓ ${ruleType} rule deleted`);
+    return;
   }
   
   hideDeleteConfirmModal();
+}
+
+async function deactivateAllRules() {
+  if (!rules.length) {
+    showNotification('⚠️ No rules to deactivate');
+    return;
+  }
+
+  // Optimistically set enabled = false on all local rules
+  rules.forEach(r => { r.enabled = false; });
+  displayRules();
+  initRuleComplianceBenchmarking();
+
+  const ids = rules.map(r => r.pbId || r.id).filter(Boolean);
+
+  let updateSuccess = false;
+  if (window.electron && typeof window.electron.invoke === 'function' && ids.length) {
+    try {
+      const res = await window.electron.invoke('rule-toggle', { ids, enabled: false });
+      if (res && res.success) updateSuccess = true;
+    } catch (ipcErr) {
+      console.warn('IPC rule-toggle all error, fallback to sb:', ipcErr);
+    }
+  }
+
+  if (!updateSuccess && sb && ids.length) {
+    try {
+      await sb.from('rules').update({ enabled: false, updated: new Date().toISOString() }).in('id', ids);
+      updateSuccess = true;
+    } catch (err) {
+      console.warn('Failed to deactivate rules in Supabase:', err);
+    }
+  }
+
+  // Clear violation tracking & localStorage timers
+  if (window.violationTracking) {
+    window.violationTracking = {};
+  }
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith('ecoTrack_violation_start_') || k.startsWith('ecoTrack_alert_triggered_'))) {
+        localStorage.removeItem(k);
+      }
+    }
+  } catch (_) {}
+
+  // Invalidate caches and broadcast update
+  window.EcoDataBus?.invalidate('rules:data');
+  window.dispatchEvent(new CustomEvent('rules:updated'));
+  if (typeof window.invalidateRulesCache === 'function') {
+    window.invalidateRulesCache();
+  }
+
+  showNotification('⚠️ All rules deactivated — monitoring paused');
 }
 
 function cancelDelete() {
@@ -1072,35 +1449,255 @@ function cancelDelete() {
   hideDeleteConfirmModal();
 }
 
-function toggleRuleEnabled(ruleId) {
-  const rule = rules.find(r => r.id === ruleId);
-  if (rule) {
-    rule.enabled = !rule.enabled;
-    const targetId = rule.pbId || rule.id;
-    if (sb && targetId) {
-      sb.from('rules').update({ enabled: rule.enabled, updated: new Date().toISOString() }).eq('id', targetId).then().catch(err => {
-        console.warn('Failed to update rule in Supabase:', err);
-      });
+function showClearViolationHistoryModal() {
+  const modal = document.getElementById('confirmClearViolationHistoryModal');
+  if (modal) {
+    modal.classList.remove('hidden');
+    modal.style.display = 'flex';
+    modal.style.zIndex = '99999';
+    setTimeout(() => {
+      modal.classList.add('opacity-100');
+    }, 10);
+  }
+}
+
+function hideClearViolationHistoryModal() {
+  const modal = document.getElementById('confirmClearViolationHistoryModal');
+  if (modal) {
+    modal.classList.add('hidden');
+    modal.classList.remove('opacity-100');
+    modal.style.display = 'none';
+  }
+}
+
+async function executeClearViolationHistory() {
+  hideClearViolationHistoryModal();
+
+  try {
+    // 1. Clear local audit storage
+    if (typeof clearStoredViolationAuditHistory === 'function') {
+      clearStoredViolationAuditHistory();
+    } else {
+      try {
+        localStorage.removeItem('ecoTrack_violation_audit_history');
+        localStorage.removeItem('ecoTrack_violationAuditHistory');
+      } catch (_) {}
     }
 
-    // Clean tracking cache if disabled
-    if (!rule.enabled && window.violationTracking) {
+    // 2. Clear violation tracking in memory & localStorage
+    if (window.violationTracking) {
+      window.violationTracking = {};
+    }
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && (k.startsWith('ecoTrack_violation_start_') || k.startsWith('ecoTrack_alert_triggered_'))) {
+          localStorage.removeItem(k);
+        }
+      }
+    } catch (_) {}
+
+    // 3. Mark cleaned flag
+    try {
+      localStorage.setItem('ecoTrack_violationHistoryCleaned_v1', 'true');
+    } catch (_) {}
+
+    // 4. Delete violation notifications from Supabase if any exist
+    if (window.electron && typeof window.electron.invoke === 'function') {
+      try {
+        const notifRes = await window.electron.invoke('notifications-fetch-all');
+        if (notifRes && notifRes.success && Array.isArray(notifRes.data)) {
+          const violationIds = notifRes.data
+            .filter(n => n.triggered !== false && !isRoutineScheduleNotification(n))
+            .map(n => n.id)
+            .filter(Boolean);
+          if (violationIds.length > 0) {
+            await window.electron.invoke('notifications-delete', violationIds);
+          }
+        }
+      } catch (ipcErr) {
+        console.warn('IPC notification delete error:', ipcErr);
+      }
+    } else if (sb) {
+      try {
+        const { data: nData } = await sb.from('notifications').select('id, content, message, triggered');
+        if (Array.isArray(nData) && nData.length > 0) {
+          const violationIds = nData
+            .filter(n => n.triggered !== false && !isRoutineScheduleNotification(n))
+            .map(n => n.id)
+            .filter(Boolean);
+          if (violationIds.length > 0) {
+            await sb.from('notifications').delete().in('id', violationIds);
+          }
+        }
+      } catch (err) {
+        console.warn('Supabase notification delete error:', err);
+      }
+    }
+
+    // 5. Clear in-memory violation collections
+    currentViolationHistory = [];
+    currentRankingsData = { rooms: [], floors: [], buildings: [] };
+
+    // 6. Re-render table and rankings
+    violationHistoryCurrentPage = 1;
+    renderViolationHistoryTable();
+    renderViolationRankings();
+
+    // 7. Update summary cards (Total Violations, Non-Compliant Rooms, Violating AC Controls)
+    const avgEl = document.getElementById('totalViolations');
+    const nonCompliantEl = document.getElementById('nonCompliantRooms');
+    const violatingEl = document.getElementById('violatingNodes');
+    if (avgEl) avgEl.textContent = '0';
+    if (nonCompliantEl) nonCompliantEl.textContent = '0';
+    if (violatingEl) violatingEl.textContent = '0';
+
+    // 8. Re-evaluate chart & benchmarking
+    await initRuleComplianceBenchmarking();
+
+    // 9. Invalidate caches and broadcast update
+    window.EcoDataBus?.invalidate('notifications');
+    window.EcoDataBus?.invalidate('notifications:data');
+    window.EcoDataBus?.invalidate('rules:data');
+    window.dispatchEvent(new CustomEvent('rules:updated'));
+
+    showNotification('✓ Violation history erased successfully');
+  } catch (err) {
+    console.error('Error clearing violation history:', err);
+    showNotification('⚠️ Failed to erase violation history');
+  }
+}
+
+async function deleteSingleViolationRecord(eventId) {
+  if (!eventId) return;
+
+  const item = currentViolationHistory.find(e => String(e.id) === String(eventId));
+  if (!item) return;
+
+  const rawId = item.rawId || item.rawNotif?.id || item.id;
+
+  // 1. Remove from localStorage audit store
+  if (typeof removeViolationFromAuditHistory === 'function') {
+    removeViolationFromAuditHistory(rawId);
+    removeViolationFromAuditHistory(item.id);
+  } else {
+    try {
+      const raw = localStorage.getItem('ecoTrack_violation_audit_history') || localStorage.getItem('ecoTrack_violationAuditHistory');
+      if (raw) {
+        const hist = JSON.parse(raw);
+        const filtered = hist.filter(h => String(h.id) !== String(rawId) && String(h.id) !== String(item.id));
+        localStorage.setItem('ecoTrack_violation_audit_history', JSON.stringify(filtered));
+        localStorage.setItem('ecoTrack_violationAuditHistory', JSON.stringify(filtered));
+      }
+    } catch (_) {}
+  }
+
+  // 2. Remove from Supabase if real DB record
+  if (rawId && !String(rawId).startsWith('active-') && !String(rawId).startsWith('evt-') && !String(rawId).startsWith('v_hist_')) {
+    if (window.electron && typeof window.electron.invoke === 'function') {
+      try {
+        await window.electron.invoke('notifications-delete', [rawId]);
+      } catch (ipcErr) {
+        console.warn('IPC notification delete error:', ipcErr);
+      }
+    } else if (sb) {
+      try {
+        await sb.from('notifications').delete().eq('id', rawId);
+      } catch (err) {
+        console.warn('Supabase notification delete error:', err);
+      }
+    }
+  }
+
+  // 3. Remove from memory
+  currentViolationHistory = currentViolationHistory.filter(e => String(e.id) !== String(eventId));
+
+  // 4. Close modal and re-render
+  closeViolationDetailModal();
+  renderViolationHistoryTable();
+
+  // 5. Invalidate caches and refresh benchmarking
+  window.EcoDataBus?.invalidate('notifications');
+  window.EcoDataBus?.invalidate('rules:data');
+  window.dispatchEvent(new CustomEvent('rules:updated'));
+  await initRuleComplianceBenchmarking();
+
+  showNotification('✓ Violation record deleted');
+}
+
+async function toggleRuleEnabled(ruleId) {
+  const rule = rules.find(r => r.id === ruleId || r.pbId === ruleId);
+  if (!rule) return;
+
+  const isCurrentlyActive = rule.enabled !== false && rule.enabled !== 'false' && rule.enabled !== 0 && rule.enabled !== '0';
+  const newEnabled = !isCurrentlyActive;
+  rule.enabled = newEnabled;
+
+  // Immediately re-render table so user sees the change right away!
+  displayRules();
+
+  const targetId = rule.pbId || rule.id;
+  const currentSb = window.supabaseClient || window.sb;
+  const hasElectron = Boolean(window.electron && typeof window.electron.invoke === 'function');
+
+  let updateSuccess = false;
+
+  if (hasElectron && targetId) {
+    try {
+      const res = await window.electron.invoke('rule-toggle', { id: targetId, enabled: newEnabled });
+      if (res && res.success) {
+        updateSuccess = true;
+      } else {
+        console.warn('IPC rule-toggle notice, fallback to direct sb:', res);
+      }
+    } catch (ipcErr) {
+      console.warn('IPC rule-toggle error, fallback to sb:', ipcErr);
+    }
+  }
+
+  if (!updateSuccess && currentSb && targetId) {
+    try {
+      const { error } = await currentSb.from('rules').update({ enabled: newEnabled, updated: new Date().toISOString() }).eq('id', targetId);
+      if (!error) updateSuccess = true;
+    } catch (err) {
+      console.warn('Failed to update rule in Supabase:', err);
+    }
+  }
+
+  // Clean tracking cache and localStorage if disabled
+  if (!newEnabled) {
+    if (window.violationTracking) {
       Object.keys(window.violationTracking).forEach(k => {
-        if (k.startsWith(`${rule.id}_`)) {
+        if (k.startsWith(`${rule.id}_`) || (targetId && k.startsWith(`${targetId}_`))) {
           delete window.violationTracking[k];
         }
       });
     }
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && (k.includes(rule.id) || (targetId && k.includes(targetId)))) {
+          localStorage.removeItem(k);
+        }
+      }
+    } catch (_) {}
+  }
 
-    displayRules();
-    initRuleComplianceBenchmarking();
+  // Invalidate query caches and notify global notifications engine
+  window.EcoDataBus?.invalidate('rules:data');
+  window.dispatchEvent(new CustomEvent('rules:updated', { detail: { ruleId, enabled: newEnabled } }));
+  if (typeof window.invalidateRulesCache === 'function') {
+    window.invalidateRulesCache();
+  }
 
-    if (rule.enabled) {
-      syncTriggeredNotifications(true, true);
-      showNotification(`✓ Rule "${rule.type}" enabled — automatic monitoring active`);
-    } else {
-      showNotification(`⚠️ Rule "${rule.type}" disabled — automatic monitoring paused`);
-    }
+  // Refresh compliance benchmarks
+  initRuleComplianceBenchmarking();
+
+  if (newEnabled) {
+    syncTriggeredNotifications(true, true);
+    showNotification(`✓ Rule "${rule.type}" enabled — monitoring active`);
+  } else {
+    showNotification(`⚠️ Rule "${rule.type}" disabled — monitoring paused`);
   }
 }
 
@@ -1112,22 +1709,107 @@ function displayRules() {
   if (!tbody) return;
   
   // Filter rules
+  const isRuleDisabled = (r) => r.enabled === false || r.enabled === 'false' || r.enabled === 0 || r.enabled === '0';
   let filteredRules = rules;
   if (currentFilter === 'all') {
     filteredRules = rules;
   } else if (currentFilter === 'disabled') {
-    filteredRules = rules.filter(r => !r.enabled);
+    filteredRules = rules.filter(isRuleDisabled);
   } else {
     filteredRules = rules.filter(r => r.type === currentFilter);
   }
+
+  const totalRules = filteredRules.length;
+  const totalPages = Math.max(1, Math.ceil(totalRules / RULES_PAGE_SIZE));
+  if (rulesCurrentPage > totalPages) rulesCurrentPage = totalPages;
+  if (rulesCurrentPage < 1) rulesCurrentPage = 1;
+
+  const startIndex = (rulesCurrentPage - 1) * RULES_PAGE_SIZE;
+  const endIndex = Math.min(startIndex + RULES_PAGE_SIZE, totalRules);
+  const pageRules = filteredRules.slice(startIndex, endIndex);
+
+  const pageInfo = document.getElementById('rulesPageInfo');
+  const prevBtn = document.getElementById('rulesPrevPageBtn');
+  const nextBtn = document.getElementById('rulesNextPageBtn');
+  const pagesContainer = document.getElementById('rulesPaginationPages');
+
+  if (pageInfo) {
+    pageInfo.textContent = totalRules === 0
+      ? 'Showing 0 to 0 of 0 rules'
+      : `Showing ${startIndex + 1} to ${endIndex} of ${totalRules} rules (Page ${rulesCurrentPage} of ${totalPages})`;
+  }
+  if (prevBtn) prevBtn.disabled = rulesCurrentPage <= 1;
+  if (nextBtn) nextBtn.disabled = rulesCurrentPage >= totalPages;
+
+  if (pagesContainer) {
+    let pagesHtml = '';
+    const maxButtons = 5;
+    let startPage = Math.max(1, rulesCurrentPage - Math.floor(maxButtons / 2));
+    let endPage = Math.min(totalPages, startPage + maxButtons - 1);
+    if (endPage - startPage + 1 < maxButtons) {
+      startPage = Math.max(1, endPage - maxButtons + 1);
+    }
+    if (startPage > 1) {
+      pagesHtml += `<button type="button" class="rule-page-btn px-2.5 py-1 text-xs font-bold rounded-lg border border-gray-200 dark:border-white/10 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-800 cursor-pointer" data-page="1">1</button>`;
+      if (startPage > 2) pagesHtml += `<span class="px-1 text-gray-400">...</span>`;
+    }
+    for (let p = startPage; p <= endPage; p++) {
+      const isActive = p === rulesCurrentPage;
+      pagesHtml += `
+        <button type="button" class="rule-page-btn px-2.5 py-1 text-xs font-bold rounded-lg border transition-all cursor-pointer ${isActive ? 'bg-[#10b981] text-white border-[#10b981] shadow-xs' : 'border-gray-200 dark:border-white/10 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-800'}" data-page="${p}">${p}</button>
+      `;
+    }
+    if (endPage < totalPages) {
+      if (endPage < totalPages - 1) pagesHtml += `<span class="px-1 text-gray-400">...</span>`;
+      pagesHtml += `<button type="button" class="rule-page-btn px-2.5 py-1 text-xs font-bold rounded-lg border border-gray-200 dark:border-white/10 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-800 cursor-pointer" data-page="${totalPages}">${totalPages}</button>`;
+    }
+    pagesContainer.innerHTML = pagesHtml;
+    pagesContainer.querySelectorAll('.rule-page-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        rulesCurrentPage = parseInt(btn.dataset.page);
+        displayRules();
+      });
+    });
+  }
   
   if (filteredRules.length === 0) {
-    tbody.innerHTML = '<tr class="text-center"><td colspan="11" class="px-4 py-8 text-gray-500 dark:text-gray-400 text-sm">No rules to display</td></tr>';
+    const isZeroTotal = rules.length === 0;
+    tbody.innerHTML = `
+      <tr class="text-center">
+        <td colspan="11" class="px-4 py-16 text-center">
+          <div class="flex flex-col items-center justify-center max-w-sm mx-auto">
+            <div class="w-14 h-14 rounded-2xl bg-teal-500/10 dark:bg-teal-500/15 text-teal-600 dark:text-teal-400 border border-teal-500/30 flex items-center justify-center mb-3 shadow-xs">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                <circle cx="12" cy="11" r="3"/>
+              </svg>
+            </div>
+            <h4 class="font-bold text-sm text-slate-800 dark:text-white mb-1">
+              ${isZeroTotal ? 'No Automation Rules Configured' : 'No Rules Match Selected Filters'}
+            </h4>
+            <p class="text-xs text-slate-500 dark:text-gray-400 mb-4 leading-relaxed">
+              ${isZeroTotal ? 'Create automated compliance policies such as high-temperature thresholds, auto-shutdowns, and battery level alerts.' : 'Adjust search filters or reset to display all facility rules.'}
+            </p>
+            ${isZeroTotal ? `
+              <button type="button" onclick="const addBtn = document.getElementById('openAddRuleModalBtn'); if (addBtn) addBtn.click(); else if (typeof openAddRuleModal === 'function') openAddRuleModal();" class="px-4 py-2 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 text-slate-950 font-bold text-xs shadow-md inline-flex items-center gap-1.5 transition-all cursor-pointer">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Create Automation Rule
+              </button>
+            ` : `
+              <button type="button" onclick="const searchIn = document.getElementById('ruleSearchInput'); if (searchIn) searchIn.value=''; if (typeof filterRules === 'function') filterRules();" class="px-4 py-2 rounded-xl bg-teal-500/15 hover:bg-teal-500/25 text-teal-600 dark:text-teal-400 border border-teal-500/30 text-xs font-bold transition-all cursor-pointer">
+                Clear Filters
+              </button>
+            `}
+          </div>
+        </td>
+      </tr>
+    `;
     return;
   }
   
   tbody.innerHTML = '';
-  filteredRules.forEach((rule, index) => {
+  pageRules.forEach((rule, idx) => {
+    const index = startIndex + idx;
     const row = document.createElement('tr');
     row.className = 'rule-table-row text-sm transition-colors border-b border-gray-100 dark:border-white/5 hover:bg-emerald-50/30 dark:hover:bg-slate-800/50';
     
@@ -1170,7 +1852,7 @@ function displayRules() {
         }
       }
       
-      let friendlyNodeName = 'Unknown Sensor';
+      let friendlyNodeName = 'Unknown Control';
       if (rule.nodeName && !rule.nodeName.startsWith('nd_')) {
         friendlyNodeName = rule.nodeName;
       }
@@ -1185,9 +1867,14 @@ function displayRules() {
       'equals': 'Equals (==)'
     }[rule.condition] || rule.condition;
     
-    const statusBadge = rule.enabled 
-      ? '<span class="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-100 dark:bg-emerald-950/60 text-[#10b981] dark:text-emerald-400 dark:border dark:border-emerald-800/40">Active</span>'
-      : '<span class="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-gray-400 dark:border dark:border-white/5">Disabled</span>';
+    const isRuleActive = rule.enabled !== false && rule.enabled !== 'false' && rule.enabled !== 0 && rule.enabled !== '0';
+    
+    const statusBadge = `
+      <button type="button" class="ruleStatusToggleBtn inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase cursor-pointer transition-all hover:scale-105 active:scale-95 shadow-xs border ${isRuleActive ? 'bg-emerald-100 dark:bg-emerald-950/60 text-[#10b981] dark:text-emerald-400 border-emerald-300 dark:border-emerald-800/40 hover:bg-emerald-200 dark:hover:bg-emerald-900/60' : 'bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-white/10 hover:bg-gray-200 dark:hover:bg-slate-700'}" title="Click to ${isRuleActive ? 'disable' : 'enable'} this rule" data-id="${rule.id}">
+        <span class="w-1.5 h-1.5 rounded-full ${isRuleActive ? 'bg-[#10b981] animate-pulse' : 'bg-gray-400'}"></span>
+        <span>${isRuleActive ? 'Active' : 'Disabled'}</span>
+      </button>
+    `;
     
     let conditionPill = '';
     if (rule.condition === 'above') {
@@ -1244,7 +1931,7 @@ function displayRules() {
           </button>
           <button class="toggleRuleBtn w-full px-4 py-2.5 text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-800 hover:text-[#10b981] font-semibold text-left transition-colors flex items-center gap-2 cursor-pointer border-0 bg-transparent" data-id="${rule.id}">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>
-            ${rule.enabled ? 'Disable' : 'Enable'}
+            ${isRuleActive ? 'Disable' : 'Enable'}
           </button>
           <div class="h-px bg-gray-100 dark:bg-slate-800 my-0.5"></div>
           <button class="deleteRuleBtn w-full px-4 py-2.5 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 hover:text-red-600 font-semibold text-left transition-colors flex items-center gap-2 cursor-pointer border-0 bg-transparent" data-id="${rule.id}">
@@ -1255,6 +1942,15 @@ function displayRules() {
       </td>
     `;
     
+    // Status button click listener for direct 1-click toggle
+    const statusBtn = row.querySelector('.ruleStatusToggleBtn');
+    if (statusBtn) {
+      statusBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleRuleEnabled(rule.id);
+      });
+    }
+
     const actionBtn = row.querySelector('.actionDropdownBtn');
     const actionMenu = row.querySelector('.action-menu');
 
@@ -1278,28 +1974,34 @@ function displayRules() {
       });
       if (willOpen) {
         // Smart vertical positioning to prevent cutoff by table overflow container
-        const scrollContainer = actionMenu.closest('.overflow-auto') || tbody.closest('.overflow-auto');
+        const scrollContainer = actionMenu.closest('.overflow-x-auto') || actionMenu.closest('.overflow-auto') || tbody.closest('.overflow-x-auto') || tbody.closest('.overflow-auto') || actionMenu.closest('#activeRulesModal');
+        const isBottomRow = (idx >= pageRules.length - 2 && pageRules.length > 1) || (index >= filteredRules.length - 2 && filteredRules.length > 1);
+
+        let openUpward = isBottomRow;
         if (scrollContainer) {
           const btnRect = actionBtn.getBoundingClientRect();
           const containerRect = scrollContainer.getBoundingClientRect();
           const spaceBelow = containerRect.bottom - btnRect.bottom;
           const spaceAbove = btnRect.top - containerRect.top;
-          const menuHeight = 135;
+          const menuHeight = 140;
 
-          // If space below is insufficient for full menu, position as dropup (open upwards)
-          const isBottomRows = (index >= filteredRules.length - 2 && filteredRules.length > 1);
-          if ((spaceBelow < menuHeight || isBottomRows) && spaceAbove >= spaceBelow) {
-            actionMenu.classList.remove('top-10');
-            actionMenu.classList.add('bottom-10');
-            actionMenu.style.top = 'auto';
-            actionMenu.style.bottom = '2.5rem';
-          } else {
-            actionMenu.classList.remove('bottom-10');
-            actionMenu.classList.add('top-10');
-            actionMenu.style.bottom = 'auto';
-            actionMenu.style.top = '2.5rem';
+          if ((spaceBelow < menuHeight || isBottomRow) && spaceAbove >= spaceBelow) {
+            openUpward = true;
           }
         }
+
+        if (openUpward) {
+          actionMenu.classList.remove('top-10');
+          actionMenu.classList.add('bottom-10');
+          actionMenu.style.top = 'auto';
+          actionMenu.style.bottom = '2.5rem';
+        } else {
+          actionMenu.classList.remove('bottom-10');
+          actionMenu.classList.add('top-10');
+          actionMenu.style.bottom = 'auto';
+          actionMenu.style.top = '2.5rem';
+        }
+        actionMenu.style.zIndex = '9999';
         actionMenu.classList.remove('hidden');
       }
     });
@@ -1344,6 +2046,8 @@ function showNotification(message, duration = 3000) {
 
 window.syncTriggeredNotifications = syncTriggeredNotifications;
 window.initRuleComplianceBenchmarking = initRuleComplianceBenchmarking;
+window.openActiveRulesModal = openActiveRulesModal;
+window.closeActiveRulesModal = closeActiveRulesModal;
 
 // ===== RULE COMPLIANCE BENCHMARKING ENGINE =====
 async function initRuleComplianceBenchmarking() {
@@ -1360,10 +2064,34 @@ async function initRuleComplianceBenchmarking() {
     let nodesResult = [];
     let floorsResult = [];
     let buildingsResult = [];
-
+    let ruleNodesResult = [];
     let notificationsResult = [];
 
-    if (sb) {
+    let ipcRulesLoaded = false;
+    if (window.electron && typeof window.electron.invoke === 'function') {
+      try {
+        const [rData, notifRes] = await Promise.all([
+          window.electron.invoke('rules-fetch-data'),
+          window.electron.invoke('notifications-fetch-all')
+        ]);
+        if (rData && rData.success) {
+          rulesResult = rData.rules || [];
+          roomsResult = rData.rooms || [];
+          nodesResult = rData.nodes || [];
+          floorsResult = rData.floors || [];
+          buildingsResult = rData.buildings || [];
+          ruleNodesResult = rData.ruleNodes || [];
+          ipcRulesLoaded = true;
+        }
+        if (notifRes && notifRes.success) {
+          notificationsResult = notifRes.data || [];
+        }
+      } catch (ipcErr) {
+        console.warn('IPC rules benchmark fetch error, fallback to sb:', ipcErr);
+      }
+    }
+
+    if (!ipcRulesLoaded && sb) {
       const [rRes, rulRes, nRes, fRes, bRes, notifRes] = await Promise.all([
         sb.from('rooms').select('*').order('created', { ascending: false }),
         sb.from('rules').select('*').order('created', { ascending: false }),
@@ -1397,8 +2125,17 @@ async function initRuleComplianceBenchmarking() {
 
     // Merge persistent Violation Audit History from localStorage so Rule Management
     // data remains fully preserved even if notifications are deleted from the Notification page
-    if (typeof getStoredViolationAuditHistory === 'function') {
-      const auditViolations = getStoredViolationAuditHistory();
+    const getAuditFn = (typeof getStoredViolationAuditHistory === 'function' ? getStoredViolationAuditHistory : null) ||
+                       (typeof window !== 'undefined' && typeof window.getStoredViolationAuditHistory === 'function' ? window.getStoredViolationAuditHistory : null);
+    let auditViolations = [];
+    if (getAuditFn) {
+      auditViolations = getAuditFn();
+    } else {
+      try {
+        auditViolations = JSON.parse(localStorage.getItem('ecoTrack_violation_audit_history') || localStorage.getItem('ecoTrack_violationAuditHistory') || '[]');
+      } catch (_) {}
+    }
+    if (Array.isArray(auditViolations)) {
       auditViolations.forEach(av => {
         const exists = notificationsList.some(n =>
           (n.id && av.id && String(n.id) === String(av.id)) ||
@@ -1461,10 +2198,10 @@ async function initRuleComplianceBenchmarking() {
       }
     });
 
-    // Fetch rule_nodes from Supabase
+    // Fetch rule_nodes from IPC result or Supabase
     try {
-      let ruleNodes = [];
-      if (sb) {
+      let ruleNodes = ruleNodesResult || [];
+      if (!ipcRulesLoaded && sb) {
         const { data: rnData } = await sb.from('rule_nodes').select('*');
         if (rnData) ruleNodes = rnData;
       }
@@ -1500,15 +2237,15 @@ async function initRuleComplianceBenchmarking() {
       if (n.id && !latestByNode[n.id]) latestByNode[n.id] = currentReading;
     });
 
-    // Use ALL rules (including disabled) for violation tracking/chart so
-    // historical violation data is preserved for transparency and auditability.
-    // Disabling a rule only stops future alert triggers, not historical counts.
-    const enabledRules = rulesList;
+    // Filter ONLY actively enabled rules!
+    // A rule that is disabled in the rules modal must NEVER evaluate violations,
+    // count breaches against live telemetry, or trigger violation records.
+    const activeEnabledRules = rulesList.filter(r => isRuleActiveAndEnabled(r));
+    const disabledRuleIds = new Set(rulesList.filter(r => !isRuleActiveAndEnabled(r)).map(r => String(r.id)));
 
-    // Environmental / compliance violation rules (temperature threshold alerts)
-    // Note: Battery rules are device notifications only, NOT room violations.
-    const complianceViolationRules = enabledRules.filter(r => r.type !== 'battery');
-    const batteryRuleIds = new Set(enabledRules.filter(r => r.type === 'battery').map(r => String(r.id)));
+    // Include all active enabled rules (both temperature and battery thresholds)
+    const complianceViolationRules = activeEnabledRules;
+    const batteryRuleIds = new Set(rulesList.filter(r => r.type === 'battery').map(r => String(r.id)));
 
     const roomLabels = [];
     const complianceValues = [];
@@ -1528,7 +2265,8 @@ async function initRuleComplianceBenchmarking() {
       let nodesViolating = 0;
       const violatingNodeKeys = new Set();
 
-      // Collect rule IDs and node identifiers for this room (only environmental compliance rules)
+      // Collect all configured rule IDs (active and historical) and node identifiers for this room
+      const allRoomRuleIds = new Set(rulesList.filter(r => r.room_id === room.id || r.room === room.id).map(r => String(r.id)));
       const roomRuleIds = new Set(complianceViolationRules.filter(r => r.room_id === room.id || r.room === room.id).map(r => String(r.id)));
       const roomNodeKeys = new Set();
       parsedNodes.forEach(node => {
@@ -1538,12 +2276,20 @@ async function initRuleComplianceBenchmarking() {
         if (nId) roomNodeKeys.add(String(nId).toLowerCase());
       });
 
+      // Check if room has any rules in database (active or configured)
+      const hasAnyRuleInDB = rulesList.some(r =>
+        (r.room_id && String(r.room_id) === String(room.id)) ||
+        (r.room && String(r.room) === String(room.id)) ||
+        (r.nodeIds && r.nodeIds.some(nid => roomNodeKeys.has(String(nid).toLowerCase()))) ||
+        (r.nodes && r.nodes.some(nid => roomNodeKeys.has(String(nid).toLowerCase())))
+      );
+      room.hasAnyRuleInDB = hasAnyRuleInDB;
+
       parsedNodes.forEach(node => {
         const nodeId = typeof node === 'string' ? node : (node.name || node.id);
         const nodePbId = typeof node === 'object' ? node.id : node;
         if (!nodeId) return;
 
-        // Battery rules are excluded: only check compliance violation rules
         const nodeRules = getApplicableRules(complianceViolationRules, room.id, nodeId, nodePbId);
         if (nodeRules.length > 0) roomHasRules = true;
 
@@ -1559,40 +2305,57 @@ async function initRuleComplianceBenchmarking() {
       });
 
       // Count all triggered notifications for this room (each notification = 1 violation)
-      // Note: Battery alerts and schedule notices are notifications only, NOT violations
+      // Note: Battery alerts and routine schedule notices (wake/sleep) are NOT room violations.
+      // Historical violations must be preserved even if the specific rule is currently disabled.
       const roomTriggeredNotifs = notificationsList.filter(notif => {
         if (notif.triggered === false) return false;
 
         // Battery alerts are device notifications only, NOT room violations
         if (isBatteryNotification(notif, batteryRuleIds)) return false;
 
-        // Routine schedule alerts are notifications only, NOT room violations
+        // Routine schedule alerts (wake up, sleep time, schedules) are NOT room violations
         if (isRoutineScheduleNotification(notif)) return false;
 
-        // 1. Direct room ID match
-        if (notif.room_id && String(notif.room_id) === String(room.id)) return true;
-        if (notif.roomId && String(notif.roomId) === String(room.id)) return true;
-        if (notif.room && String(notif.room) === String(room.id)) return true;
+        // Must match this room
+        const matchesRoom = (
+          (notif.room_id && String(notif.room_id) === String(room.id)) ||
+          (notif.roomId && String(notif.roomId) === String(room.id)) ||
+          (notif.room && String(notif.room) === String(room.id))
+        );
 
-        // 2. Rule ID match (only environmental compliance rules)
-        if (notif.rule_id && roomRuleIds.has(String(notif.rule_id))) return true;
+        // 1. Direct rule ID match for this room (matches all configured rules for this room, active or disabled)
+        if (notif.rule_id && allRoomRuleIds.has(String(notif.rule_id))) return true;
 
-        // 3. Node ID match
-        const notifNode = notif.node_id || notif.node || notif.sensor;
-        if (notifNode && roomNodeKeys.has(String(notifNode).toLowerCase())) return true;
-
-        // 4. Content text match for node name or room name
-        const text = String(notif.content || notif.message || '');
-        if (text.includes('|||')) {
-          const prefixNode = text.split('|||')[0].trim().toLowerCase();
-          if (prefixNode && roomNodeKeys.has(prefixNode)) return true;
+        // 2. Direct room match: ONLY if content is an environmental threshold breach
+        if (matchesRoom) {
+          const text = String(notif.content || notif.message || '').toLowerCase();
+          const isViolationContent = (
+            text.includes('temperature') ||
+            text.includes('temp ') ||
+            text.includes('threshold') ||
+            text.includes('breach') ||
+            text.includes('went above') ||
+            text.includes('went below') ||
+            text.includes('condition:')
+          );
+          if (isViolationContent) return true;
         }
-        const textLower = text.toLowerCase();
-        for (const nKey of roomNodeKeys) {
-          if (nKey && textLower.includes(nKey)) return true;
+
+        // 3. Node ID match for a node in this room (only if explicit violation content)
+        const notifNode = notif.node_id || notif.node || notif.control;
+        if (notifNode && roomNodeKeys.has(String(notifNode).toLowerCase())) {
+          const text = String(notif.content || notif.message || '').toLowerCase();
+          const isViolationContent = (
+            text.includes('temperature') ||
+            text.includes('temp ') ||
+            text.includes('threshold') ||
+            text.includes('breach') ||
+            text.includes('went above') ||
+            text.includes('went below') ||
+            text.includes('condition:')
+          );
+          if (isViolationContent) return true;
         }
-        if (room.name && textLower.includes(String(room.name).toLowerCase())) return true;
-        if (room.roomName && textLower.includes(String(room.roomName).toLowerCase())) return true;
 
         return false;
       });
@@ -1614,7 +2377,7 @@ async function initRuleComplianceBenchmarking() {
             violatingNodeKeys.add(nKey);
           }
         }
-        const notifNode = notif.node_id || notif.node || notif.sensor;
+        const notifNode = notif.node_id || notif.node || notif.control;
         if (notifNode && roomNodeKeys.has(String(notifNode).toLowerCase())) {
           violatingNodeKeys.add(String(notifNode).toLowerCase());
         }
@@ -1631,9 +2394,13 @@ async function initRuleComplianceBenchmarking() {
       room.roomHasRules = roomHasRules;
       room.nodes = parsedNodes;
 
-      if (!roomHasRules && triggeredNotifCount === 0) {
+      if (!roomHasRules && !hasAnyRuleInDB) {
         roomsNoRules += 1;
-        return; // Exclude rooms without configured rules and without triggered violations
+      }
+
+      // Only exclude rooms with completely no rules, no hardware nodes, and no violations
+      if (!roomHasRules && !hasAnyRuleInDB && (!room.nodes || room.nodes.length === 0) && triggeredNotifCount === 0) {
+        return;
       }
 
       totalCompliance += violations;
@@ -1661,7 +2428,7 @@ async function initRuleComplianceBenchmarking() {
         triggeredNotifs: triggeredNotifCount,
         nodesEvaluated,
         nodesViolating,
-        hasRules: roomHasRules,
+        hasRules: roomHasRules || hasAnyRuleInDB,
         buildingName: room.buildingName,
         floorName: room.floorName,
         roomName: room.roomName,
@@ -1673,7 +2440,7 @@ async function initRuleComplianceBenchmarking() {
     const roomRankings = [];
     roomsList.forEach(room => {
       const violations = room.violations ?? 0;
-      if (!room.roomHasRules && violations === 0) return;
+      if (!room.roomHasRules && !room.hasAnyRuleInDB && (!room.nodes || room.nodes.length === 0) && violations === 0) return;
       roomRankings.push({
         id: room.id,
         name: room.roomName || room.name || 'Room',
@@ -1753,13 +2520,31 @@ async function initRuleComplianceBenchmarking() {
       if (isBatteryNotification(notif, batteryRuleIds)) return;
       if (isRoutineScheduleNotification(notif)) return;
 
+      // Note: Historical violation records are preserved in the Violation History Board
+      // even if the rule is currently disabled. Disabling pauses new evaluations, but does not wipe history.
+
+      // If notification has no rule_id, verify it is truly an environmental violation
+      const text = String(notif.content || notif.message || '');
+      const textLower = text.toLowerCase();
+      if (!notif.rule_id) {
+        const isViolationText = (
+          textLower.includes('temperature') ||
+          textLower.includes('temp ') ||
+          textLower.includes('threshold') ||
+          textLower.includes('breach') ||
+          textLower.includes('went above') ||
+          textLower.includes('went below') ||
+          textLower.includes('condition:')
+        );
+        if (!isViolationText) return;
+      }
+
       let matchedRoom = null;
       if (notif.room_id) matchedRoom = roomsList.find(r => String(r.id) === String(notif.room_id));
       if (!matchedRoom && notif.roomId) matchedRoom = roomsList.find(r => String(r.id) === String(notif.roomId));
       if (!matchedRoom && notif.room) matchedRoom = roomsList.find(r => String(r.id) === String(notif.room));
 
-      const text = String(notif.content || notif.message || '');
-      let nodeName = notif.node_id || notif.node || notif.sensor || null;
+      let nodeName = notif.node_id || notif.node || notif.control || null;
       let cleanText = text;
       if (text.includes('|||')) {
         const parts = text.split('|||');
@@ -1790,14 +2575,14 @@ async function initRuleComplianceBenchmarking() {
       if (notif.rule_id) matchedRule = rulesList.find(r => String(r.id) === String(notif.rule_id));
 
       if (!nodeName) {
-        const matchNode = cleanText.match(/sensor\s+([A-Za-z0-9_\-]+)/i) || cleanText.match(/node\s+([A-Za-z0-9_\-]+)/i) || cleanText.match(/AC\s+([A-Za-z0-9_\-]+)/i);
+        const matchNode = cleanText.match(/control\s+([A-Za-z0-9_\-]+)/i) || cleanText.match(/node\s+([A-Za-z0-9_\-]+)/i) || cleanText.match(/AC\s+([A-Za-z0-9_\-]+)/i);
         if (matchNode) nodeName = matchNode[1];
       }
       if (!nodeName && matchedRoom && matchedRoom.nodes && matchedRoom.nodes.length > 0) {
         const fn = matchedRoom.nodes[0];
         nodeName = typeof fn === 'string' ? fn : (fn.name || fn.id);
       }
-      nodeName = nodeName || 'AC Sensor Unit';
+      nodeName = nodeName || 'AC Control Unit';
 
       let recordedVal = null;
       const actualMatch = cleanText.match(/(?:was|actual[:\s]*)\s*(\d+(?:\.\d+)?)\s*(?:°C|C)?/i);
@@ -1875,7 +2660,11 @@ async function initRuleComplianceBenchmarking() {
     // Also sync all existing valid violations into the persistent audit store
     if (typeof saveViolationToAuditHistory === 'function') {
       notificationsList.forEach(n => {
-        if (n.triggered !== false && !isBatteryNotification(n, batteryRuleIds) && !isRoutineScheduleNotification(n)) {
+        if (
+          n.triggered !== false &&
+          !isBatteryNotification(n, batteryRuleIds) &&
+          !isRoutineScheduleNotification(n)
+        ) {
           saveViolationToAuditHistory(n);
         }
       });
@@ -1961,11 +2750,11 @@ async function initRuleComplianceBenchmarking() {
         const emptyDesc = document.getElementById('ruleComplianceEmptyDesc');
         if (emptyTitle && emptyDesc) {
           if (complianceViolationRules.length === 0) {
-            emptyTitle.textContent = 'No Temperature Rules Configured';
-            emptyDesc.textContent = 'All AC sensor nodes are operating normally. Configure temperature rules on campus rooms to monitor thresholds and track real-time violations.';
+            emptyTitle.textContent = 'No Automation Rules Configured';
+            emptyDesc.textContent = 'All AC control nodes are operating normally. Configure rules on campus rooms to monitor thresholds and track real-time violations.';
           } else {
             emptyTitle.textContent = 'No Active Violations';
-            emptyDesc.textContent = 'All AC sensor nodes across configured rooms are operating within compliant rule parameters.';
+            emptyDesc.textContent = 'All AC control nodes across configured rooms are operating within compliant rule parameters.';
           }
         }
       }
@@ -2000,118 +2789,75 @@ async function initRuleComplianceBenchmarking() {
     const isDark = localStorage.getItem('ecoTrackTheme') === 'dark' || document.documentElement.classList.contains('dark');
     const maxVal = Math.max(0, ...complianceValues);
 
-    if (ruleComplianceChart) ruleComplianceChart.destroy();
-    ruleComplianceChart = new Chart(ctx.getContext('2d'), {
-      type: 'bar',
-      data: {
-        labels: roomLabels,
-        datasets: [{
-          label: 'Total Violations',
-          data: complianceValues,
-          backgroundColor: barColors,
-          borderColor: borderColors,
-          borderWidth: 1.5,
-          borderRadius: 8,
-          borderSkipped: false,
-          minBarLength: 6,
-          maxBarThickness: 24
-        }]
-      },
-      options: {
-        indexAxis: 'y',
-        responsive: true,
-        maintainAspectRatio: false,
-        layout: {
-          padding: { left: 6, right: 20, top: 6, bottom: 6 }
+    if (typeof Chart === 'function') {
+      if (ruleComplianceChart) ruleComplianceChart.destroy();
+      ruleComplianceChart = new Chart(ctx.getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels: roomLabels,
+          datasets: [{
+            label: 'Total Violations',
+            data: complianceValues,
+            backgroundColor: barColors,
+            borderColor: borderColors,
+            borderWidth: 1.5,
+            borderRadius: 8,
+            borderSkipped: false,
+            minBarLength: 6,
+            maxBarThickness: 24
+          }]
         },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            backgroundColor: isDark ? 'rgba(12, 19, 40, 0.95)' : 'rgba(255, 255, 255, 0.96)',
-            titleColor: isDark ? '#38bdf8' : '#0f172a',
-            bodyColor: isDark ? '#cbd5e1' : '#334155',
-            borderColor: isDark ? 'rgba(56, 189, 248, 0.25)' : 'rgba(0, 0, 0, 0.1)',
-            borderWidth: 1,
-            cornerRadius: 8,
-            padding: 12,
-            boxPadding: 4,
-            callbacks: {
-              title: (tooltipItems) => {
-                const item = tooltipItems[0];
-                if (!item) return '';
-                const meta = roomMeta[item.dataIndex];
-                return meta?.roomName || (Array.isArray(item.label) ? item.label[0] : String(item.label || ''));
-              },
-              beforeBody: (tooltipItems) => {
-                const item = tooltipItems[0];
-                const meta = roomMeta[item.dataIndex];
-                if (meta && meta.buildingName && meta.floorName) {
-                  return `📍 ${meta.buildingName} • ${meta.floorName}`;
-                }
-                return '';
-              },
-              label: (context) => {
-                const meta = roomMeta[context.dataIndex];
-                if (!meta) return 'No active rules or data';
-                const statusText = meta.violations > 2 ? '⚠️ Critical' : meta.violations > 0 ? '⚡ Warning' : '✅ Compliant';
-                return [
-                  `Violations: ${meta.violations}`,
-                  `Triggered Alerts: ${meta.triggeredNotifs ?? meta.violations}`,
-                  `Active Nodes: ${meta.nodesEvaluated}`,
-                  `Status: ${statusText}`
-                ];
-              }
-            }
-          }
-        },
-        scales: {
-          x: {
-            beginAtZero: true,
-            suggestedMax: Math.max(4, maxVal + 1),
-            ticks: {
-              color: isDark ? '#94a3b8' : '#64748b',
-              font: {
-                size: 11,
-                weight: '600',
-                family: "'Manrope', 'Inter', system-ui, sans-serif"
-              },
-              stepSize: 1,
-              precision: 0
-            },
-            grid: {
-              color: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.05)',
-              drawBorder: false
-            },
-            title: {
-              display: true,
-              text: 'Violations Count',
-              color: isDark ? '#64748b' : '#94a3b8',
-              font: {
-                size: 11,
-                weight: '600',
-                family: "'Manrope', system-ui, sans-serif"
-              },
-              padding: { top: 6 }
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          layout: {
+            padding: { left: 6, right: 20, top: 6, bottom: 6 }
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: isDark ? 'rgba(12, 19, 40, 0.95)' : 'rgba(255, 255, 255, 0.96)',
+              titleColor: isDark ? '#38bdf8' : '#0f172a',
+              bodyColor: isDark ? '#cbd5e1' : '#334155',
+              borderColor: isDark ? 'rgba(56, 189, 248, 0.25)' : 'rgba(0, 0, 0, 0.1)',
+              borderWidth: 1,
+              cornerRadius: 8,
+              padding: 12
             }
           },
-          y: {
-            ticks: {
-              color: isDark ? '#f1f5f9' : '#1e293b',
-              font: {
-                size: 12,
-                weight: '700',
-                family: "'Manrope', 'Inter', system-ui, -apple-system, sans-serif"
+          scales: {
+            x: {
+              beginAtZero: true,
+              suggestedMax: Math.max(3, maxVal + 1),
+              ticks: {
+                color: isDark ? '#94a3b8' : '#64748b',
+                font: { size: 11, weight: '600' },
+                stepSize: 1,
+                precision: 0
               },
-              lineHeight: 1.35,
-              padding: 12,
-              crossAlign: 'far',
-              autoSkip: false
+              grid: {
+                color: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.05)',
+                drawBorder: false
+              },
+              title: {
+                display: true,
+                text: 'Violations Count',
+                color: isDark ? '#64748b' : '#94a3b8',
+                font: { size: 11, weight: '600' }
+              }
             },
-            grid: { display: false }
+            y: {
+              ticks: {
+                color: isDark ? '#f1f5f9' : '#1e293b',
+                font: { size: 12, weight: '700' }
+              },
+              grid: { display: false }
+            }
           }
         }
-      }
-    });
+      });
+    }
   } catch (error) {
     console.warn('Rule compliance load error:', error);
   }
@@ -2173,6 +2919,15 @@ function renderViolationRankings() {
 
   const maxViolations = Math.max(1, ...items.map(i => i.violations || 0));
 
+  const totalRankingItems = items.length;
+  const totalRankingPages = Math.max(1, Math.ceil(totalRankingItems / RANKING_PAGE_SIZE));
+  if (currentRankingPage > totalRankingPages) currentRankingPage = totalRankingPages;
+  if (currentRankingPage < 1) currentRankingPage = 1;
+
+  const rankStart = (currentRankingPage - 1) * RANKING_PAGE_SIZE;
+  const rankEnd = Math.min(rankStart + RANKING_PAGE_SIZE, totalRankingItems);
+  const pageRankItems = items.slice(rankStart, rankEnd);
+
   let html = `
     <table class="w-full text-left border-collapse">
       <thead class="bg-[#0b291d] dark:bg-[#081a14] text-white dark:text-[#a7f3d0] sticky top-0 z-10 text-[11px] font-bold uppercase tracking-wider">
@@ -2180,7 +2935,7 @@ function renderViolationRankings() {
           <th class="px-4 py-3.5 text-center w-16">RANK</th>
           <th class="px-4 py-3.5">${currentRankingTab === 'rooms' ? 'ROOM & LOCATION' : currentRankingTab === 'floors' ? 'FLOOR & BUILDING' : 'BUILDING'}</th>
           <th class="px-4 py-3.5 text-center">VIOLATIONS</th>
-          <th class="px-4 py-3.5">${currentRankingTab === 'rooms' ? 'ACTIVE SENSORS' : 'COVERAGE'}</th>
+          <th class="px-4 py-3.5">${currentRankingTab === 'rooms' ? 'ACTIVE CONTROLS' : 'COVERAGE'}</th>
           <th class="px-4 py-3.5 min-w-[200px]">BREACH LEVEL & DENSITY</th>
           <th class="px-4 py-3.5 text-right pr-4">STATUS</th>
         </tr>
@@ -2188,7 +2943,8 @@ function renderViolationRankings() {
       <tbody class="divide-y divide-gray-100 dark:divide-white/5 text-gray-800 dark:text-gray-200 text-xs">
   `;
 
-  items.forEach((item, index) => {
+  pageRankItems.forEach((item, idx) => {
+    const index = rankStart + idx;
     const rank = index + 1;
     let medalClass = 'ranking-medal ranking-medal-default';
     let medalText = `#${rank}`;
@@ -2297,7 +3053,44 @@ function renderViolationRankings() {
     </table>
   `;
 
+  if (totalRankingPages > 1) {
+    html += `
+      <div class="mt-4 pt-3 border-t border-gray-100 dark:border-white/5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+        <div class="font-bold text-gray-500 dark:text-gray-400">
+          Showing ${rankStart + 1} to ${rankEnd} of ${totalRankingItems} (Page ${currentRankingPage} of ${totalRankingPages})
+        </div>
+        <div class="flex items-center gap-1.5">
+          <button type="button" id="rankingPrevBtn" ${currentRankingPage <= 1 ? 'disabled' : ''} class="px-3 py-1.5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-xl font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer">
+            ‹ Previous
+          </button>
+          <button type="button" id="rankingNextBtn" ${currentRankingPage >= totalRankingPages ? 'disabled' : ''} class="px-3 py-1.5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 rounded-xl font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer">
+            Next ›
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
   container.innerHTML = html;
+
+  const rkPrev = container.querySelector('#rankingPrevBtn');
+  if (rkPrev) {
+    rkPrev.addEventListener('click', () => {
+      if (currentRankingPage > 1) {
+        currentRankingPage--;
+        renderViolationRankings();
+      }
+    });
+  }
+  const rkNext = container.querySelector('#rankingNextBtn');
+  if (rkNext) {
+    rkNext.addEventListener('click', () => {
+      if (currentRankingPage < totalRankingPages) {
+        currentRankingPage++;
+        renderViolationRankings();
+      }
+    });
+  }
 }
 
 function renderViolationHistoryTable() {
@@ -2343,6 +3136,18 @@ function renderViolationHistoryTable() {
     pageInfo.textContent = totalItems === 0
       ? 'Showing 0 to 0 of 0 violations'
       : `Showing ${startIndex + 1} to ${endIndex} of ${totalItems} violations (Page ${violationHistoryCurrentPage} of ${totalPages})`;
+  }
+
+  const clearHistBtn = document.getElementById('clearViolationHistoryBtn');
+  if (clearHistBtn) {
+    clearHistBtn.disabled = totalItems === 0;
+    if (totalItems === 0) {
+      clearHistBtn.classList.add('opacity-50', 'cursor-not-allowed');
+      clearHistBtn.classList.remove('hover:bg-rose-500/20', 'cursor-pointer');
+    } else {
+      clearHistBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+      clearHistBtn.classList.add('hover:bg-rose-500/20', 'cursor-pointer');
+    }
   }
 
   if (prevBtn) prevBtn.disabled = violationHistoryCurrentPage <= 1;
@@ -2394,8 +3199,19 @@ function renderViolationHistoryTable() {
   if (pageItems.length === 0) {
     tbody.innerHTML = `
       <tr class="text-center">
-        <td colspan="10" class="px-5 py-8 text-gray-500 dark:text-gray-400 font-medium">
-          No violation records found matching current criteria.
+        <td colspan="10" class="px-5 py-14 text-center">
+          <div class="flex flex-col items-center justify-center max-w-sm mx-auto">
+            <div class="w-14 h-14 rounded-2xl bg-emerald-500/10 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 flex items-center justify-center mb-3 shadow-xs">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                <polyline points="9 12 11 14 15 10"/>
+              </svg>
+            </div>
+            <h4 class="font-bold text-sm text-slate-800 dark:text-white mb-1">Zero Policy Violations</h4>
+            <p class="text-xs text-slate-500 dark:text-gray-400 leading-relaxed">
+              All monitored air conditioning units and sensor nodes are currently operating within configured safe parameters.
+            </p>
+          </div>
         </td>
       </tr>
     `;
@@ -2487,11 +3303,11 @@ function openViolationDetailModal(eventId) {
   const rEl = document.getElementById('modalRoomName');
   if (rEl) rEl.textContent = item.roomName || 'Room';
 
-  const sNameEl = document.getElementById('modalSensorName');
-  if (sNameEl) sNameEl.textContent = item.nodeName || 'AC Sensor Unit';
+  const sNameEl = document.getElementById('modalControlName');
+  if (sNameEl) sNameEl.textContent = item.nodeName || 'AC Control Unit';
 
-  const sIdEl = document.getElementById('modalSensorId');
-  if (sIdEl) sIdEl.textContent = item.rawNotif?.node_id ? `Sensor ID: ${item.rawNotif.node_id}` : (item.room?.id ? `Room ID: ${item.room.id}` : 'AC Node Sensor');
+  const sIdEl = document.getElementById('modalControlId');
+  if (sIdEl) sIdEl.textContent = item.rawNotif?.node_id ? `Control ID: ${item.rawNotif.node_id}` : (item.room?.id ? `Room ID: ${item.room.id}` : 'AC Node Control');
 
   const recValEl = document.getElementById('modalRecordedValue');
   if (recValEl) {
@@ -2512,6 +3328,32 @@ function openViolationDetailModal(eventId) {
 
   const notifMsgEl = document.getElementById('modalNotificationMessage');
   if (notifMsgEl) notifMsgEl.textContent = item.content || 'Environmental temperature rule threshold exceeded configured bounds.';
+
+  const viewNotifBtn = document.getElementById('modalViewInNotificationsBtn');
+  if (viewNotifBtn) {
+    const rawNotifId = item.rawNotif?.id || item.id;
+    const roomId = item.roomId || item.room_id || (item.room ? item.room.id : '');
+    const notifUrl = `Notification.html?notif=${encodeURIComponent(rawNotifId)}${roomId ? `&room=${encodeURIComponent(roomId)}` : ''}`;
+    viewNotifBtn.href = notifUrl;
+    viewNotifBtn.onclick = () => {
+      const navPayload = {
+        room: roomId,
+        notif: rawNotifId,
+        highlight: rawNotifId,
+        message: item.content,
+        timestamp: Date.now()
+      };
+      try { sessionStorage.setItem('pendingNav', JSON.stringify(navPayload)); } catch (_) {}
+      try { localStorage.setItem('ecoTrack_pendingNotificationNav', JSON.stringify(navPayload)); } catch (_) {}
+    };
+  }
+
+  const deleteRecBtn = document.getElementById('modalDeleteViolationBtn');
+  if (deleteRecBtn) {
+    deleteRecBtn.onclick = () => {
+      deleteSingleViolationRecord(item.id);
+    };
+  }
 
   modal.style.display = 'flex';
 }
@@ -2547,11 +3389,29 @@ function getApplicableRules(rules, roomId, nodeId, nodePbId) {
   });
 }
 
+function isRuleActiveAndEnabled(rule) {
+  if (!rule) return false;
+  if (rule.enabled === false || rule.enabled === 'false' || rule.enabled === 0) return false;
+  if (rule.active === false || rule.active === 'false' || rule.active === 0) return false;
+  if (rule.status === 'disabled' || rule.status === 'inactive') return false;
+  return true;
+}
+
 function isRuleViolated(rule, telemetry) {
   if (!telemetry || !rule) return false;
+  // A rule that is disabled in the rules modal must NEVER evaluate violations
+  if (!isRuleActiveAndEnabled(rule)) return false;
 
-  // Battery rules are device notifications only, NOT compliance violations
-  if (rule.type === 'battery') return false;
+  if (rule.type === 'battery') {
+    const bat = Number(telemetry.battery);
+    if (Number.isNaN(bat)) return false;
+    const ruleVal = Number(rule.value);
+    const batPct = bat <= 5 ? Math.max(0, Math.min(100, Math.round(((bat - 3.0) / 1.2) * 100))) : bat;
+    if (rule.condition === 'below') return batPct < ruleVal;
+    if (rule.condition === 'equals') return batPct === ruleVal;
+    if (rule.condition === 'above') return batPct > ruleVal;
+    return false;
+  }
 
   if (rule.type === 'temperature') {
     const temp = Number(telemetry.temperature ?? telemetry.temp);
@@ -2566,15 +3426,29 @@ function isRuleViolated(rule, telemetry) {
 }
 
 function isBatteryNotification(notif, batteryRuleIds = new Set()) {
+  if (!notif) return false;
   if (notif.rule_id && batteryRuleIds.has(String(notif.rule_id))) return true;
-  const text = String(notif.content || notif.message || '').toLowerCase();
+  const text = String(notif.content || notif.message || notif.title || '').toLowerCase();
   if (text.includes('battery')) return true;
   return false;
 }
 
 function isRoutineScheduleNotification(notif) {
-  const text = String(notif.content || notif.message || '').toLowerCase();
-  return text.includes('sensor wake up') || text.includes('sensor sleep') || text.includes('schedule applied');
+  if (!notif) return false;
+  if (notif.type === 'schedule' || notif.category === 'schedule' || notif.is_schedule) return true;
+  if (notif.type === 'wake' || notif.type === 'sleep' || notif.type === 'system') return true;
+
+  const text = String(notif.content || notif.message || notif.title || '').toLowerCase();
+  return (
+    text.includes('wake') ||
+    text.includes('sleep') ||
+    text.includes('schedule') ||
+    text.includes('scheduled') ||
+    text.includes('scheduler') ||
+    text.includes('interval') ||
+    text.includes('cycle') ||
+    text.includes('routine')
+  );
 }
 
 function normalizeTemperatureRuleValue(value, unit) {

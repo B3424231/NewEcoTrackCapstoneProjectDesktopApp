@@ -1,0 +1,23 @@
+[
+  "public/aircons.html",
+  "public/control.html",
+  "public/dashboard.html",
+  "public/ir-library.html",
+  "public/ir-profiles.html",
+  "public/logs.html",
+  "public/nodes.html",
+  "public/scheduler.html",
+  "public/staff.html",
+  "public/telemetry.html",
+  "scripts/test_capability_verification_render.js",
+  "scripts/test_ir_capabilities.js",
+  "scripts/test_ir_capabilities_render.js",
+  "scripts/test_ir_realtime.js",
+  "scripts/test_ir_realtime_render.js",
+  "scripts/test_multi_brand_control_render.js",
+  "scripts/test_page_connections.js",
+  "public/js/ac-capability-verification.js",
+  "public/js/aircon-state.js",
+  "public/js/aircon-system.js",
+  "public/js/scheduler.js"
+]

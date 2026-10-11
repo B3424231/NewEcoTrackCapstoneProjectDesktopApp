@@ -1,0 +1,21 @@
+{
+  "passed": 14,
+  "checks": [
+    "A compact Postgres event updates power, temperature, mode, fan, Turbo and receiver capabilities across six engines immediately, with zero database fetches or writes.",
+    "Private Broadcast and Postgres delivery of the same observation produce one update per page.",
+    "Private Broadcast updates the UI directly without waiting for the fallback polling timer.",
+    "Delayed older OFF events cannot overwrite a newer ON observation.",
+    "A heartbeat refreshes connection indicators while preserving the original IR observation timestamp.",
+    "The production dashboard DOM changes to Remote OFF, received temperature and independent Turbo on the fast event.",
+    "An in-flight stale database response cannot roll back a newer received observation.",
+    "A fresh database recovery read still detects offline hardware.",
+    "A connection-only nodes heartbeat does not refetch the registry.",
+    "An unknown controller event schedules reconciliation without creating a profile or controller.",
+    "The production scheduler immediately follows received power, target temperature, mode, fan and Turbo without fetching database records.",
+    "Fast schedule updates preserve unsaved wake/sleep times and report interval inputs.",
+    "A fresh repeated physical setting overrides a newer requested UI setting; equality of decoded values does not suppress it.",
+    "The delivered receiver sketch attempts a compact decoded observation before scheduled heartbeat polling and enables HTTP keep-alive."
+  ],
+  "live_database_modified": false,
+  "physical_hardware_tested": false
+}

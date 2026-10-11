@@ -1,0 +1,11 @@
+{
+  "checks": [
+    "Matching cloud transmission receipt updates status without LAN or browser acknowledgement writes",
+    "Receipt for another controller is ignored",
+    "Failed cloud read preserves queued status",
+    "Expired command is failed rather than transmitted",
+    "Old receipt cannot overwrite a newer request",
+    "Cloud mode does not create sensor history from browser timers or cached nodes"
+  ],
+  "passed": 6
+}

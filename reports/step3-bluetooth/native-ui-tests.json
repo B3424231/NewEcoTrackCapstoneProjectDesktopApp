@@ -1,0 +1,59 @@
+{
+  "passed": 42,
+  "isolated_production_components": true,
+  "live_hardware_tested": false,
+  "results": [
+    {
+      "theme": "light",
+      "checks": [
+        "Edit restores actual ancestors with repeated location names",
+        "Floors are restricted to the selected building",
+        "Changing buildings clears incompatible descendants",
+        "Complete location validates",
+        "Blank custom room fails before writes",
+        "Custom room uses its server ID and correct parent",
+        "Step 3 native validation accepts recovery password and optional brand",
+        "Edit native validation accepts optional brand",
+        "Status absent; hardware IP read-only",
+        "Password Enter cannot submit registration",
+        "Bluetooth detection enabled before registration",
+        "Detection result updates brand and releases buttons",
+        "Live disconnect uses Bluetooth status instead of a Supabase failure",
+        "Disconnected setup identifies Wi-Fi as previously confirmed",
+        "Reconnect provides immediate busy feedback and guards Save",
+        "Reconnect verifies the selected ESP32 and refreshes the reported IP",
+        "Reconnect preserves name, location, brand, and the recovery password",
+        "Reconnect releases controls and retains native form validity",
+        "Another controller disconnect cannot change this wizard",
+        "Every AC command button including simulated remote requires a transmitter",
+        "Transmitter capability restores power control"
+      ]
+    },
+    {
+      "theme": "dark",
+      "checks": [
+        "Edit restores actual ancestors with repeated location names",
+        "Floors are restricted to the selected building",
+        "Changing buildings clears incompatible descendants",
+        "Complete location validates",
+        "Blank custom room fails before writes",
+        "Custom room uses its server ID and correct parent",
+        "Step 3 native validation accepts recovery password and optional brand",
+        "Edit native validation accepts optional brand",
+        "Status absent; hardware IP read-only",
+        "Password Enter cannot submit registration",
+        "Bluetooth detection enabled before registration",
+        "Detection result updates brand and releases buttons",
+        "Live disconnect uses Bluetooth status instead of a Supabase failure",
+        "Disconnected setup identifies Wi-Fi as previously confirmed",
+        "Reconnect provides immediate busy feedback and guards Save",
+        "Reconnect verifies the selected ESP32 and refreshes the reported IP",
+        "Reconnect preserves name, location, brand, and the recovery password",
+        "Reconnect releases controls and retains native form validity",
+        "Another controller disconnect cannot change this wizard",
+        "Every AC command button including simulated remote requires a transmitter",
+        "Transmitter capability restores power control"
+      ]
+    }
+  ]
+}

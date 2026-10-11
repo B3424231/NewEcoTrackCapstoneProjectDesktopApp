@@ -1,0 +1,208 @@
+--- before/public/nodes.html
++++ public/nodes.html
+@@ -92,7 +92,7 @@
+   </style>
+   <script src="./js/supabase.umd.js"></script>
+   <script src="./js/supabase-client.js"></script>
+-  <script src="./js/hardware-cloud.js?v=7"></script>
++  <script src="./js/hardware-cloud.js?v=8"></script>
+   <script src="./js/controller-locations.js?v=1"></script>
+   <script src="./js/sidebar.js"></script>
+   <script src="./js/sidebar-loader.js?v=7"></script>
+@@ -415,6 +415,7 @@
+             <p id="registrationCloudTitle" class="font-bold">Supabase: Pending registration</p>
+             <p id="registrationCloudMessage">Bluetooth and Wi-Fi setup are complete. Save &amp; Verify Controller will register this device in Supabase and confirm its connection.</p>
+             <button type="button" id="reconnectRegistrationBtn" aria-busy="false" class="mt-2 inline-flex items-center justify-center px-3 py-2 rounded-lg border border-current font-bold focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-50">Reconnect ESP32</button>
++            <button type="button" id="chooseRegistrationBtn" class="hidden ml-2 px-2 py-2 underline underline-offset-2 font-semibold focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-50">Choose ESP32 again</button>
+           </div>
+ 
+ 
+@@ -527,11 +528,11 @@
+             </div>
+             <div>
+               <label class="block text-[10px] font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wider mb-1">Hardware Model</label>
+-              <input type="text" id="nodeFormHw" value="AC Controller Device (WiFi + IR)" class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/15 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-teal-500">
++              <input type="text" id="nodeFormHw" readonly value="Not reported" class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/15 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-teal-500">
+             </div>
+             <div>
+               <label class="block text-[10px] font-bold text-slate-500 dark:text-gray-400 uppercase tracking-wider mb-1">Firmware</label>
+-              <input type="text" id="nodeFormFw" value="v2.4.2-WiFi" class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/15 text-xs text-slate-900 dark:text-white font-mono focus:outline-none focus:border-teal-500">
++              <input type="text" id="nodeFormFw" readonly value="Not reported" class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/15 text-xs text-slate-900 dark:text-white font-mono focus:outline-none focus:border-teal-500">
+             </div>
+           </div>
+ 
+@@ -1116,7 +1117,8 @@
+           verifying: { title: 'Supabase: Registering and verifying...', badge: 'Verifying cloud', color: 'amber', message: 'Keep Bluetooth connected while the controller receives its cloud settings. Waiting for its Supabase confirmation...' },
+           verified: { title: 'Supabase: Connection verified', badge: 'Cloud verified', color: 'teal', message: 'The controller confirmed its Supabase connection. Brand detection is available from its Edit screen.' },
+           bluetooth: { title: 'Bluetooth: Reconnect required', badge: 'Bluetooth disconnected', color: 'rose', message: 'Bluetooth disconnected. Select Reconnect ESP32 and choose the same controller. Your entered details are preserved; Supabase setup is still unverified.' },
+-          reconnecting: { title: 'Bluetooth: Reconnecting...', badge: 'Reconnecting Bluetooth', color: 'amber', message: 'Choose the same ESP32 in the Bluetooth picker. Keep the board awake and nearby. Your controller details will be preserved.' },
++          bluetooth_request: { title: 'Bluetooth: Request failed', badge: 'Bluetooth needs retry', color: 'amber', message: 'The Bluetooth link is connected, but the setup request failed. Select Reconnect ESP32 to check its setup characteristics again.' },
++          reconnecting: { title: 'Bluetooth: Reconnecting...', badge: 'Reconnecting Bluetooth', color: 'amber', message: 'Checking the selected ESP32 and its setup characteristics. Keep the board awake and nearby. Your controller details will be preserved.' },
+           failed: { title: 'Supabase: Setup incomplete', badge: 'Setup incomplete', color: 'rose', message: 'Cloud setup could not be completed. Check the connection and try Save & Verify Controller again.' }
+         }[state];
+         const colors = {
+@@ -1136,6 +1138,11 @@
+         document.getElementById('saveNodeBtnText').textContent = state === 'verifying' ? 'Verifying Supabase...' : state === 'reconnecting' ? 'Reconnecting Bluetooth...' : 'Save & Verify Controller';
+         const reconnectButton = document.getElementById('reconnectRegistrationBtn');
+         if (reconnectButton) reconnectButton.disabled = registrationSaving || registrationReconnecting;
++        const chooseButton = document.getElementById('chooseRegistrationBtn');
++        if (chooseButton) {
++          chooseButton.classList.toggle('hidden', !['bluetooth','bluetooth_request'].includes(state));
++          chooseButton.disabled = registrationSaving || registrationReconnecting;
++        }
+       }
+       function setRemoteBusy(kind, busy) {
+         remoteCapture[kind].busy = busy;
+@@ -1431,6 +1438,30 @@
+         if (label) label.textContent = 'Test Connection';
+         refreshExistingWifiPanel();
+       }
++      function applyControllerInfo(info) {
++        document.getElementById('nodeFormFw').value = info?.firmware_version || 'Not reported';
++        document.getElementById('nodeFormHw').value = info?.capabilities?.ir_transmitter === true
++          ? 'ESP32-S3 IR receiver + transmitter'
++          : info?.capabilities?.ir_receiver === true ? 'ESP32-S3 IR receiver' : 'ESP32-S3 controller';
++      }
++      function acceptLiveBluetoothInfo(info) {
++        if (modal.classList.contains('hidden') || info?.device_id !== selectedBleDevice?.nodeId) return;
++        selectedBleDevice.info = info;
++        applyControllerInfo(info);
++        setConnectionCheck('chkBle', 'success', 'ESP32 replied over Bluetooth.');
++        const sameWifi = hasConnectedWifi(info) && info.wifi_ssid === document.getElementById('nodeFormSsid').value.trim();
++        if (sameWifi) {
++          existingWifiInfo = info; selectedBleDevice.ip = info.ip_address;
++          document.getElementById('nodeFormIp').value = info.ip_address;
++          document.getElementById('step3IpBadge').textContent = info.ip_address;
++        }
++        if (!registrationSaving && !registrationReconnecting && ['bluetooth','bluetooth_request'].includes(registrationCloudState))
++          setRegistrationCloudStatus('pending', sameWifi
++            ? 'ESP32 replied over Bluetooth and confirmed its Wi-Fi connection. Supabase registration is still pending. Select Save & Verify Controller when your details are ready.'
++            : 'ESP32 replied over Bluetooth. Verify its current Wi-Fi connection before saving.');
++        refreshExistingWifiPanel();
++      }
++      window.addEventListener?.('ecotrack:bluetooth-info', event => acceptLiveBluetoothInfo(event.detail?.info));
+       function hasConnectedWifi(info) {
+         const ip = info?.ip_address || '';
+         return !!info && !!selectedBleDevice?.nodeId && info.device_id === selectedBleDevice.nodeId && info.wifi_status === 'connected' &&
+@@ -1465,9 +1496,11 @@
+           document.getElementById('existingWifiMessage').textContent =
+             registrationCloudState === 'bluetooth' || registrationCloudState === 'reconnecting'
+               ? `Previously confirmed Wi-Fi: ${existingWifiInfo.wifi_ssid} (${existingWifiInfo.ip_address}). Reconnect Bluetooth to check the ESP32 again.`
++              : registrationCloudState === 'bluetooth_request'
++              ? `Bluetooth link connected; setup read failed. Wi-Fi last confirmed: ${existingWifiInfo.wifi_ssid} (${existingWifiInfo.ip_address}).`
+               : `Bluetooth verified. ESP32 is already connected to ${existingWifiInfo.wifi_ssid} (${existingWifiInfo.ip_address}). Steps 1 and 2 are complete.`;
+           document.getElementById('existingCloudMessage').textContent = existingWifiInfo.cloud_status === 'error'
+-            ? 'Supabase is not connected. Save & Verify Controller will refresh the deleted or invalid cloud registration.'
++            ? 'Last ESP32 report: Supabase is not connected. Save & Verify Controller will refresh the deleted or invalid cloud registration.'
+             : 'Save & Verify Controller will refresh this device registration and verify its Supabase connection.';
+         }
+       }
+@@ -1475,6 +1508,7 @@
+         if (!hasConnectedWifi(info)) return false;
+         existingWifiInfo = info;
+         selectedBleDevice.info = info;
++        applyControllerInfo(info);
+         selectedBleDevice.ip = info.ip_address;
+         document.getElementById('nodeFormSsid').value = info.wifi_ssid;
+         wifiConfirmedFor = info.wifi_ssid;
+@@ -1495,8 +1529,11 @@
+       function reportRegistrationFailure(error) {
+         const message = error?.message || 'Cloud setup could not be completed. Please try again.';
+         const bluetooth = isRegistrationBluetoothError(error);
+-        setRegistrationCloudStatus(bluetooth ? 'bluetooth' : 'failed', message);
+-        if (bluetooth) setConnectionCheck('chkBle', 'error', 'Bluetooth disconnected. Reconnect the same ESP32 to continue.');
++        const connectedFailure = bluetooth && error?.bluetooth_connected === true;
++        setRegistrationCloudStatus(bluetooth ? connectedFailure ? 'bluetooth_request' : 'bluetooth' : 'failed', message);
++        if (bluetooth) setConnectionCheck('chkBle', 'error', connectedFailure
++          ? 'Bluetooth link connected, but the setup request failed. Retry the device check.'
++          : 'Bluetooth disconnected. Reconnect the same ESP32 to continue.');
+         refreshExistingWifiPanel();
+         window.EcoToast?.show(message, 'error');
+       }
+@@ -1518,7 +1555,7 @@
+         refreshExistingWifiPanel();
+         return info;
+       }
+-      async function reconnectRegistrationController() {
++      async function reconnectRegistrationController(chooseDevice = false) {
+         if (registrationSaving || registrationReconnecting || remoteCapture.register.busy) return;
+         const nodeId = selectedBleDevice?.nodeId;
+         if (!nodeId) { setNodeModalStep(1); return; }
+@@ -1526,17 +1563,20 @@
+         const button = document.getElementById('reconnectRegistrationBtn');
+         const current = () => session === registrationSessionVersion && nodeId === selectedBleDevice?.nodeId && !modal.classList.contains('hidden');
+         registrationReconnecting = true;
+-        button.disabled = true; button.setAttribute('aria-busy', 'true'); button.textContent = 'Choose the same ESP32...';
++        button.disabled = true; button.setAttribute('aria-busy', 'true'); button.textContent = chooseDevice ? 'Choose the same ESP32...' : 'Checking ESP32...';
+         document.getElementById('saveNodeBtn').disabled = true;
+         document.getElementById('registerRemoteBtn').disabled = true;
+         setRegistrationCloudStatus('reconnecting');
+         refreshExistingWifiPanel();
+         try {
+-          // The explicit button opens the chooser if Windows pairing/authorization was removed.
+-          const info = await window.EcoTrackHardwareCloud.connect(nodeId);
++          // Reuse the known device; opening the picker is an explicit separate action.
++          const info = chooseDevice
++            ? await window.EcoTrackHardwareCloud.connect(nodeId)
++            : await window.EcoTrackHardwareCloud.reconnect(nodeId);
+           if (!current()) return;
+           if (info.device_id !== nodeId) throw Object.assign(new Error('Reconnect the selected ESP32. The Bluetooth device does not match this controller.'), { code: 'BLE_DEVICE_MISMATCH' });
+           selectedBleDevice.info = info;
++          applyControllerInfo(info);
+           const previousSsid = document.getElementById('nodeFormSsid').value.trim();
+           if (hasConnectedWifi(info)) {
+             if (previousSsid !== info.wifi_ssid) {
+@@ -1557,13 +1597,15 @@
+           if (current()) {
+             registrationReconnecting = false;
+             button.disabled = false; button.setAttribute('aria-busy', 'false'); button.textContent = 'Reconnect ESP32';
++            document.getElementById('chooseRegistrationBtn').disabled = false;
+             document.getElementById('saveNodeBtn').disabled = remoteCapture.register.busy;
+             document.getElementById('registerRemoteBtn').disabled = !selectedBleDevice?.info;
+             updateNextButtonState();
+           }
+         }
+       }
+-      document.getElementById('reconnectRegistrationBtn')?.addEventListener('click', reconnectRegistrationController);
++      document.getElementById('reconnectRegistrationBtn')?.addEventListener('click', () => reconnectRegistrationController());
++      document.getElementById('chooseRegistrationBtn')?.addEventListener('click', () => reconnectRegistrationController(true));
+       window.addEventListener?.('ecotrack:bluetooth-disconnected', event => {
+         if (modal.classList.contains('hidden') || event.detail?.device_id !== selectedBleDevice?.nodeId || registrationSaving || registrationReconnecting) return;
+         setRegistrationCloudStatus('bluetooth');
+@@ -1671,6 +1713,7 @@
+         resetRemoteDetection('register');
+         const previousId = selectedBleDevice?.nodeId;
+         selectedBleDevice = device;
++        applyControllerInfo(device.info);
+         if (previousId !== device.nodeId) {
+           document.getElementById('nodeFormPassword').value = '';
+           document.getElementById('registrationWifiPassword').value = '';
+@@ -2627,8 +2670,8 @@
+           passBadge.className = 'font-mono font-bold text-[10px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-white/10 text-slate-600 dark:text-gray-300';
+         }
+ 
+-        document.getElementById('nodeFormHw').value = 'AC Controller Device (WiFi + IR)';
+-        document.getElementById('nodeFormFw').value = 'v2.4.2-WiFi';
++        document.getElementById('nodeFormHw').value = 'Not reported';
++        document.getElementById('nodeFormFw').value = 'Not reported';
+         document.getElementById('nodeFormStatus').value = 'Offline';
+         wifiConfirmedFor = null;
+ 
+@@ -2680,9 +2723,6 @@
+           return;
+         }
+ 
+-        const hardware = document.getElementById('nodeFormHw').value.trim() || 'AC Controller Device (WiFi + IR)';
+-        const status = document.getElementById('nodeFormStatus').value;
+-        const firmware = document.getElementById('nodeFormFw').value.trim() || 'v2.4.2-WiFi';
+         const ip_address = document.getElementById('nodeFormIp').value.trim();
+         const wifi_ssid = document.getElementById('nodeFormSsid').value.trim();
+         const credentials = registrationCredentials();
+@@ -2761,6 +2801,7 @@
+         } finally {
+           registrationSaving = false; saveNodeBtn.disabled = false;
+           document.getElementById('reconnectRegistrationBtn').disabled = false;
++          document.getElementById('chooseRegistrationBtn').disabled = false;
+         }
+       });
+ 

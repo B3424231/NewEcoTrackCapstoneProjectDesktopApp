@@ -1,0 +1,29 @@
+--- before/public/nodes.html
++++ public/nodes.html
+@@ -100,7 +100,7 @@
+   <script src="./js/eco-network.js"></script>
+   <script src="./js/eco-data-bus.js"></script>
+   <script src="./js/skeletons.js"></script>
+-  <script src="./js/aircon-system.js?v=14"></script>
++  <script src="./js/aircon-system.js?v=15"></script>
+ </head>
+ 
+ <body class="app-shell bg-gray-50 dark:bg-[#0a0f1d] text-slate-800 dark:text-slate-100 transition-colors duration-200">
+@@ -2625,14 +2625,14 @@
+           registered = await window.EcoTrackHardwareCloud.register({ room_id: effectiveRoomId, brand: brand || null, aircon_type }, credentials);
+           await NodeService.saveNode({
+             node_id: registered.info.device_id, db_id: registered.node.id, cloud_registered: true, aircon_id: selectedAirconId,
+-            name, hardware: 'ESP32-S3 IR receiver', status: 'Connected',
++            name, hardware: registered.info.capabilities?.ir_transmitter === true ? 'ESP32-S3 IR controller' : 'ESP32-S3 IR receiver', status: 'Connected',
+             firmware: registered.info.firmware_version, cloud_state: registered.cloud_state, ip_address: registered.info.ip_address || null,
+             wifi_ssid: registered.info.wifi_ssid || wifi_ssid, capabilities: registered.info.capabilities,
+-            ir_rx: true, ir_tx: false, brand: effectiveBrand, aircon_type, protocol_name: selectedProtocol,
++            ir_rx: registered.info.capabilities?.ir_receiver === true, ir_tx: registered.info.capabilities?.ir_transmitter === true, brand: effectiveBrand, aircon_type, protocol_name: selectedProtocol,
+             building: bldText, floor: flrText, room_name: rmText, room_id: effectiveRoomId,
+             floor_id: effectiveFlrId, building_id: effectiveBldId,
+             location: deployment.location, connection: 'Supabase over Wi-Fi',
+-            rssi: registered.info.rssi ?? null, controls: ['IR Learning']
++            rssi: registered.info.rssi ?? null, controls: registered.info.capabilities?.ir_transmitter === true ? ['IR Control','IR Learning'] : ['IR Learning']
+           });
+           document.getElementById('nodeFormPassword').value = '';
+           document.getElementById('registrationWifiPassword').value = '';

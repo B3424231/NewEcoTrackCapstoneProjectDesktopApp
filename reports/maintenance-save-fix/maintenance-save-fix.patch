@@ -1,0 +1,490 @@
+--- before/src/main.js
++++ after/src/main.js
+@@ -555,60 +555,28 @@
+ registerDatabaseHandler('maintenance-save-report', async (event, input) => {
+   const client = getSupabaseAdmin();
+   if (!client) return { success: false, error: 'Database service unavailable' };
+-  const report = input?.record || input;
++  const report = input?.record;
+   if (!report?.id) return { success: false, error: 'Report is required' };
+-
+-  // 1. Attempt transactional RPC if operation context is provided
+-  if (input?.operationId && typeof input?.isNew === 'boolean') {
+-    try {
+-      const { data, error } = await client.rpc('ecotrack_admin_save_report', {
+-        p_record: report,
+-        p_expected_updated: input.expectedUpdated ?? report.updatedAt ?? null,
+-        p_parent_expected: input.parentExpected ?? null,
+-        p_operation_id: input.operationId,
+-        p_create: input.isNew
+-      });
+-      if (!error && data?.report) {
+-        return { success: true, data };
+-      }
+-      if (error && error.code === '40001') {
+-        return { success: false, error: 'This report changed. Refresh the report before saving again.', code: '40001' };
+-      }
+-      console.warn('[Main Process] ecotrack_admin_save_report RPC fallback:', error?.message);
+-    } catch (rpcErr) {
+-      console.warn('[Main Process] ecotrack_admin_save_report RPC exception:', rpcErr?.message);
+-    }
+-  }
+-
+-  // 2. Direct table upsert fallback
+-  try {
+-    const payload = { ...report, updated: new Date().toISOString() };
+-    const { data: savedReport, error: upsertErr } = await client
+-      .from('maintenance_reports')
+-      .upsert(payload, { onConflict: 'id' })
+-      .select()
+-      .single();
+-
+-    if (upsertErr) {
+-      console.warn('[Main Process] Direct report upsert error:', upsertErr.message);
+-      return { success: false, error: upsertErr.message, code: upsertErr.code };
+-    }
+-
+-    let parentRecord = null;
+-    if (payload.parent_report_id) {
+-      const { data: pData } = await client.from('maintenance_reports').select('*').eq('id', payload.parent_report_id).maybeSingle();
+-      parentRecord = pData || null;
+-    }
+-
+-    return {
+-      success: true,
+-      data: {
+-        report: savedReport,
+-        parent: parentRecord
+-      }
+-    };
+-  } catch (err) {
+-    return { success: false, error: err?.message || 'Failed to save maintenance report' };
++  if (!input.operationId || typeof input.isNew !== 'boolean') {
++    return { success: false, error: 'A report save operation is required. Refresh and retry.', code: 'INVALID_OPERATION' };
++  }
++  try {
++    const { data, error } = await client.rpc('ecotrack_admin_save_report', {
++      p_record: report,
++      p_expected_updated: input.expectedUpdated ?? null,
++      p_parent_expected: input.parentExpected ?? null,
++      p_operation_id: input.operationId,
++      p_create: input.isNew
++    });
++    // Validation, authorization and version checks belong to the transactional RPC.
++    // A rejected operation must never fall through to a direct table write.
++    if (error) return { success: false, error: error.message, code: error.code };
++    if (data?.report?.id !== report.id) {
++      return { success: false, error: 'Database did not confirm the report save.', code: 'INVALID_RESPONSE' };
++    }
++    return { success: true, data };
++  } catch (error) {
++    return { success: false, error: error?.message || 'Failed to save maintenance report', code: error?.code };
+   }
+ });
+ 
+--- before/public/js/maintenance-modal.js
++++ after/public/js/maintenance-modal.js
+@@ -15,6 +15,8 @@
+   }
+   let _reportsCache = [];
+   const reportVersions = new Map();
++  let reportWriteRevision = 0;
++  const confirmedReportWrites = new Map();
+ 
+   // Preserve legacy relative labels while rendering precise timestamps written
+   // by the mobile app in a concise, consistent desktop format.
+@@ -809,93 +811,21 @@
+     return [];
+   }
+ 
+-  function mergeReportsSafely(remoteData, localReports) {
+-    const remoteNormalized = Array.isArray(remoteData) ? remoteData.map(normalizeReport).filter(Boolean) : [];
+-    const remoteMap = new Map();
+-    remoteNormalized.forEach(r => {
+-      if (r && r.id) remoteMap.set(String(r.id).toUpperCase().trim(), r);
++  function mergeReportsSafely(remoteData, localReports, readRevision = reportWriteRevision) {
++    // Successful full reads are authoritative, including deletions and empty lists.
++    // Retain only writes confirmed after this read started, to avoid a read/save race.
++    const merged = Array.isArray(remoteData) ? remoteData.map(normalizeReport).filter(Boolean) : [];
++    for (const [id, write] of confirmedReportWrites) {
++      if (write.revision <= readRevision) continue;
++      const record = normalizeReport(write.record);
++      const index = merged.findIndex(item => item.id === id);
++      if (index >= 0) merged[index] = record; else merged.push(record);
++    }
++    merged.sort((a, b) => {
++      const timeA = Date.parse(a.created || a.created_date || a.createdDate) || 0;
++      const timeB = Date.parse(b.created || b.created_date || b.createdDate) || 0;
++      return timeB - timeA || String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true });
+     });
+-
+-    const merged = [...remoteNormalized];
+-    // Preserve local reports that remote queries haven't returned yet (e.g. newly dispatched tasks)
+-    if (Array.isArray(localReports)) {
+-      localReports.forEach(lr => {
+-        if (!lr || !lr.id || isMockOrTestReport(lr)) return;
+-        const key = String(lr.id).toUpperCase().trim();
+-        if (!remoteMap.has(key)) {
+-          // Local report not in remote data yet: preserve it at the top so it is never clobbered
+-          merged.unshift(lr);
+-        } else {
+-          // If remote exists, preserve any richer local in-progress task state or defect links
+-          const remoteItem = remoteMap.get(key);
+-          if (lr.issue && !remoteItem.issue) remoteItem.issue = lr.issue;
+-          if (lr.parentReportId && !remoteItem.parentReportId) remoteItem.parentReportId = lr.parentReportId;
+-          if (lr.parent_report_id && !remoteItem.parent_report_id) remoteItem.parent_report_id = lr.parent_report_id;
+-          if (lr.linkedRepairId && !remoteItem.linkedRepairId) remoteItem.linkedRepairId = lr.linkedRepairId;
+-          if (lr.linked_repair_id && !remoteItem.linked_repair_id) remoteItem.linked_repair_id = lr.linked_repair_id;
+-          if (lr.photo_url && !remoteItem.photo_url) remoteItem.photo_url = lr.photo_url;
+-          if (Array.isArray(lr.photos) && lr.photos.length > (Array.isArray(remoteItem.photos) ? remoteItem.photos.length : 0)) {
+-            remoteItem.photos = lr.photos;
+-            remoteItem.photoUris = lr.photos;
+-          }
+-          if (lr.issue && Array.isArray(lr.issue.photos) && lr.issue.photos.length > (Array.isArray(remoteItem.issue?.photos) ? remoteItem.issue.photos.length : 0)) {
+-            if (!remoteItem.issue) remoteItem.issue = {};
+-            remoteItem.issue.photos = lr.issue.photos;
+-            remoteItem.issue.photoUris = lr.issue.photos;
+-          }
+-          if (Array.isArray(lr.linkedRepairIds) && lr.linkedRepairIds.length > 0) {
+-            if (!Array.isArray(remoteItem.linkedRepairIds)) remoteItem.linkedRepairIds = [];
+-            lr.linkedRepairIds.forEach(id => {
+-              if (!remoteItem.linkedRepairIds.includes(id)) remoteItem.linkedRepairIds.push(id);
+-            });
+-          }
+-          if (lr.status === 'Under Repair' && remoteItem.status === 'Needs Repair') {
+-            remoteItem.status = 'Under Repair';
+-          }
+-          if (Array.isArray(lr.timeline) && lr.timeline.length > 0) {
+-            if (!Array.isArray(remoteItem.timeline) || remoteItem.timeline.length === 0) {
+-              remoteItem.timeline = lr.timeline;
+-            } else {
+-              lr.timeline.forEach(tl => {
+-                if (tl && tl.title && !remoteItem.timeline.some(rtl => rtl && rtl.title === tl.title)) {
+-                  remoteItem.timeline.unshift(tl);
+-                }
+-              });
+-            }
+-          }
+-          if (Array.isArray(lr.tasks) && Array.isArray(remoteItem.tasks)) {
+-            lr.tasks.forEach(lt => {
+-              const rt = remoteItem.tasks.find(t => String(t.id) === String(lt.id));
+-              if (rt && lt.linkedRepairId && !rt.linkedRepairId) {
+-                rt.linkedRepairId = lt.linkedRepairId;
+-                if (lt.status === 'Under Repair' && rt.status === 'Needs Repair') {
+-                  rt.status = 'Under Repair';
+-                }
+-              }
+-            });
+-          }
+-        }
+-      });
+-    }
+-
+-    const parseReportTime = (r) => {
+-      if (!r) return 0;
+-      if (r.created && !isNaN(new Date(r.created).getTime())) return new Date(r.created).getTime();
+-      if (r.createdDate && !isNaN(new Date(r.createdDate).getTime())) return new Date(r.createdDate).getTime();
+-      if (r.created_date && !isNaN(new Date(r.created_date).getTime())) return new Date(r.created_date).getTime();
+-      return 0;
+-    };
+-
+-    // Sort by created descending so newest reports are always at the top
+-    merged.sort((a, b) => {
+-      const timeA = parseReportTime(a);
+-      const timeB = parseReportTime(b);
+-      if (timeA !== timeB) {
+-        return timeB - timeA;
+-      }
+-      return String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true });
+-    });
+-
+     return syncReportsWithLinkedRepairs(deduplicateReports(merged));
+   }
+ 
+@@ -998,10 +928,12 @@
+     reportReadClient = sb;
+     reportAuthVersion += 1;
+     reportRowsRead = null;
++    confirmedReportWrites.clear();
+     sb.auth?.onAuthStateChange?.(() => {
+       if (reportReadClient !== sb) return;
+       reportAuthVersion += 1;
+       reportRowsRead = null;
++      confirmedReportWrites.clear();
+       if (reportsFetchPromise) reportsFetchPending = true;
+     });
+   }
+@@ -1011,15 +943,22 @@
+     const request = { client: sb, promise: null };
+     const controller = typeof AbortController === 'function' ? new AbortController() : null;
+     let timeout;
+-    let query = sb.from('maintenance_reports').select('*').order('created', { ascending: false });
+-    if (controller && typeof query.abortSignal === 'function') query = query.abortSignal(controller.signal);
+-    request.promise = Promise.race([
+-      Promise.resolve(query),
+-      new Promise((_, reject) => { timeout = setTimeout(() => {
+-        controller?.abort();
+-        reject(new Error('Supabase fetch timed out (2.5s)'));
+-      }, 2500); })
+-    ]).finally(() => {
++    request.promise = Promise.resolve(window.ecotrackAuthReady).then(async () => {
++      if (typeof sb.auth?.getSession === 'function') {
++        const { data, error } = await sb.auth.getSession();
++        if (error) throw error;
++        if (!data?.session) throw new Error('Sign in to refresh maintenance reports.');
++      }
++      let query = sb.from('maintenance_reports').select('*').order('created', { ascending: false });
++      if (controller && typeof query.abortSignal === 'function') query = query.abortSignal(controller.signal);
++      return Promise.race([
++        Promise.resolve(query),
++        new Promise((_, reject) => { timeout = setTimeout(() => {
++          controller?.abort();
++          reject(new Error('Supabase fetch timed out (2.5s)'));
++        }, 2500); })
++      ]);
++    }).finally(() => {
+       clearTimeout(timeout);
+       if (reportRowsRead === request) reportRowsRead = null;
+     });
+@@ -1064,28 +1003,18 @@
+       try {
+         ensureReportReadSession(sb);
+         const authVersion = reportAuthVersion;
++        const readRevision = reportWriteRevision;
+         const { data, error } = await readMaintenanceRows(sb);
+         if (authVersion !== reportAuthVersion) return _reportsCache;
+         if (!error && Array.isArray(data)) {
+           data.forEach(record => reportVersions.set(record.id, record.updated));
+           const localExisting = authoritative ? [] : ((_reportsCache && _reportsCache.length > 0) ? _reportsCache : getReportsLocal());
+-          _reportsCache = mergeReportsSafely(data, localExisting);
++          _reportsCache = mergeReportsSafely(data, localExisting, readRevision);
+           try {
+             localStorage.setItem('ecoTrack_maintenance_reports', JSON.stringify(_reportsCache));
+           } catch (e) { }
+           window.dispatchEvent(new Event('storage'));
+ 
+-          // Backfill: Auto-sync any locally created reports that haven't reached Supabase yet
+-          const remoteIds = new Set(data.map(r => r.id));
+-          const unsyncedReports = localExisting.filter(r => r && r.id && !isMockOrTestReport(r) && !remoteIds.has(r.id));
+-          if (unsyncedReports.length > 0) {
+-            console.log(`[EcoTrack Sync] Found ${unsyncedReports.length} unsynced local report(s). Syncing to Supabase...`, unsyncedReports.map(r => r.id));
+-            for (const unsynced of unsyncedReports) {
+-              saveReports(_reportsCache, unsynced, true).catch(syncErr => {
+-                console.warn('[EcoTrack Sync] Auto-sync warning for report ' + unsynced.id + ':', syncErr);
+-              });
+-            }
+-          }
+         }
+       } catch (err) {
+         console.warn('[Supabase maintenance load]:', err.message);
+@@ -1142,76 +1071,35 @@
+     }) || null;
+   }
+ 
++  async function resolveMaintenanceReference(table, candidateId, candidateName, label) {
++    const sb = getSb();
++    const id = String(candidateId || '').trim(), name = String(candidateName || '').trim();
++    if (!id && !name) return null;
++    let rows, error;
++    if (id) {
++      const result = await sb.from(table).select('id').eq('id', id).maybeSingle();
++      error = result.error;
++      rows = result.data ? [result.data] : [];
++    } else {
++      const result = await sb.from(table).select('id').eq('name', name).limit(2);
++      error = result.error;
++      rows = result.data || [];
++    }
++    if (error) throw error;
++    if (rows.length !== 1) {
++      const failure = new Error(`Selected ${label} no longer exists or is ambiguous. Refresh and choose an existing ${label}.`);
++      failure.code = 'INVALID_REFERENCE';
++      throw failure;
++    }
++    return rows[0].id;
++  }
++
+   function resolveValidNodeId(candidateId, candidateName) {
+-    if (!candidateId && !candidateName) return null;
+-    const strId = String(candidateId || '').trim();
+-    const strName = String(candidateName || '').trim();
+-
+-    const nodes = (_nodesAirconCache && _nodesAirconCache.length > 0)
+-      ? _nodesAirconCache
+-      : (window.activeNodesData || []);
+-
+-    const exact = nodes.find(n =>
+-      (n.nodeId && n.nodeId === strId) ||
+-      (n.pb_id && n.pb_id === strId) ||
+-      (n.id && n.id === strId) ||
+-      (n.name && n.name === strId) ||
+-      (strName && (
+-        (n.nodeId && n.nodeId === strName) ||
+-        (n.pb_id && n.pb_id === strName) ||
+-        (n.id && n.id === strName) ||
+-        (n.name && n.name === strName) ||
+-        (n.model && n.model === strName)
+-      ))
+-    );
+-    if (exact) {
+-      const resolved = exact.nodeId || exact.pb_id || (exact.id && String(exact.id).startsWith('node_') ? exact.id : null);
+-      if (resolved && String(resolved).startsWith('node_')) return resolved;
+-    }
+-
+-    const exactName = nodes.find(n =>
+-      (n.id && n.id.toLowerCase() === strName.toLowerCase()) ||
+-      (n.name && n.name.toLowerCase() === strName.toLowerCase()) ||
+-      (n.model && n.model.toLowerCase() === strName.toLowerCase()) ||
+-      (n.id && n.id.toLowerCase() === strId.toLowerCase()) ||
+-      (n.name && n.name.toLowerCase() === strId.toLowerCase())
+-    );
+-    if (exactName) {
+-      const resolved = exactName.nodeId || exactName.pb_id || (exactName.id && String(exactName.id).startsWith('node_') ? exactName.id : null);
+-      if (resolved && String(resolved).startsWith('node_')) return resolved;
+-    }
+-
+-    const KNOWN_MAP = {
+-      'node-1': 'node_001', 'node-2': 'node_002', 'node-3': 'node_003',
+-      'node-4': 'node_004', 'node-5': 'node_005', 'node-6': 'node_006',
+-      'node-9': 'node_node_9', 'node-10': 'node_node_10',
+-      'ac-001': 'node_001', 'ac-002': 'node_002', 'ac-003': 'node_003',
+-      'ac-004': 'node_004', 'ac-005': 'node_005', 'ac-006': 'node_006',
+-      'ac-009': 'node_node_9', 'ac-010': 'node_node_10',
+-      'ac-225': 'node_6d47jt6emtlqy3b',
+-      'ecotrack-node-225': 'node_6d47jt6emtlqy3b',
+-      'node-225': 'node_6d47jt6emtlqy3b',
+-      'ac-323': 'node_3cdgou8xmul5mkq',
+-      'ecotrack-esp32-s3': 'node_3cdgou8xmul5mkq',
+-      'ac-3232': 'node_f8cbj6o1mu5d879',
+-      'ecotrack-esp32-s3-2': 'node_f8cbj6o1mu5d879'
+-    };
+-    const key = (strId || strName).toLowerCase();
+-    if (KNOWN_MAP[key]) return KNOWN_MAP[key];
+-    if (strName && KNOWN_MAP[strName.toLowerCase()]) return KNOWN_MAP[strName.toLowerCase()];
+-    if (strId.startsWith('node_')) return strId;
+-    return null;
++    return resolveMaintenanceReference('nodes', candidateId, candidateName, 'controller');
+   }
+ 
+   function resolveValidRoomId(candidateId, candidateName) {
+-    if (!candidateId && !candidateName) return null;
+-    const strId = String(candidateId || '').trim();
+-    const strName = String(candidateName || '').toLowerCase().trim();
+-    if (strName.includes('room 1') || strId === 'rm_a6f6b95d56084c6') return 'rm_a6f6b95d56084c6';
+-    if (strName.includes('server') || strId === 'rm_svr_01') return 'rm_svr_01';
+-    if (strName.includes('lab') || strId === 'rm_lab_01') return 'rm_lab_01';
+-    if (strId.startsWith('rm_')) return strId;
+-    return null;
++    return resolveMaintenanceReference('rooms', candidateId, candidateName, 'room');
+   }
+ 
+   function resolveValidStaffId(candidateId, candidateName) {
+@@ -1245,17 +1133,18 @@
+     const sb = getSb();
+     if (sb && targetReport) {
+       try {
+-        const validNodeId = resolveValidNodeId(
++        await window.ecotrackAuthReady;
++        const validNodeId = await resolveValidNodeId(
+           targetReport.aircon_id || targetReport.nodeId || targetReport.node_id,
+           targetReport.aircon_name || targetReport.airconId
+         );
+-        const safeNodeId = (validNodeId && String(validNodeId).startsWith('node_')) ? validNodeId : null;
+-
+-        const validRoomId = resolveValidRoomId(
++        const safeNodeId = validNodeId;
++
++        const validRoomId = await resolveValidRoomId(
+           targetReport.room_id || targetReport.roomId,
+           targetReport.room_name || targetReport.room
+         );
+-        const safeRoomId = (validRoomId && String(validRoomId).startsWith('rm_')) ? validRoomId : null;
++        const safeRoomId = validRoomId;
+ 
+         const validStaffId = resolveValidStaffId(
+           targetReport.staff_id || targetReport.staffId,
+@@ -1267,9 +1156,9 @@
+           id: targetReport.id,
+           aircon_id: safeNodeId,
+           aircon_name: targetReport.aircon_name || targetReport.airconId || (safeNodeId ? 'AC Unit' : 'AC-Unassigned'),
+-          aircon_type: targetReport.aircon_type || targetReport.airconType || 'Split Type (Inverter)',
++          aircon_type: targetReport.aircon_type || targetReport.airconType || null,
+           room_id: safeRoomId,
+-          room_name: targetReport.room_name || targetReport.room || 'Main Campus',
++          room_name: targetReport.room_name || targetReport.room || 'Unassigned',
+           type: targetReport.type,
+           priority: targetReport.priority,
+           staff_id: safeStaffId,
+@@ -1311,7 +1200,8 @@
+           } catch (ipcErr) {
+             console.warn('[saveReports] Electron IPC save notice:', ipcErr?.message);
+           }
+-        } else {
++        }
++        if (!result) {
+           try {
+             const response = await sb.rpc('ecotrack_admin_save_report', { p_record: payload, p_expected_updated: expectedUpdated, p_parent_expected: parentExpected, p_operation_id: operation.id, p_create: isNewReport });
+             result = { success: !response.error, data: response.data, error: response.error?.message, code: response.error?.code };
+@@ -1327,44 +1217,17 @@
+           throw error;
+         }
+ 
+-        // Resilient Direct Upsert Fallback
+-        if (!result || !result.success || result.data?.report?.id !== payload.id) {
+-          try {
+-            const directPayload = { ...payload, updated: new Date().toISOString() };
+-            const { data: directData, error: directErr } = await sb
+-              .from('maintenance_reports')
+-              .upsert(directPayload, { onConflict: 'id' })
+-              .select()
+-              .single();
+-
+-            if (!directErr && directData?.id === payload.id) {
+-              let savedParent = null;
+-              if (parent && payload.parent_report_id) {
+-                const { data: pData } = await sb.from('maintenance_reports').select('*').eq('id', payload.parent_report_id).maybeSingle();
+-                savedParent = pData || null;
+-              }
+-              result = {
+-                success: true,
+-                data: {
+-                  report: directData,
+-                  parent: savedParent
+-                }
+-              };
+-            } else if (directErr) {
+-              console.warn('[saveReports] Direct Supabase upsert notice:', directErr.message);
+-            }
+-          } catch (directExc) {
+-            console.warn('[saveReports] Direct Supabase upsert exception:', directExc);
+-          }
+-        }
+-
+         if (!result?.success || result?.data?.report?.id !== payload.id) {
+-          throw new Error('Database did not confirm the report save. Refresh and retry; the previous state has been preserved.');
++          const failure = new Error(result?.error || 'Database did not confirm the report save. Refresh and retry; the previous state has been preserved.');
++          failure.code = result?.code;
++          throw failure;
+         }
+ 
+         pendingReportOperations.delete(targetReport.id);
++        reportWriteRevision += 1;
+         for (const record of [result.data.report, result.data.parent].filter(Boolean)) {
+           reportVersions.set(record.id, record.updated);
++          confirmedReportWrites.set(record.id, { revision: reportWriteRevision, record: JSON.parse(JSON.stringify(record)) });
+           const normalized = normalizeReport(record);
+           // Update existing references as well as the cache so linked repair saves use the new parent version.
+           for (const item of reports) if (item.id === record.id) Object.assign(item, normalized);
+@@ -1937,10 +1800,11 @@
+       try {
+         ensureReportReadSession(sb);
+         const authVersion = reportAuthVersion;
++        const readRevision = reportWriteRevision;
+         const { data, error } = await readMaintenanceRows(sb);
+         if (authVersion !== reportAuthVersion) return;
+         if (!error && Array.isArray(data)) {
+-          const freshNormalized = mergeReportsSafely(data, _reportsCache);
++          const freshNormalized = mergeReportsSafely(data, _reportsCache, readRevision);
+           const freshHash = JSON.stringify(freshNormalized.map(r => ({
+             id: r.id,
+             status: r.status,

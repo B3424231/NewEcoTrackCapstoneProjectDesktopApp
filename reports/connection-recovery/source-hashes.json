@@ -1,0 +1,11 @@
+{
+  "public/nodes.html": "a8fc7bad3784eac7efbd4da5f96089f9bbdc3c658a50ebc1418eb655e19f9e8e",
+  "public/js/hardware-cloud.js": "cb8ba7684569c3b25e66e0bdada2f2c6509d554af4c117fba24b956d2315e56f",
+  "public/styles.css": "8cf36456f772acd944a2d2ef407f655d24b1b6114e2cf48274bf6bb733e22271",
+  "scripts/test_registration_progress.js": "8bc3387a70b7d7723faa363faf5272afac4146cb6e8d202da859c97ade0353df",
+  "scripts/test_device_setup_feedback.js": "89202878c6ed9bfd957210354d16c39a994b1fe453076a5c84e9eab7c84dc211",
+  "scripts/test_cloud_hardware_client.js": "bf3a314afceca7895e21ee131b38c782ee6864279df748f98e6f986c3e85dd26",
+  "reports/cloud-hardware/SETUP.md": "5c5ac361c0195982e3b719e44b7ba1706da8ac1a06ce550553d22e49e3407bfc",
+  "scripts/test_connection_recovery.js": "85e1011d3f65e1b786017aa8d162820486421b70b726edfd2ef858c61199efeb",
+  "scripts/test_connection_recovery_render.js": "015cec9fb1eac03a821d61ed8116e0c02bc7d7b7a6da9a1658666553cac10e25"
+}

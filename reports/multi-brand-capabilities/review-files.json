@@ -1,0 +1,34 @@
+{
+  "saved_originals_compared": [
+    "config/ac-capabilities.sql.source",
+    "config/ac-capability-engine.source.js",
+    "public/Notification.html",
+    "public/aircons.html",
+    "public/control.html",
+    "public/css/controller-details.css",
+    "public/dashboard.html",
+    "public/ir-library.html",
+    "public/js/ac-capability-registry.source.js",
+    "public/js/ac-capability-verification.js",
+    "public/js/aircon-state.js",
+    "public/js/aircon-system.js",
+    "public/js/controller-registration.js",
+    "public/js/notifications.js",
+    "public/js/scheduler.js",
+    "public/logs.html",
+    "public/nodes.html",
+    "public/scheduler.html",
+    "public/staff.html",
+    "public/telemetry.html",
+    "reports/cloud-hardware/EcoTrackCloudReceiver.ino.txt"
+  ],
+  "additional_generated_or_new_files": [
+    "config/ac-capabilities.json",
+    "config/ac-capabilities.firmware.source.h",
+    "public/js/controller-details.js",
+    "supabase_ac_capabilities_migration.sql",
+    "supabase_aircon_names_migration.sql",
+    "supabase_controller_details_migration.sql"
+  ],
+  "unrelated_git_changes_excluded": true
+}

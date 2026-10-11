@@ -1,0 +1,12 @@
+{
+  "board": "esp32:esp32:esp32s3",
+  "esp32_core": "3.3.12",
+  "IRremoteESP8266": "2.9.0",
+  "ArduinoJson": "7.4.3",
+  "compile_status": "passed",
+  "program_bytes": 1224472,
+  "program_capacity_bytes": 1310720,
+  "global_memory_bytes": 49428,
+  "firmware_files_changed": false,
+  "hardware_flashed": false
+}

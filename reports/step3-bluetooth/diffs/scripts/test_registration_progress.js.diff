@@ -1,0 +1,52 @@
+--- before/scripts/test_registration_progress.js
++++ scripts/test_registration_progress.js
+@@ -15,7 +15,7 @@
+  for(const [id,value]of Object.entries({nodeFormId:deviceId,nodeFormName:'Receiver lab',nodeFormIp:'10.0.0.4',nodeFormSsid:'Fixture network',nodeFormPassword:'fixture-password',nodeFormBuilding:'b1',nodeFormFloor:'f1',nodeFormRoom:'r1',editNodeIdHidden:deviceId,editNodeIp:'10.0.0.4'}))get(id).value=value;
+  const db={buildings:[{id:'b1',name:'Fixture building'}],floors:[{id:'f1',name:'Fixture floor',building_id:'b1'}],rooms:[{id:'r1',name:'Fixture room',floor_id:'f1'}]};
+  let denied=null;
+- const window={document:{getElementById:get},EcoTrackHardwareCloud:{register:async(...args)=>{calls.push(args);return capture.promise;},completeRegistration:id=>completed.push(id)},EcoToast:{show:(message,kind)=>toasts.push({message,kind})},EcoDataBus:{invalidate(){}}};
++ const window={document:{getElementById:get},EcoTrackHardwareCloud:{reconnect:async id=>({device_id:id,wifi_status:'connected',wifi_ssid:'Fixture network',ip_address:'10.0.0.4',capabilities:{ir_receiver:true}}),connect:async id=>({device_id:id,wifi_status:'connected',wifi_ssid:'Fixture network',ip_address:'10.0.0.4'}),register:async(...args)=>{calls.push(args);return capture.promise;},completeRegistration:id=>completed.push(id)},EcoToast:{show:(message,kind)=>toasts.push({message,kind})},EcoDataBus:{invalidate(){}}};
+  window.supabaseClient={from(table){let id,payload;const q={select(){return q;},eq(k,v){id=v;return q;},insert(v){payload=v[0];return q;},async maybeSingle(){return {data:db[table].find(r=>r.id===id),error:null};},async single(){
+  if(denied===table)return {data:null,error:{message:'Location save denied'}};
+  assert(!Object.hasOwn(payload,'id'),'IDs must come from Supabase defaults');const row={id:table+'-server-'+db[table].length,...payload};writes.push({table,payload});db[table].push(row);return {data:row,error:null};
+@@ -23,7 +23,7 @@
+  const context=vm.createContext({window,console,document:window.document,setTimeout:()=>1,
+  NodeService:{saveNode:async data=>{saved.push(data);return persisted.promise;},getNode:()=>({db_id:'n1',node_id:deviceId,brand:null}),saveRemoteProfile:async()=>{throw Error('Unnecessary profile save');}},
+  CapabilityEngine:{resolveProtocolName:brand=>brand?'DAIKIN':null},ProtocolAdapter:{detectRemoteBrand:async()=>({success:true,brand:'Daikin',protocol:'DAIKIN2'})},
+- renderBrandChips(){},renderNodes(){},setNodeModalStep(){},resetDeviceIpFeedback(){},nodeCurrentPage:1,
++ renderBrandChips(){},renderNodes(){},setNodeModalStep(){},resetDeviceIpFeedback(){},updateDeviceIpResult(){},setDeviceIpFeedback(){},updateNextButtonState(){},nodeCurrentPage:1,
+  _cachedBuildings:[...db.buildings],_cachedFloors:[...db.floors],_cachedRooms:[...db.rooms],
+  currentModalStep:3,selectedBleDevice:{nodeId:deviceId,info:{device_id:deviceId}},wifiConfirmedFor:'Fixture network',
+  AirconProfileManager:{getById:()=>null},modal:get('nodeModal'),saveNodeBtn:get('saveNodeBtn'),form:{addEventListener:(name,fn)=>handlers.set(name,fn)}});
+@@ -92,6 +92,31 @@
+  assert.equal(edits[0].room_id,app.context._cachedRooms.at(-1).id);assert.equal(app.context._cachedRooms.at(-1).floor_id,app.context._cachedFloors.at(-1).id);
+  checks.push('Edit saves a complete custom hierarchy without requiring a brand or changing real status');
+  app=harness();app.context.ProtocolAdapter.detectRemoteBrand=async()=>{throw Error('Controller is sleeping');};await app.context.listenForRemote('edit');assert.match(app.get('editRemoteStatus').textContent,/sleeping/);assert.equal(app.get('saveEditNodeBtn').disabled,false);checks.push('IR failures remain actionable and release edit controls');
++ app=harness();app.get('nodeFormRoom').value='custom';app.get('nodeFormCustomRoom').value='Preserved room';
++ app.window.EcoTrackHardwareCloud.reconnect=async()=>{throw Object.assign(new Error('Bluetooth disconnected. Select Reconnect ESP32.'),{code:'BLE_DISCONNECTED'});};
++ await app.submit();assert.equal(app.calls.length,0);assert.equal(app.writes.length,0);assert.equal(app.get('registrationCloudStatus').dataset.state,'bluetooth');
++ assert.equal(app.get('nodeFormCustomRoom').value,'Preserved room');assert.equal(app.get('nodeFormName').value,'Receiver lab');assert.equal(app.get('nodeFormPassword').value,'fixture-password');
++ assert.equal(app.get('saveNodeBtn').disabled,false);assert.equal(app.get('reconnectRegistrationBtn').disabled,false);
++ checks.push('A dropped Bluetooth connection preserves the form and is reported before location writes or credential rotation');
++ app=harness();app.window.EcoTrackHardwareCloud.reconnect=async()=>({device_id:'esp32s3-ffeeddccbbaa',wifi_status:'connected',wifi_ssid:'Fixture network',ip_address:'10.0.0.9'});
++ await app.submit();assert.equal(app.calls.length,0);assert.equal(app.writes.length,0);assert.equal(app.get('registrationCloudStatus').dataset.state,'bluetooth');
++ checks.push('A different ESP32 cannot be registered under the selected controller details');
++ app=harness();app.window.EcoTrackHardwareCloud.reconnect=async()=>({device_id:deviceId,wifi_status:'connected',wifi_ssid:'Changed network',ip_address:'10.0.0.4'});
++ await app.submit();assert.equal(app.calls.length,0);assert.equal(app.context.wifiConfirmedFor,null);assert.match(app.toasts.at(-1).message,/Wi-Fi connection has changed/);
++ checks.push('Changed Wi-Fi must be verified before any registration write');
++ app=harness();const reconnect=deferred();let selections=0;app.window.EcoTrackHardwareCloud.connect=async id=>{assert.equal(id,deviceId);selections++;return reconnect.promise;};
++ const reconnecting=app.context.reconnectRegistrationController();assert.equal(app.get('saveNodeBtn').disabled,true);assert.equal(app.get('reconnectRegistrationBtn').attributes['aria-busy'],'true');
++ await app.context.reconnectRegistrationController();assert.equal(selections,1);
++ reconnect.resolve({device_id:deviceId,wifi_status:'connected',wifi_ssid:'Fixture network',ip_address:'10.0.0.6'});await reconnecting;
++ assert.equal(app.get('nodeFormName').value,'Receiver lab');assert.equal(app.get('nodeFormRoom').value,'r1');assert.equal(app.get('nodeFormPassword').value,'fixture-password');
++ assert.equal(app.get('registrationCloudStatus').dataset.state,'pending');assert.equal(app.calls.length,0);assert.equal(app.get('saveNodeBtn').disabled,false);
++ checks.push('Step 3 reconnect checks live identity and Wi-Fi, preserves form values, guards duplicates, and never saves automatically');
++ app=harness();app.window.EcoTrackHardwareCloud.connect=async()=>({device_id:deviceId,wifi_status:'connected',wifi_ssid:'Changed network',ip_address:'10.0.0.8'});
++ await app.context.reconnectRegistrationController();assert.equal(app.get('nodeFormSsid').value,'Changed network');assert.equal(app.get('nodeFormPassword').value,'');assert.equal(app.get('registrationWifiPassword').value,'');
++ checks.push('Reconnecting to a changed SSID discards the old network password');
++ app=harness();const late=deferred();app.window.EcoTrackHardwareCloud.connect=()=>late.promise;const waiting=app.context.reconnectRegistrationController();app.context.closeModal();late.resolve({device_id:deviceId,wifi_status:'connected',wifi_ssid:'New network',ip_address:'10.0.0.7'});await waiting;
++ assert.equal(app.get('nodeFormSsid').value,'Fixture network');assert.equal(app.get('nodeModal').classList.contains('hidden'),true);assert.equal(app.calls.length,0);
++ checks.push('A late reconnect reply cannot repopulate a closed wizard');
+  for(const script of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi))if(script[1].trim())new vm.Script(script[1]);
+  fs.mkdirSync('reports/controller-workflow',{recursive:true});fs.writeFileSync('reports/controller-workflow/registration-tests.json',JSON.stringify({passed:checks.length,checks,physical_hardware_tested:false},null,2));
+  console.log('Registration progress: '+checks.length+' checks passed.');

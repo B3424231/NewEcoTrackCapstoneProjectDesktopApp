@@ -1,0 +1,10 @@
+--- before/scripts/test_logs_stability.js
++++ scripts/test_logs_stability.js
+@@ -175,6 +175,7 @@
+     document: { getElementById: id => id === 'logsTableBody' ? tbody : {},
+       createDocumentFragment: () => ({ rows: [], appendChild(row) { this.rows.push(row); } }), createElement: () => ({}) }
+   });
++  vm.runInContext(section('function getRecordedClimateModes(', 'function getRuntimeIntervalMs('), context);
+   vm.runInContext(section('function render({', '// ── REDESIGNED EXECUTIVE EXCEL'), context);
+   context.render({ preserveScroll: true });
+   assert.equal(scroll.scrollTop, 80, 'Background refresh preserves table position');

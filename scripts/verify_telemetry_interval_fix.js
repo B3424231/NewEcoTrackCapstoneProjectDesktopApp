@@ -62,16 +62,16 @@ if (telemetryCode.includes("nodes-realtime-telemetry") && telemetryCode.includes
 console.log('\n7. telemetry.html Modal Send Interval Erased:');
 const htmlCode = fs.readFileSync(path.join(__dirname, '../public/telemetry.html'), 'utf8');
 if (!htmlCode.includes('nodeDetailIntervalVal')) {
-  console.log('  ✅ Sensor Send Interval configuration box cleanly removed from modal');
+  console.log('  ✅ Control Send Interval configuration box cleanly removed from modal');
 } else {
-  console.error('  ❌ Sensor Send Interval controls still present in modal');
+  console.error('  ❌ Control Send Interval controls still present in modal');
   process.exit(1);
 }
 
 console.log('\n8. scheduler.js telemetry resolution:');
 const schedulerCode = fs.readFileSync(path.join(__dirname, '../public/js/scheduler.js'), 'utf8');
 if (schedulerCode.includes("telemetryByNodeId[t.sensor_name] = t") && schedulerCode.includes("telemetryByNodeId[n.name]")) {
-  console.log('  ✅ scheduler.js maps telemetry by sensor_name to match PocketBase sensor logs');
+  console.log('  ✅ scheduler.js maps telemetry by sensor_name to match PocketBase control logs');
 } else {
   console.error('  ❌ scheduler.js telemetry resolution missing sensor_name');
   process.exit(1);

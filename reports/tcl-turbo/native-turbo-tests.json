@@ -1,0 +1,17 @@
+{
+  "checks": [
+    "Production controls show supported Turbo separately from High fan, initially OFF.",
+    "Unsupported special functions are excluded by the receiver manifest.",
+    "Native Turbo button uses the shared command engine and a separate Turbo flag.",
+    "Received Turbo ON activates the actual control and dashboard automatically without reloading.",
+    "light production shell renders received Turbo ON without overflow.",
+    "dark production shell renders received Turbo ON without overflow.",
+    "Received Turbo OFF automatically clears the control and dashboard Turbo label.",
+    "Changing receiver capabilities hides unsupported Turbo without reloading.",
+    "A missing decoded Turbo value preserves the previous reliable observation."
+  ],
+  "elapsed_ms": 4936,
+  "passed": 9,
+  "live_database_modified": false,
+  "physical_hardware_tested": false
+}

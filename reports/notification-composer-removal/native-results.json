@@ -1,0 +1,10 @@
+{
+  "passed": 3,
+  "checks": [
+    "Empty room renders automatic alert guidance without a composer or broadcast action; room selection and live refresh start.",
+    "Rule and schedule records still load; filters, detail modal, read persistence and Escape dismissal work.",
+    "Automatic delivery triggers each existing alert once; no manual-create calls or notification data deletion occur."
+  ],
+  "errors": [],
+  "live_database_modified": false
+}

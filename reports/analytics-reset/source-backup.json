@@ -1,0 +1,13 @@
+{
+  "path": "C:\\Users\\reygay\\AppData\\Local\\Temp\\ecotrack-analytics-source-before-cz_ngdcr",
+  "files": [
+    "backend/app.py",
+    "public/js/logs.js",
+    "public/logs.html",
+    "scripts/test_logs_stability.js",
+    "scripts/test_cloud_telemetry_sync.py",
+    "README.md",
+    "public/js/telemetry-new.js",
+    "public/js/node-sync.js"
+  ]
+}

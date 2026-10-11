@@ -1,0 +1,22 @@
+{
+  "checks": [
+    "Production dashboard and controls update received power, temperature, mode, fan, Turbo and Swing synchronously from a compact Postgres event.",
+    "Fast Postgres rendering uses zero additional database queries.",
+    "Private Broadcast immediately renders actual Remote OFF, temperature, mode, Low fan and Turbo OFF without a fetch or page reload.",
+    "The native Chromium fixture remains free of horizontal overflow."
+  ],
+  "timings": [
+    {
+      "event": "Postgres ON",
+      "mock_event_to_dom_ms": 5.5
+    },
+    {
+      "event": "Broadcast OFF",
+      "mock_event_to_dom_ms": 2.5999999046325684
+    }
+  ],
+  "passed": 4,
+  "live_database_modified": false,
+  "physical_hardware_tested": false,
+  "timing_scope": "Mock Realtime callback to synchronous DOM updates; excludes hardware and network"
+}

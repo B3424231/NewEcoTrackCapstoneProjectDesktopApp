@@ -1,0 +1,24 @@
+{
+  "passed": 17,
+  "checks": [
+    "Turbo is supported by the exact detected TCL112AC protocol; a manufacturer name or TCL96AC does not invent support.",
+    "Six page engines follow received TCL112AC rather than an incorrect saved brand, without rewriting the database profile.",
+    "Legacy kMax fan is High; a checksummed packet with Turbo OFF stays OFF across all six pages.",
+    "Old Generic capability cache cannot hide a feature supported by the received protocol.",
+    "Legacy Turbo ON is taken from the independent Turbo bit, together with the received swing flag.",
+    "Production dashboard separates High fan from active Turbo.",
+    "Production Schedule mode summary includes the actual received Turbo flag separately from High fan.",
+    "Explicit receiver flags update Turbo, Swing and Eco, while the receiver manifest excludes unsupported functions.",
+    "Auxiliary packets and noise preserve the last full observation and supported controls.",
+    "Truncated or corrupt legacy packets leave Turbo unknown instead of inferring it from fan speed.",
+    "Explicit firmware-decoded fields take priority over the compatibility reader.",
+    "Receiver protocol identifiers normalize case and accept raw_type when protocol is absent.",
+    "Manual protocol overrides that contradict the receiver are rejected without a cloud command.",
+    "Turbo ON and OFF dispatch separate flags using the detected protocol, with normal High fan and honest Queued delivery.",
+    "A receiver manifest denying Turbo hides and rejects it without queuing a command.",
+    "Malformed capability strings, fan names and temperature ranges cannot enable controls.",
+    "A new valid received protocol replaces the previous capability family across all six engines."
+  ],
+  "live_database_modified": false,
+  "physical_hardware_tested": false
+}

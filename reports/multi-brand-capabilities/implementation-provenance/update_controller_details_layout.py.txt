@@ -1,0 +1,59 @@
+from pathlib import Path
+p=Path('public/nodes.html');s=p.read_text(encoding='utf-8')
+a=s.index('  <div id="viewNodeModal"');b=s.index('  <!-- EDIT ',a) if '  <!-- EDIT ' in s[a:] else s.index('  <div id="editNodeModal"',a)
+part=s[a:b].replace('grid grid-cols-1 sm:grid-cols-2 gap-3','controller-details-grid').replace('text-xs flex justify-between','text-xs controller-details-row')
+part=part.replace('p-3.5 rounded-xl bg-slate-50','controller-details-card p-3.5 rounded-xl bg-slate-50')
+part=part.replace('<span class="text-gray-500">MAC Address:</span> <span id="viewMacAddress" class="font-mono text-slate-800 dark:text-white">3C:71:BF:24:A8:12</span>','<span class="text-gray-500">Battery:</span> <span id="viewBattery" class="font-mono text-slate-800 dark:text-white">Not reported</span>')
+part=part.replace('truncate max-w-[150px]','').replace('>room 1 (main campus • first floor)</span>','>Unassigned</span>')
+needle='          </div>\n\n          <div class="controller-details-card'
+start=part.index('id="viewLocationTag"');pos=part.index(needle,start)
+part=part[:pos]+'''
+            <div class="controller-deployment-dates space-y-2">
+              <div class="text-xs controller-details-row"><span class="text-gray-500">Saved date:</span><time id="viewDeploymentDate" class="font-semibold">Not recorded</time></div>
+              <div class="text-xs controller-details-row"><span class="text-gray-500">Saved time:</span><time id="viewDeploymentTime" class="font-mono">Not recorded</time></div>
+              <p id="viewDeploymentTimezone" class="controller-date-note"></p>
+              <p id="viewAdminVerified" class="controller-date-note"></p>
+            </div>
+'''+part[pos:]
+part=part.replace('<span class="font-semibold text-emerald-600 dark:text-emerald-400">IR TX &amp; IR Learning Active</span>','<span id="viewIrRole" class="font-semibold text-emerald-600 dark:text-emerald-400">Not reported</span>')
+s=s[:a]+part+s[b:]
+s=s.replace("window.EcoTrackControllerDetails.render(node);","window.EcoTrackControllerDetails.render(node);\n        document.getElementById('viewIrRole').textContent = node.ir_tx && node.ir_rx ? 'IR TX & IR Learning Active' : node.ir_rx ? 'IR Learning Active' : node.ir_tx ? 'IR TX Active' : 'Not reported';")
+p.write_text(s,encoding='utf-8',newline='\r\n')
+source=Path('supabase_controller_registration_migration.sql').read_text(encoding='utf-8')
+a=source.index('CREATE OR REPLACE FUNCTION public.ecotrack_finish_controller_registration');b=source.index('END $$;',a)+len('END $$;')
+fn=source[a:b].replace(' UPDATE public.nodes SET name='," PERFORM set_config('ecotrack.registration_verify','on',true);\n UPDATE public.nodes SET admin_verified_at=clock_timestamp(),admin_verified_by=auth.uid(),deployment_saved_at=clock_timestamp(),name=")
+sql="""-- Add after supabase_controller_registration_migration.sql. Idempotent and additive.
+-- Existing devices retain NULL until an admin actually saves/verifies them.
+BEGIN;
+ALTER TABLE public.nodes ADD COLUMN IF NOT EXISTS admin_verified_at timestamptz;
+ALTER TABLE public.nodes ADD COLUMN IF NOT EXISTS admin_verified_by uuid;
+ALTER TABLE public.nodes ADD COLUMN IF NOT EXISTS deployment_saved_at timestamptz;
+
+CREATE OR REPLACE FUNCTION public.ecotrack_stamp_controller_deployment()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+BEGIN
+ IF (NEW.admin_verified_at IS DISTINCT FROM OLD.admin_verified_at OR NEW.admin_verified_by IS DISTINCT FROM OLD.admin_verified_by)
+    AND coalesce(current_setting('ecotrack.registration_verify',true),'')<>'on' THEN
+   RAISE EXCEPTION 'Use Save & Verify to record admin verification' USING ERRCODE='42501';
+ END IF;
+ IF coalesce(current_setting('ecotrack.registration_verify',true),'')<>'on' THEN
+   NEW.deployment_saved_at:=OLD.deployment_saved_at;
+   IF NEW.room_id IS DISTINCT FROM OLD.room_id AND auth.uid() IS NOT NULL AND public.ecotrack_is_admin() THEN
+     NEW.deployment_saved_at:=clock_timestamp();
+   END IF;
+ END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public.ecotrack_stamp_controller_deployment() FROM PUBLIC;
+DROP TRIGGER IF EXISTS ecotrack_controller_deployment_stamp ON public.nodes;
+CREATE TRIGGER ecotrack_controller_deployment_stamp BEFORE UPDATE ON public.nodes
+ FOR EACH ROW EXECUTE FUNCTION public.ecotrack_stamp_controller_deployment();
+"""
+sql+=fn+"""
+REVOKE ALL ON FUNCTION public.ecotrack_finish_controller_registration(text,text,jsonb) FROM PUBLIC,anon;
+GRANT EXECUTE ON FUNCTION public.ecotrack_finish_controller_registration(text,text,jsonb) TO authenticated;
+NOTIFY pgrst,'reload schema';
+COMMIT;
+"""
+Path('supabase_controller_details_migration.sql').write_text(sql,encoding='utf-8')
+print('Controller details layout and server timestamps updated.')

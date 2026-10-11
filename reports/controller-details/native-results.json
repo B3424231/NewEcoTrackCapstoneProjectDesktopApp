@@ -1,0 +1,9 @@
+{
+  "checks": [
+    "light 1080px: aligned wrapped rows; real battery and saved timestamp update; missing telemetry/legacy date remain honest.",
+    "light 390px: aligned wrapped rows; real battery and saved timestamp update; missing telemetry/legacy date remain honest.",
+    "dark 1080px: aligned wrapped rows; real battery and saved timestamp update; missing telemetry/legacy date remain honest.",
+    "dark 390px: aligned wrapped rows; real battery and saved timestamp update; missing telemetry/legacy date remain honest."
+  ],
+  "passed": 4
+}

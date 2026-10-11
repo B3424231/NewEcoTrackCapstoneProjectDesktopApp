@@ -1,0 +1,11 @@
+--- before/public/nodes.html
++++ public/nodes.html
+@@ -92,7 +92,7 @@
+   </style>
+   <script src="./js/supabase.umd.js"></script>
+   <script src="./js/supabase-client.js"></script>
+-  <script src="./js/hardware-cloud.js?v=6"></script>
++  <script src="./js/hardware-cloud.js?v=7"></script>
+   <script src="./js/controller-locations.js?v=1"></script>
+   <script src="./js/sidebar.js"></script>
+   <script src="./js/sidebar-loader.js?v=7"></script>

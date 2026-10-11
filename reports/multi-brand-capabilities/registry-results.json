@@ -1,0 +1,9 @@
+{
+  "passed": 4,
+  "checks": [
+    "All 18 exact protocols resolve and validate audited boundaries and increments without clamping.",
+    "Brand mismatches, exact variants, remote models, unknown-model fallback and mode-specific temperatures remain distinct.",
+    "Physical overrides outrank detection only for their matching identity; stale results do not leak into another protocol.",
+    "Partial packets preserve reliable fields without replaying old power over a newer request, including cold reload from PostgreSQL field timestamps."
+  ]
+}

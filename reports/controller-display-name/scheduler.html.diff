@@ -1,0 +1,11 @@
+--- before/public/scheduler.html
++++ public/scheduler.html
+@@ -159,7 +159,7 @@
+   <script src="./js/shared.js"></script>
+   <script src="./js/global-notifications.js"></script>
+   <script src="./js/sidebar.js"></script>
+-  <script src="./js/scheduler.js?v=23"></script>
++  <script src="./js/scheduler.js?v=24"></script>
+ </body>
+ 
+ </html>

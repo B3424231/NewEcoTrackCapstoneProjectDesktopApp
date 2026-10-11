@@ -1,0 +1,16 @@
+[
+  "Registration migration executes and is repeatable",
+  "Backend rejects missing assignment, name, invalid custom type, unsafe name and deleted room before registration",
+  "Offline registration cannot create an AC or claim success",
+  "Fresh registration atomically binds one AC and persists custom type to both rows",
+  "Retry uses the same controller and AC identifiers",
+  "Registration lookup restores the actual association without exposing credentials",
+  "Read-only registration verification does not rotate credentials",
+  "Credential recovery preserves controller metadata and AC assignment",
+  "Existing valid association is allowed; conflicting AC name, controller name or controller is rejected",
+  "Available existing AC is linked without creating another profile",
+  "Failed final assignment rolls back metadata",
+  "Every registration RPC denies non-admin access",
+  "Anonymous clients cannot inspect registration",
+  "Deleted credential recovers the previous node identity from live state"
+]

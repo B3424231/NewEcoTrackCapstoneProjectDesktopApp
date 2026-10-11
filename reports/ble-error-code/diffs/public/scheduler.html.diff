@@ -1,0 +1,11 @@
+--- before/public/scheduler.html
++++ public/scheduler.html
+@@ -153,7 +153,7 @@
+     }
+   </script>
+   <script src="./js/supabase-client.js"></script>
+-  <script src="./js/hardware-cloud.js?v=6"></script>
++  <script src="./js/hardware-cloud.js?v=7"></script>
+   <script src="./js/aircon-system.js?v=15"></script>
+   <script src="./js/node-sync.js"></script>
+   <script src="./js/shared.js"></script>

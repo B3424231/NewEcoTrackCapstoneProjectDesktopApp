@@ -1,0 +1,115 @@
+{
+  "passed": 4,
+  "isolated_production_component": true,
+  "live_app_tested": false,
+  "results": [
+    {
+      "theme": "light",
+      "viewport": {
+        "width": 1026,
+        "height": 770
+      },
+      "box": {
+        "x": 273,
+        "y": 254.296875,
+        "width": 480,
+        "height": 261.390625
+      },
+      "background": "rgb(255, 255, 255)",
+      "titleColor": "rgb(15, 23, 42)",
+      "choiceBackground": "rgb(240, 253, 250)",
+      "choiceColor": "rgb(17, 94, 89)",
+      "title": "Select nearby EcoTrack device",
+      "focus": "EcoTrack-esp32s3-9cd20604a7ac",
+      "choiceFits": true,
+      "cancelSeparate": true,
+      "labelled": true,
+      "titleContrast": 17.85253496299567,
+      "choiceContrast": 7.2713467244827035,
+      "screenshot": "C:\\Users\\reygay\\Desktop\\EcoTrackDesktopDashboardNew-main-control\\reports\\device-setup-ui\\picker-light-1024.png",
+      "selection_and_cancel_passed": true,
+      "errors": []
+    },
+    {
+      "theme": "dark",
+      "viewport": {
+        "width": 1026,
+        "height": 770
+      },
+      "box": {
+        "x": 273,
+        "y": 254.296875,
+        "width": 480,
+        "height": 261.390625
+      },
+      "background": "rgb(15, 23, 42)",
+      "titleColor": "rgb(248, 250, 252)",
+      "choiceBackground": "rgb(19, 78, 74)",
+      "choiceColor": "rgb(204, 251, 241)",
+      "title": "Select nearby EcoTrack device",
+      "focus": "EcoTrack-esp32s3-9cd20604a7ac",
+      "choiceFits": true,
+      "cancelSeparate": true,
+      "labelled": true,
+      "titleContrast": 17.062933971317335,
+      "choiceContrast": 8.40873921807544,
+      "screenshot": "C:\\Users\\reygay\\Desktop\\EcoTrackDesktopDashboardNew-main-control\\reports\\device-setup-ui\\picker-dark-1024.png",
+      "selection_and_cancel_passed": true,
+      "errors": []
+    },
+    {
+      "theme": "light",
+      "viewport": {
+        "width": 392,
+        "height": 825
+      },
+      "box": {
+        "x": 16,
+        "y": 270.796875,
+        "width": 360,
+        "height": 283.390625
+      },
+      "background": "rgb(255, 255, 255)",
+      "titleColor": "rgb(15, 23, 42)",
+      "choiceBackground": "rgb(240, 253, 250)",
+      "choiceColor": "rgb(17, 94, 89)",
+      "title": "Select nearby EcoTrack device",
+      "focus": "EcoTrack-esp32s3-9cd20604a7ac",
+      "choiceFits": true,
+      "cancelSeparate": true,
+      "labelled": true,
+      "titleContrast": 17.85253496299567,
+      "choiceContrast": 7.2713467244827035,
+      "screenshot": "C:\\Users\\reygay\\Desktop\\EcoTrackDesktopDashboardNew-main-control\\reports\\device-setup-ui\\picker-light-390.png",
+      "selection_and_cancel_passed": true,
+      "errors": []
+    },
+    {
+      "theme": "dark",
+      "viewport": {
+        "width": 392,
+        "height": 825
+      },
+      "box": {
+        "x": 16,
+        "y": 270.796875,
+        "width": 360,
+        "height": 283.390625
+      },
+      "background": "rgb(15, 23, 42)",
+      "titleColor": "rgb(248, 250, 252)",
+      "choiceBackground": "rgb(19, 78, 74)",
+      "choiceColor": "rgb(204, 251, 241)",
+      "title": "Select nearby EcoTrack device",
+      "focus": "EcoTrack-esp32s3-9cd20604a7ac",
+      "choiceFits": true,
+      "cancelSeparate": true,
+      "labelled": true,
+      "titleContrast": 17.062933971317335,
+      "choiceContrast": 8.40873921807544,
+      "screenshot": "C:\\Users\\reygay\\Desktop\\EcoTrackDesktopDashboardNew-main-control\\reports\\device-setup-ui\\picker-dark-390.png",
+      "selection_and_cancel_passed": true,
+      "errors": []
+    }
+  ]
+}

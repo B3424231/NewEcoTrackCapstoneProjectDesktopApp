@@ -1,0 +1,21 @@
+{
+  "passed": 14,
+  "checks": [
+    "Immediate-observation migration executes and is repeatable on PostgreSQL.",
+    "Invalid device credentials cannot update hardware state.",
+    "A compact OFF observation persists the actual decoded state, with no raw timings or telemetry/history insertion.",
+    "The database trigger emits a private, controller-scoped state payload without device credentials.",
+    "Duplicate and reordered sequence uploads neither rewrite state nor emit extra broadcasts.",
+    "An older boot arriving late cannot overwrite the newer capture.",
+    "A new physical capture with the same settings refreshes the observation; only capture-identity retries are deduplicated.",
+    "Noise, auxiliary packets, raw timings, malformed power/features/sequence/temperature and oversized payloads are rejected.",
+    "Each device credential updates only its own registered controller.",
+    "A Broadcast failure preserves the observation and Postgres Changes fallback.",
+    "Legacy captures remain compatible and Broadcast strips their top-level and nested raw timing data.",
+    "Admin-only reception and server-only publishing remain enforced even alongside pre-existing broad policies; unrelated topics keep their policies.",
+    "Anonymous hardware can use its credential-scoped observation RPC without direct table access.",
+    "The immediate RPC also installs and persists successfully when Broadcast services are unavailable."
+  ],
+  "engine": "PGlite PostgreSQL",
+  "live_supabase_modified": false
+}

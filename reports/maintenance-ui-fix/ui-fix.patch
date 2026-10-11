@@ -1,0 +1,198 @@
+--- before/public/staff.html
++++ after/public/staff.html
+@@ -11,7 +11,7 @@
+       darkMode: 'class'
+     }
+   </script>
+-  <link rel="stylesheet" href="./styles.css?v=51">
++  <link rel="stylesheet" href="./styles.css?v=52">
+   <script src="./js/sidebar.js"></script>
+   <script src="./js/sidebar-loader.js?v=5"></script>
+   <script src="./js/skeletons.js?v=1"></script>
+@@ -182,7 +182,7 @@
+         <button id="tabReportsBtn"
+           class="active-tab px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 bg-[#10b981] hover:bg-emerald-600 text-white border-[2px] border-[#10b981] flex items-center gap-2 cursor-pointer shadow-md shadow-emerald-500/25"
+           style="color: #ffffff !important; background-color: #10b981 !important;">
+-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#ffffff" stroke-width="2" style="stroke: #ffffff !important;">
++          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+             <polyline points="14 2 14 8 20 8"></polyline>
+             <line x1="16" y1="13" x2="8" y2="13"></line>
+@@ -487,10 +487,10 @@
+         <!-- ============================================== -->
+         <!-- TAB 3: ARCHIVED PERSONNEL (SOFT DELETED) -->
+         <!-- ============================================== -->
+-        <div id="tabArchivedContent" class="hidden flex-1 overflow-hidden flex flex-col">
++        <div id="tabArchivedContent" class="hidden flex-1 min-h-0 overflow-auto flex flex-col">
+           <!-- FULL WIDTH Archived Table -->
+-          <div
+-            class="flex-1 bg-white dark:bg-[#0c1328]/70 dark:backdrop-blur-md border-[2px] border-amber-500/40 dark:border-amber-500/30 rounded-2xl overflow-hidden flex flex-col mx-2">
++          <div id="archivedStaffCard"
++            class="min-h-0 flex-1 bg-white dark:bg-[#0c1328]/70 dark:backdrop-blur-md border-[2px] border-amber-500/40 dark:border-amber-500/30 rounded-2xl overflow-hidden flex flex-col mx-2">
+             <div
+               class="p-4 border-b-[2px] border-amber-500/30 dark:border-white/5 flex flex-wrap gap-3 justify-between items-center bg-white dark:bg-[#0c1328]">
+               <div class="flex items-center gap-3">
+@@ -512,7 +512,7 @@
+               <!-- Search Archived -->
+               <div class="flex items-center gap-2">
+                 <div class="relative">
+-                  <input type="text" id="archivedSearch" placeholder="Search archived staff..."
++                  <input type="text" id="archivedSearch" aria-label="Search archived staff" placeholder="Search archived staff..."
+                     class="bg-gray-50 dark:bg-slate-950/40 border-[2px] border-gray-200 dark:border-white/10 rounded-lg px-3.5 py-2 text-sm text-gray-800 dark:text-gray-100 font-medium focus:outline-none focus:border-amber-500 w-56 pl-9 pr-7 transition-colors placeholder-gray-400">
+                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"
+                     class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+@@ -527,8 +527,8 @@
+             </div>
+ 
+             <!-- TABLE -->
+-            <div class="overflow-y-auto flex-1">
+-              <table class="w-full">
++            <div id="archivedStaffScroll" class="overflow-auto min-h-0 flex-1">
++              <table class="w-full min-w-[760px]">
+                 <thead class="sticky top-0 bg-[#1c180e] dark:bg-[#1a1408] text-amber-300 border-b border-amber-500/20">
+                   <tr class="text-left text-xs font-bold uppercase tracking-wider">
+                     <th class="px-5 py-4">Technician Name</th>
+@@ -1451,7 +1451,7 @@
+   <!-- Shared & Staff Scripts -->
+   <script src="./js/shared.js"></script>
+   <script src="./js/global-notifications.js"></script>
+-  <script src="./js/staff.js"></script>
++  <script src="./js/staff.js?v=2"></script>
+ 
+   <!-- UNIFIED MAINTENANCE MANAGEMENT CONTROLLER -->
+   <script>
+--- before/public/js/staff.js
++++ after/public/js/staff.js
+@@ -523,7 +523,7 @@
+       const reports = window.EcoTrackMaintenance?.getReports?.() || [];
+       pageReportCountBadge.textContent = `${reports.length} records`;
+     } else if (isArchivedTab) {
+-      pageReportCountBadge.textContent = `${archivedStaff.length} archived`;
++      pageReportCountBadge.textContent = `${archived} archived`;
+     } else {
+       pageReportCountBadge.textContent = `${activeStaff.length} staff`;
+     }
+@@ -1589,6 +1589,7 @@
+   if (!tbody) return;
+ 
+   const list = getFilteredArchivedStaff();
++  document.getElementById('archivedStaffCard')?.classList.toggle('is-empty', list.length === 0);
+   const totalPages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+   if (archivedCurrentPage > totalPages) archivedCurrentPage = totalPages;
+   if (archivedCurrentPage < 1) archivedCurrentPage = 1;
+@@ -1614,8 +1615,8 @@
+   if (!list || list.length === 0) {
+     tbody.innerHTML = `
+       <tr>
+-        <td colspan="6" class="px-6 py-16 text-center">
+-          <div class="flex flex-col items-center gap-3">
++        <td colspan="6" class="px-6 py-12 text-center">
++          <div class="archived-empty-state flex flex-col items-center gap-3">
+             <div class="w-12 h-12 rounded-2xl bg-amber-500/15 text-amber-500 flex items-center justify-center">
+               <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                 <polyline points="21 8 21 21 3 21 3 8"></polyline>
+@@ -1623,8 +1624,8 @@
+                 <line x1="10" y1="12" x2="14" y2="12"></line>
+               </svg>
+             </div>
+-            <p class="text-sm font-bold text-gray-500 dark:text-gray-400">No archived personnel accounts</p>
+-            <p class="text-xs text-gray-400">Technicians that have been soft-deleted will appear here with full historical records and deletion reasons.</p>
++            <p class="text-sm font-bold text-gray-500 dark:text-gray-400">${archivedSearchQuery.trim() ? 'No matching archived accounts' : 'No archived personnel accounts'}</p>
++            <p class="text-xs text-gray-400">${archivedSearchQuery.trim() ? 'Try a different name, email, or role, or clear the search.' : 'Archived technicians will appear here. You can review their records and restore their accounts.'}</p>
+           </div>
+         </td>
+       </tr>`;
+--- before/public/styles.css
++++ after/public/styles.css
+@@ -7664,12 +7664,6 @@
+ #headerAddRuleBtn *,
+ #addRuleBtn,
+ #addRuleBtn *,
+-#tabReportsBtn,
+-#tabReportsBtn *,
+-#tabStaffBtn.active-tab,
+-#tabStaffBtn.active-tab *,
+-#tabArchivedBtn.active-tab,
+-#tabArchivedBtn.active-tab *,
+ .log-tab.active,
+ .log-tab.active *,
+ #exportBtn,
+@@ -7700,12 +7694,6 @@
+ html:not(.dark) #headerAddRuleBtn *,
+ html:not(.dark) #addRuleBtn,
+ html:not(.dark) #addRuleBtn *,
+-html:not(.dark) #tabReportsBtn,
+-html:not(.dark) #tabReportsBtn *,
+-html:not(.dark) #tabStaffBtn.active-tab,
+-html:not(.dark) #tabStaffBtn.active-tab *,
+-html:not(.dark) #tabArchivedBtn.active-tab,
+-html:not(.dark) #tabArchivedBtn.active-tab *,
+ html:not(.dark) .log-tab.active,
+ html:not(.dark) .log-tab.active *,
+ html:not(.dark) #exportBtn,
+@@ -7739,12 +7727,6 @@
+ html:not(.dark) #headerAddRuleBtn svg,
+ #addRuleBtn svg,
+ html:not(.dark) #addRuleBtn svg,
+-#tabReportsBtn svg,
+-html:not(.dark) #tabReportsBtn svg,
+-#tabStaffBtn.active-tab svg,
+-html:not(.dark) #tabStaffBtn.active-tab svg,
+-#tabArchivedBtn.active-tab svg,
+-html:not(.dark) #tabArchivedBtn.active-tab svg,
+ .log-tab.active svg,
+ html:not(.dark) .log-tab.active svg,
+ #exportBtn svg,
+@@ -8507,6 +8489,52 @@
+ html:not(.dark) #tabArchivedBtn.active-tab svg {
+   color: #ffffff !important;
+   stroke: #ffffff !important;
++}
++
++/* Unselected tabs and the archive count keep their own contrast. */
++#tabReportsBtn:not(.active-tab),
++#tabStaffBtn:not(.active-tab),
++#tabArchivedBtn:not(.active-tab) {
++  color: #334155 !important;
++}
++
++.dark #tabReportsBtn:not(.active-tab),
++.dark #tabStaffBtn:not(.active-tab),
++.dark #tabArchivedBtn:not(.active-tab) {
++  color: #cbd5e1 !important;
++}
++
++#archivedBadgeCount {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  min-width: 1.5rem;
++  min-height: 1.5rem;
++  color: #92400e !important;
++  background-color: #fef3c7 !important;
++}
++
++.dark #archivedBadgeCount {
++  color: #fde68a !important;
++  background-color: #451a03 !important;
++}
++
++#tabArchivedBtn.active-tab #archivedBadgeCount {
++  color: #92400e !important;
++  background-color: #ffffff !important;
++}
++
++#archivedStaffCard.is-empty {
++  flex: 0 0 auto;
++}
++
++#archivedStaffCard.is-empty #archivedStaffScroll {
++  flex: 0 0 auto;
++}
++
++#archivedStaffCard .archived-empty-state {
++  max-width: 34rem;
++  margin-inline: auto;
+ }
+ 
+ /* Control Telemetry Logs Tabs */

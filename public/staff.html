@@ -11,13 +11,15 @@
       darkMode: 'class'
     }
   </script>
-  <link rel="stylesheet" href="./styles.css?v=51">
+  <link rel="stylesheet" href="./styles.css?v=52">
   <script src="./js/sidebar.js"></script>
   <script src="./js/sidebar-loader.js?v=5"></script>
   <script src="./js/skeletons.js?v=1"></script>
   <script src="./js/supabase.umd.js"></script>
   <script src="./js/supabase-client.js"></script>
-  <script src="./js/maintenance-modal.js?v=64"></script>
+  <script src="./js/hardware-cloud.js?v=1"></script>
+  <script src="./js/aircon-system.js?v=22"></script>
+  <script src="./js/maintenance-modal.js?v=68"></script>
   <style>
     .no-scrollbar::-webkit-scrollbar {
       display: none !important;
@@ -179,33 +181,34 @@
       <!-- TAB NAVIGATION -->
       <div class="bg-transparent px-6 pt-4 pb-2 flex flex-wrap gap-3 items-center shrink-0">
         <button id="tabReportsBtn"
-          class="px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 bg-[#0b291d] dark:bg-[#10b981] text-white border-[2px] border-[#10b981] dark:border-[#10b981]/40 flex items-center gap-2 cursor-pointer shadow-md shadow-emerald-500/10">
+          class="active-tab px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 bg-[#10b981] hover:bg-emerald-600 text-white border-[2px] border-[#10b981] flex items-center gap-2 cursor-pointer shadow-md shadow-emerald-500/25"
+          style="color: #ffffff !important; background-color: #10b981 !important;">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
             <polyline points="14 2 14 8 20 8"></polyline>
             <line x1="16" y1="13" x2="8" y2="13"></line>
             <line x1="16" y1="17" x2="8" y2="17"></line>
           </svg>
-          Maintenance Reports & Activities
+          <span class="tab-btn-text" style="color: #ffffff !important;">Maintenance Reports & Activities</span>
         </button>
         <button id="tabStaffBtn"
-          class="px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 bg-white dark:bg-slate-900 text-gray-700 dark:text-gray-300 border-[2px] border-gray-200 dark:border-white/10 hover:border-[#10b981] flex items-center gap-2 cursor-pointer">
+          class="px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 bg-white dark:bg-slate-900 text-gray-700 dark:text-gray-300 border-[2px] border-gray-200 dark:border-white/10 hover:border-[#10b981] hover:text-[#10b981] dark:hover:text-[#64f0b6] flex items-center gap-2 cursor-pointer shadow-xs">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
             <circle cx="9" cy="7" r="4"></circle>
             <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
             <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
           </svg>
-          Maintenance Personnel Directory
+          <span class="tab-btn-text">Maintenance Personnel Directory</span>
         </button>
         <button id="tabArchivedBtn"
-          class="px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 bg-white dark:bg-slate-900 text-gray-700 dark:text-gray-300 border-[2px] border-gray-200 dark:border-white/10 hover:border-amber-500 flex items-center gap-2 cursor-pointer">
+          class="px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 bg-white dark:bg-slate-900 text-gray-700 dark:text-gray-300 border-[2px] border-gray-200 dark:border-white/10 hover:border-amber-500 hover:text-amber-600 flex items-center gap-2 cursor-pointer shadow-xs">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="21 8 21 21 3 21 3 8"></polyline>
             <rect x="1" y="3" width="22" height="5"></rect>
             <line x1="10" y1="12" x2="14" y2="12"></line>
           </svg>
-          <span>Archived Accounts</span>
+          <span class="tab-btn-text">Archived Accounts</span>
           <span id="archivedBadgeCount"
             class="ml-1 px-2.5 py-0.5 text-xs font-black rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-600/50 shadow-xs transition-colors">0</span>
         </button>
@@ -219,7 +222,7 @@
         <!-- ============================================== -->
         <div id="tabReportsContent" class="flex-1 overflow-hidden flex flex-col">
           <!-- TOP STATS CARDS -->
-          <div id="pageMaintStats" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 mb-3 mx-2 shrink-0">
+          <div id="pageMaintStats" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-3 mx-2 shrink-0">
             <!-- Dynamically populated by JS -->
           </div>
 
@@ -274,11 +277,9 @@
                     <option value="Assigned">Assigned</option>
                     <option value="In Progress">In Progress</option>
                     <option value="For Verification">For Verification</option>
-                    <option value="Need Rework">Need Rework</option>
                     <option value="Completed">Completed</option>
                     <option value="Needs Repair">Needs Repair</option>
                     <option value="Under Repair">Under Repair</option>
-                    <option value="Verified">Verified</option>
                     <option value="Closed">Closed</option>
                   </select>
 
@@ -349,7 +350,7 @@
             </div>
 
             <!-- REPORTS TABLE -->
-            <div class="overflow-y-auto flex-1">
+            <div class="overflow-x-auto overflow-y-auto flex-1">
               <table class="w-full">
                 <thead class="sticky top-0 bg-[#0b291d] dark:bg-[#081a14] text-white dark:text-[#a7f3d0]">
                   <tr class="text-left text-xs font-bold uppercase tracking-wider">
@@ -421,12 +422,15 @@
               <div class="flex items-center gap-2">
                 <div class="relative">
                   <input type="text" id="staffSearch" placeholder="Search staff..."
-                    class="bg-gray-50 dark:bg-slate-950/40 border-[2px] border-gray-200 dark:border-white/10 rounded-lg px-3.5 py-2 text-sm text-gray-800 dark:text-gray-100 font-medium focus:outline-none focus:border-[#10b981] w-52 pl-9 transition-colors placeholder-gray-400">
+                    class="bg-gray-50 dark:bg-slate-950/40 border-[2px] border-gray-200 dark:border-white/10 rounded-lg px-3.5 py-2 text-sm text-gray-800 dark:text-gray-100 font-medium focus:outline-none focus:border-[#10b981] w-52 pl-9 pr-7 transition-colors placeholder-gray-400">
                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"
                     class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
                     <circle cx="11" cy="11" r="8" />
                     <line x1="21" y1="21" x2="16.65" y2="16.65" />
                   </svg>
+                  <button id="btnStaffClearSearch" type="button"
+                    class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-xs font-bold cursor-pointer transition-colors"
+                    title="Clear search">✕</button>
                 </div>
                 <select id="staffStatusFilter"
                   class="bg-gray-50 dark:bg-slate-950/40 border-[2px] border-gray-200 dark:border-white/10 rounded-lg px-3 py-2 text-sm font-bold text-gray-700 dark:text-gray-200 focus:outline-none focus:border-[#10b981] cursor-pointer transition-colors">
@@ -470,9 +474,10 @@
             <div
               class="p-4 border-t-[2px] border-[#10b981] dark:border-white/5 flex justify-between items-center bg-white dark:bg-[#0c1328]">
               <span id="staffPageInfo" class="text-sm font-bold text-gray-600 dark:text-gray-400">Showing 0 of 0</span>
-              <div class="flex gap-2">
+              <div class="flex items-center gap-2">
                 <button id="staffPrevBtn" disabled
                   class="px-4 py-2 bg-white dark:bg-slate-900 border-[2px] border-[#10b981] dark:border-[#10b981]/40 rounded-lg text-sm font-bold text-[#18392B] dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer">Previous</button>
+                <span id="staffPaginationPages" class="text-xs font-bold px-2 text-gray-700 dark:text-gray-300">Page 1 of 1</span>
                 <button id="staffNextBtn" disabled
                   class="px-4 py-2 bg-[#0b291d] dark:bg-[#10b981] border-[2px] border-[#10b981] dark:border-[#10b981]/40 rounded-lg text-sm font-bold text-white hover:bg-[#18392B] dark:hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer">Next</button>
               </div>
@@ -483,10 +488,10 @@
         <!-- ============================================== -->
         <!-- TAB 3: ARCHIVED PERSONNEL (SOFT DELETED) -->
         <!-- ============================================== -->
-        <div id="tabArchivedContent" class="hidden flex-1 overflow-hidden flex flex-col">
+        <div id="tabArchivedContent" class="hidden flex-1 min-h-0 overflow-auto flex flex-col">
           <!-- FULL WIDTH Archived Table -->
-          <div
-            class="flex-1 bg-white dark:bg-[#0c1328]/70 dark:backdrop-blur-md border-[2px] border-amber-500/40 dark:border-amber-500/30 rounded-2xl overflow-hidden flex flex-col mx-2">
+          <div id="archivedStaffCard"
+            class="min-h-0 flex-1 bg-white dark:bg-[#0c1328]/70 dark:backdrop-blur-md border-[2px] border-amber-500/40 dark:border-amber-500/30 rounded-2xl overflow-hidden flex flex-col mx-2">
             <div
               class="p-4 border-b-[2px] border-amber-500/30 dark:border-white/5 flex flex-wrap gap-3 justify-between items-center bg-white dark:bg-[#0c1328]">
               <div class="flex items-center gap-3">
@@ -508,20 +513,23 @@
               <!-- Search Archived -->
               <div class="flex items-center gap-2">
                 <div class="relative">
-                  <input type="text" id="archivedSearch" placeholder="Search archived staff..."
-                    class="bg-gray-50 dark:bg-slate-950/40 border-[2px] border-gray-200 dark:border-white/10 rounded-lg px-3.5 py-2 text-sm text-gray-800 dark:text-gray-100 font-medium focus:outline-none focus:border-amber-500 w-56 pl-9 transition-colors placeholder-gray-400">
+                  <input type="text" id="archivedSearch" aria-label="Search archived staff" placeholder="Search archived staff..."
+                    class="bg-gray-50 dark:bg-slate-950/40 border-[2px] border-gray-200 dark:border-white/10 rounded-lg px-3.5 py-2 text-sm text-gray-800 dark:text-gray-100 font-medium focus:outline-none focus:border-amber-500 w-56 pl-9 pr-7 transition-colors placeholder-gray-400">
                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"
                     class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
                     <circle cx="11" cy="11" r="8" />
                     <line x1="21" y1="21" x2="16.65" y2="16.65" />
                   </svg>
+                  <button id="btnArchivedClearSearch" type="button"
+                    class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-xs font-bold cursor-pointer transition-colors"
+                    title="Clear search">✕</button>
                 </div>
               </div>
             </div>
 
             <!-- TABLE -->
-            <div class="overflow-y-auto flex-1">
-              <table class="w-full">
+            <div id="archivedStaffScroll" class="overflow-auto min-h-0 flex-1">
+              <table class="w-full min-w-[760px]">
                 <thead class="sticky top-0 bg-[#1c180e] dark:bg-[#1a1408] text-amber-300 border-b border-amber-500/20">
                   <tr class="text-left text-xs font-bold uppercase tracking-wider">
                     <th class="px-5 py-4">Technician Name</th>
@@ -539,12 +547,17 @@
               </table>
             </div>
 
-            <!-- FOOTER -->
+            <!-- FOOTER & PAGINATION (20 PER PAGE) -->
             <div
-              class="p-3 border-t-[2px] border-amber-500/20 dark:border-white/5 flex justify-between items-center bg-white dark:bg-[#0c1328]">
-              <span id="archivedPageInfo" class="text-xs font-bold text-gray-500">Showing archived records</span>
-              <span class="text-xs text-gray-400">Click <strong class="text-amber-500">View Full Record</strong> or
-                <strong class="text-emerald-500">Restore</strong> to reactivate.</span>
+              class="p-3 border-t-[2px] border-amber-500/20 dark:border-white/5 flex flex-col sm:flex-row justify-between items-center gap-2 bg-white dark:bg-[#0c1328]">
+              <span id="archivedPageInfo" class="text-xs font-bold text-gray-500">Showing 0 of 0 archived accounts</span>
+              <div class="flex items-center gap-2">
+                <button id="archivedPrevBtn" disabled
+                  class="px-3 py-1 bg-white dark:bg-slate-900 border border-amber-500/30 rounded-lg text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-amber-50 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer">Previous</button>
+                <span id="archivedPaginationPages" class="text-xs font-bold px-1 text-gray-700 dark:text-gray-300">Page 1 of 1</span>
+                <button id="archivedNextBtn" disabled
+                  class="px-3 py-1 bg-amber-500/20 border border-amber-500/40 rounded-lg text-xs font-bold text-amber-700 dark:text-amber-300 hover:bg-amber-500/30 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer">Next</button>
+              </div>
             </div>
           </div>
         </div>
@@ -695,7 +708,6 @@
               <select id="staffBuilding"
                 class="w-full bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 text-gray-800 dark:text-gray-100 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:border-[#10b981] transition-all cursor-pointer">
                 <option value="all_buildings">All Buildings</option>
-                <option value="bld_main">Main Campus Building</option>
               </select>
             </div>
             <div>
@@ -704,7 +716,6 @@
               <select id="staffFloor"
                 class="w-full bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 text-gray-800 dark:text-gray-100 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:border-[#10b981] transition-all cursor-pointer">
                 <option value="all_floors">All Floors</option>
-                <option value="flr_2nd_it">2nd Floor - IT Wing</option>
               </select>
             </div>
             <div>
@@ -713,9 +724,6 @@
               <select id="staffRoom"
                 class="w-full bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 text-gray-800 dark:text-gray-100 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:border-[#10b981] transition-all cursor-pointer">
                 <option value="all_rooms">All Rooms</option>
-                <option value="rm_svr_01">Server Room A</option>
-                <option value="rm_ofc_01">Main Office Area</option>
-                <option value="rm_lab_01">Laboratory A</option>
               </select>
             </div>
           </div>
@@ -913,7 +921,6 @@
               <select id="editStaffBuilding"
                 class="w-full bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 text-gray-800 dark:text-gray-100 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:border-[#10b981] transition-all cursor-pointer">
                 <option value="all_buildings">All Buildings</option>
-                <option value="bld_main">Main Campus Building</option>
               </select>
             </div>
             <div>
@@ -922,7 +929,6 @@
               <select id="editStaffFloor"
                 class="w-full bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 text-gray-800 dark:text-gray-100 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:border-[#10b981] transition-all cursor-pointer">
                 <option value="all_floors">All Floors</option>
-                <option value="flr_2nd_it">2nd Floor - IT Wing</option>
               </select>
             </div>
             <div>
@@ -931,24 +937,31 @@
               <select id="editStaffRoom"
                 class="w-full bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 text-gray-800 dark:text-gray-100 rounded-xl px-2.5 py-2 text-xs font-semibold focus:outline-none focus:border-[#10b981] transition-all cursor-pointer">
                 <option value="all_rooms">All Rooms</option>
-                <option value="rm_svr_01">Server Room A</option>
-                <option value="rm_ofc_01">Main Office Area</option>
-                <option value="rm_lab_01">Laboratory A</option>
               </select>
             </div>
           </div>
         </div>
 
-        <!-- 4. ACCOUNT STATUS -->
-        <div>
-          <label
-            class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1 uppercase tracking-wide">Status</label>
-          <select id="editStaffStatus"
-            class="w-full bg-gray-50 dark:bg-slate-950/50 border-2 border-gray-200 dark:border-white/10 text-gray-800 dark:text-gray-100 rounded-xl px-3.5 py-2 text-xs font-semibold focus:outline-none focus:border-[#10b981] focus:ring-2 focus:ring-emerald-500/20 transition-all cursor-pointer">
-            <option value="Active">🟢 Active / Online</option>
-            <option value="Offline">⚪ Offline</option>
-            <option value="On Leave">🟡 On Leave</option>
-          </select>
+        <!-- 4. ACCOUNT STATUS & OPTIONAL PASSWORD -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label
+              class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1 uppercase tracking-wide">Status</label>
+            <select id="editStaffStatus"
+              class="w-full bg-gray-50 dark:bg-slate-950/50 border-2 border-gray-200 dark:border-white/10 text-gray-800 dark:text-gray-100 rounded-xl px-3.5 py-2 text-xs font-semibold focus:outline-none focus:border-[#10b981] focus:ring-2 focus:ring-emerald-500/20 transition-all cursor-pointer">
+              <option value="Active">🟢 Active / Online</option>
+              <option value="Offline">⚪ Offline</option>
+              <option value="On Leave">🟡 On Leave</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1 uppercase tracking-wide flex items-center justify-between">
+              <span>Password (Optional)</span>
+              <span class="text-[10px] text-gray-400 font-normal">Leave blank if unchanged</span>
+            </label>
+            <input type="password" id="editStaffPassword" placeholder="New password (min. 6 chars)"
+              class="w-full bg-gray-50 dark:bg-slate-950/50 border-2 border-gray-200 dark:border-white/10 text-gray-800 dark:text-gray-100 rounded-xl px-3.5 py-2 text-xs font-medium focus:outline-none focus:border-[#10b981] focus:ring-2 focus:ring-emerald-500/20 transition-all">
+          </div>
         </div>
 
         <div class="flex gap-3 pt-2">
@@ -1422,7 +1435,7 @@
         <div class="flex gap-3 pt-2">
           <button id="archivedDetailCloseBtn" onclick="closeArchivedDetailModal()"
             class="flex-1 bg-white dark:bg-slate-900 border-2 border-gray-300 dark:border-white/10 text-gray-700 dark:text-gray-200 font-bold text-xs rounded-xl py-2.5 hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors cursor-pointer">Close</button>
-          <button id="archivedDetailRestoreBtn" onclick="restoreStaff()"
+          <button id="archivedDetailRestoreBtn" onclick="restoreStaff(_currentDetailStaffId)"
             class="flex-1 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl py-2.5 shadow-lg shadow-emerald-500/25 transition-all border-0 cursor-pointer flex items-center justify-center gap-1.5">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5">
               <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
@@ -1439,7 +1452,7 @@
   <!-- Shared & Staff Scripts -->
   <script src="./js/shared.js"></script>
   <script src="./js/global-notifications.js"></script>
-  <script src="./js/staff.js"></script>
+  <script src="./js/staff.js?v=2"></script>
 
   <!-- UNIFIED MAINTENANCE MANAGEMENT CONTROLLER -->
   <script>
@@ -1452,9 +1465,9 @@
       const tabArchivedContent = document.getElementById('tabArchivedContent');
       const staffHeaderStats = document.getElementById('staffHeaderStats');
 
-      const INACTIVE_BTN_CLASS = 'px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 bg-white dark:bg-slate-900 text-gray-700 dark:text-gray-300 border-[2px] border-gray-200 dark:border-white/10 hover:border-[#10b981] flex items-center gap-2 cursor-pointer';
-      const ACTIVE_EMERALD_CLASS = 'px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 bg-[#0b291d] dark:bg-[#10b981] text-white border-[2px] border-[#10b981] dark:border-[#10b981]/40 flex items-center gap-2 cursor-pointer shadow-md shadow-emerald-500/10';
-      const ACTIVE_AMBER_CLASS = 'px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 bg-amber-800 dark:bg-amber-600 text-white border-[2px] border-amber-500 flex items-center gap-2 cursor-pointer shadow-md shadow-amber-500/20';
+      const INACTIVE_BTN_CLASS = 'px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 bg-white dark:bg-slate-900 text-gray-700 dark:text-gray-300 border-[2px] border-gray-200 dark:border-white/10 hover:border-[#10b981] hover:text-[#10b981] dark:hover:text-[#64f0b6] flex items-center gap-2 cursor-pointer shadow-xs';
+      const ACTIVE_EMERALD_CLASS = 'active-tab px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 bg-[#10b981] hover:bg-emerald-600 text-white border-[2px] border-[#10b981] flex items-center gap-2 cursor-pointer shadow-md shadow-emerald-500/25';
+      const ACTIVE_AMBER_CLASS = 'active-tab px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 bg-amber-500 hover:bg-amber-600 text-white border-[2px] border-amber-500 flex items-center gap-2 cursor-pointer shadow-md shadow-amber-500/25';
 
       const ARCHIVED_BADGE_INACTIVE_CLASS = 'ml-1 px-2.5 py-0.5 text-xs font-black rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-600/50 shadow-xs transition-colors';
       const ARCHIVED_BADGE_ACTIVE_CLASS = 'ml-1 px-2.5 py-0.5 text-xs font-black rounded-full bg-white dark:bg-slate-950 text-amber-900 dark:text-amber-300 border border-white/40 dark:border-amber-400/40 shadow-sm transition-colors';
@@ -1462,9 +1475,16 @@
       // Tab switcher
       function switchTab(activeTab) {
         // Reset all buttons
-        if (tabReportsBtn) tabReportsBtn.className = INACTIVE_BTN_CLASS;
-        if (tabStaffBtn) tabStaffBtn.className = INACTIVE_BTN_CLASS;
-        if (tabArchivedBtn) tabArchivedBtn.className = INACTIVE_BTN_CLASS;
+        [tabReportsBtn, tabStaffBtn, tabArchivedBtn].forEach(btn => {
+          if (!btn) return;
+          btn.className = INACTIVE_BTN_CLASS;
+          btn.style.color = '';
+          btn.style.backgroundColor = '';
+          const svg = btn.querySelector('svg');
+          if (svg) svg.style.stroke = '';
+          const textSpan = btn.querySelector('.tab-btn-text');
+          if (textSpan) textSpan.style.color = '';
+        });
 
         const badgeEl = document.getElementById('archivedBadgeCount');
         if (badgeEl) badgeEl.className = ARCHIVED_BADGE_INACTIVE_CLASS;
@@ -1474,20 +1494,64 @@
         if (tabStaffContent) tabStaffContent.classList.add('hidden');
         if (tabArchivedContent) tabArchivedContent.classList.add('hidden');
 
+        const headerMaintBtn = document.getElementById('btnHeaderMaintenance');
+        const headerMaintBtnText = headerMaintBtn?.querySelector('span');
+
         if (activeTab === 'reports') {
-          if (tabReportsBtn) tabReportsBtn.className = ACTIVE_EMERALD_CLASS;
+          if (tabReportsBtn) {
+            tabReportsBtn.className = ACTIVE_EMERALD_CLASS;
+            tabReportsBtn.style.color = '#ffffff';
+            tabReportsBtn.style.backgroundColor = '#10b981';
+            const svg = tabReportsBtn.querySelector('svg');
+            if (svg) svg.style.stroke = '#ffffff';
+            const textSpan = tabReportsBtn.querySelector('.tab-btn-text');
+            if (textSpan) textSpan.style.color = '#ffffff';
+          }
+          if (headerMaintBtn) {
+            headerMaintBtn.onclick = () => window.EcoTrackMaintenance?.openCreateModal?.();
+            headerMaintBtn.setAttribute('title', 'Create Maintenance Report');
+          }
+          if (headerMaintBtnText) headerMaintBtnText.textContent = 'Create Report';
           if (tabReportsContent) tabReportsContent.classList.remove('hidden');
           renderPageReports();
         } else if (activeTab === 'staff') {
-          if (tabStaffBtn) tabStaffBtn.className = ACTIVE_EMERALD_CLASS;
+          if (tabStaffBtn) {
+            tabStaffBtn.className = ACTIVE_EMERALD_CLASS;
+            tabStaffBtn.style.color = '#ffffff';
+            tabStaffBtn.style.backgroundColor = '#10b981';
+            const svg = tabStaffBtn.querySelector('svg');
+            if (svg) svg.style.stroke = '#ffffff';
+            const textSpan = tabStaffBtn.querySelector('.tab-btn-text');
+            if (textSpan) textSpan.style.color = '#ffffff';
+          }
+          if (headerMaintBtn) {
+            headerMaintBtn.onclick = () => typeof openRegisterModal === 'function' ? openRegisterModal() : document.getElementById('openRegisterModalBtn')?.click();
+            headerMaintBtn.setAttribute('title', 'Register New Maintenance Staff');
+          }
+          if (headerMaintBtnText) headerMaintBtnText.textContent = 'Register Staff';
           if (tabStaffContent) tabStaffContent.classList.remove('hidden');
           if (typeof renderTable === 'function') renderTable();
         } else if (activeTab === 'archived') {
-          if (tabArchivedBtn) tabArchivedBtn.className = ACTIVE_AMBER_CLASS;
+          if (tabArchivedBtn) {
+            tabArchivedBtn.className = ACTIVE_AMBER_CLASS;
+            tabArchivedBtn.style.color = '#ffffff';
+            tabArchivedBtn.style.backgroundColor = '#f59e0b';
+            const svg = tabArchivedBtn.querySelector('svg');
+            if (svg) svg.style.stroke = '#ffffff';
+            const textSpan = tabArchivedBtn.querySelector('.tab-btn-text');
+            if (textSpan) textSpan.style.color = '#ffffff';
+          }
+          if (headerMaintBtn) {
+            headerMaintBtn.onclick = () => typeof openRegisterModal === 'function' ? openRegisterModal() : document.getElementById('openRegisterModalBtn')?.click();
+            headerMaintBtn.setAttribute('title', 'Register New Maintenance Staff');
+          }
+          if (headerMaintBtnText) headerMaintBtnText.textContent = 'Register Staff';
           if (badgeEl) badgeEl.className = ARCHIVED_BADGE_ACTIVE_CLASS;
           if (tabArchivedContent) tabArchivedContent.classList.remove('hidden');
           if (typeof renderArchivedTable === 'function') renderArchivedTable();
         }
+
+        if (typeof updateStats === 'function') updateStats();
       }
 
       tabReportsBtn?.addEventListener('click', () => switchTab('reports'));
@@ -1666,21 +1730,56 @@
       // Get canonical effective status for reports, ensuring 100% complete tasks transition to For Verification
       function getEffectiveReportStatus(r) {
         if (!r) return 'Pending';
+        const isRepTask = (String(r.id || '').trim().toUpperCase().startsWith('REP') || r.type === 'Corrective Repair' || r.type === 'Repair Task' || String(r.type || '').trim().toLowerCase().includes('corrective') || String(r.type || '').trim().toLowerCase().includes('repair'));
+
+        const allReports = window.EcoTrackMaintenance?.getReports() || [];
+
+        // Check if there are active child repairs still in progress for this report
+        const hasUnfinishedRepair = !isRepTask && Array.isArray(r.tasks) && r.tasks.some(t => {
+          if (t.status === 'Needs Repair' && !t.repaired) return true;
+          if (t.status === 'Under Repair' && !t.repaired) return true;
+          if (t.linkedRepairId) {
+            const childRep = allReports.find(cr => String(cr.id || '').toLowerCase() === String(t.linkedRepairId).toLowerCase());
+            if (childRep && !['completed', 'verified'].includes(String(childRep.status || '').toLowerCase())) return true;
+          }
+          return false;
+        });
+
+        if (hasUnfinishedRepair) {
+          const hasActiveRepair = r.tasks.some(t => {
+            if (t.status === 'Under Repair' && !t.repaired) return true;
+            if (t.linkedRepairId) {
+              const childRep = allReports.find(cr => String(cr.id || '').toLowerCase() === String(t.linkedRepairId).toLowerCase());
+              if (childRep && !['completed', 'verified'].includes(String(childRep.status || '').toLowerCase())) return true;
+            }
+            return false;
+          });
+          return hasActiveRepair ? 'Under Repair' : 'Needs Repair';
+        }
+
         const totalTasks = Array.isArray(r.tasks) ? r.tasks.length : 0;
-        const completedTasks = totalTasks > 0 ? r.tasks.filter(t => t && (t.status === 'Completed' || t.repaired)).length : 0;
+        const completedTasks = totalTasks > 0 ? r.tasks.filter(t => {
+          if (!t) return false;
+          if (t.status === 'Completed' || t.repaired) {
+            if (t.linkedRepairId) {
+              const childRep = allReports.find(cr => String(cr.id || '').toLowerCase() === String(t.linkedRepairId).toLowerCase());
+              if (childRep && !['completed', 'verified'].includes(String(childRep.status || '').toLowerCase())) return false;
+            }
+            return true;
+          }
+          return false;
+        }).length : 0;
         const is100PercentDone = totalTasks > 0 && completedTasks === totalTasks;
-        const isCompletedOrVerified = r.status === 'Verified' || r.status === 'Closed' || (r.status === 'Completed' && is100PercentDone) || (is100PercentDone && r.verified);
+        const isCompletedOrVerified = r.status === 'Verified' || r.status === 'Closed' || r.status === 'Completed' || (is100PercentDone && (r.verified || r.status === 'Completed'));
         const isNeedsAdminVerification = !isCompletedOrVerified && (r.status === 'For Verification' || r.status === 'Awaiting Admin Verification' || is100PercentDone);
 
-        const isRepTask = (String(r.id || '').trim().toUpperCase().startsWith('REP') || r.type === 'Corrective Repair' || r.type === 'Repair Task' || String(r.type || '').trim().toLowerCase().includes('corrective') || String(r.type || '').trim().toLowerCase().includes('repair'));
         if (isRepTask && (r.status === 'Needs Repair' || r.status === 'Under Repair' || r.status === 'Pending' || r.status === 'Assigned')) {
           return 'In Progress';
         }
-        if (isCompletedOrVerified) return (r.status === 'Closed') ? 'Closed' : (r.status === 'Verified' || r.verified ? 'Verified' : 'Completed');
+        if (isCompletedOrVerified) return (r.status === 'Closed') ? 'Closed' : 'Completed';
         if (isNeedsAdminVerification) return 'For Verification';
         if (r.status === 'Needs Repair') return isRepTask ? 'In Progress' : 'Needs Repair';
         if (r.status === 'Under Repair' || (r.status && r.status.toLowerCase() === 'under repair')) return isRepTask ? 'In Progress' : 'Under Repair';
-        if (r.status === 'Need Rework' || r.status === 'Needs Rework' || (r.status && r.status.toLowerCase().includes('rework'))) return 'Need Rework';
         if (r.status === 'Completed' && !is100PercentDone) {
           const hasRepair = r.tasks && r.tasks.some(t => t.status === 'Needs Repair' && !t.repaired);
           const hasUnderRepair = r.tasks && r.tasks.some(t => t.status === 'Under Repair' && !t.repaired);
@@ -1732,9 +1831,7 @@
               return eff === 'completed' || eff === 'verified' || eff === 'closed' || raw === 'completed' || raw === 'verified' || raw === 'closed';
             } else if (targetStatus === 'for verification') {
               return eff === 'for verification' || raw === 'for verification' || raw === 'awaiting admin verification';
-            } else if (targetStatus === 'need rework' || targetStatus === 'needs rework') {
-              return eff.includes('rework') || raw.includes('rework');
-            } else if (targetStatus === 'under repair') {
+            }  else if (targetStatus === 'under repair') {
               return eff === 'under repair' || raw === 'under repair';
             } else if (targetStatus === 'needs repair') {
               return eff === 'needs repair' || raw === 'needs repair';
@@ -1899,7 +1996,6 @@
           pending: 0,
           inProgress: 0,
           forVerification: 0,
-          needRework: 0,
           completed: 0,
           needsRepair: 0,
           underRepair: 0
@@ -1910,7 +2006,6 @@
           else if (eff === 'For Verification') stats.forVerification++;
           else if (eff === 'Needs Repair') stats.needsRepair++;
           else if (eff === 'Under Repair') stats.underRepair++;
-          else if (eff === 'Need Rework' || eff === 'Needs Rework') stats.needRework++;
           else if (eff === 'In Progress') stats.inProgress++;
           else stats.pending++;
         });
@@ -1921,7 +2016,6 @@
           const isPending = pageStatus.toLowerCase() === 'pending';
           const isInProgress = pageStatus.toLowerCase() === 'in progress';
           const isForVerification = pageStatus.toLowerCase() === 'for verification';
-          const isNeedRework = pageStatus.toLowerCase().includes('rework');
           const isCompleted = pageStatus.toLowerCase() === 'completed';
           const isNeedsRepair = pageStatus.toLowerCase() === 'needs repair';
           const isUnderRepair = pageStatus.toLowerCase() === 'under repair';
@@ -1955,13 +2049,7 @@
                 <span class="text-[10px] text-purple-800 dark:text-purple-300 font-extrabold bg-purple-50 dark:bg-purple-950/60 px-1.5 py-0.5 rounded border border-purple-400/30">Review</span>
               </div>
             </div>
-            <div onclick="window.setPageStatusFilter('Need Rework')" class="bg-white dark:bg-slate-900 border-2 ${isNeedRework ? 'border-orange-500 ring-2 ring-orange-500/50 shadow-md scale-[1.02]' : 'border-orange-500/50 dark:border-orange-500/40'} rounded-xl p-3 shadow-sm flex flex-col justify-between cursor-pointer hover:border-orange-500 transition-all" title="Click to filter by Need Rework">
-              <span class="text-[11px] font-extrabold text-orange-800 dark:text-orange-400 uppercase tracking-wider">Need Rework</span>
-              <div class="flex items-baseline justify-between mt-1">
-                <span class="text-2xl font-black text-orange-600 dark:text-orange-400">${stats.needRework}</span>
-                <span class="text-[10px] text-orange-800 dark:text-orange-300 font-extrabold bg-orange-50 dark:bg-orange-950/60 px-1.5 py-0.5 rounded border border-orange-400/30">Rework</span>
-              </div>
-            </div>
+            
             <div onclick="window.setPageStatusFilter('Completed')" class="bg-white dark:bg-slate-900 border-2 ${isCompleted ? 'border-[#10b981] ring-2 ring-[#10b981]/50 shadow-md scale-[1.02]' : 'border-emerald-500/50 dark:border-emerald-500/40'} rounded-xl p-3 shadow-sm flex flex-col justify-between cursor-pointer hover:border-[#10b981] transition-all" title="Click to filter by Completed">
               <span class="text-[11px] font-extrabold text-emerald-800 dark:text-emerald-400 uppercase tracking-wider">Completed</span>
               <div class="flex items-baseline justify-between mt-1">
@@ -2068,19 +2156,39 @@
 
         if (paginatedList.length === 0) {
           const colSpan = isReportSelectMode ? 12 : 11;
+          const isZeroTotal = !reports || reports.length === 0;
           tbody.innerHTML = `
             <tr>
-              <td colspan="${colSpan}" class="px-6 py-12 text-center text-gray-500">
-                <div class="flex flex-col items-center gap-2.5">
-                  <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.2" class="text-gray-500">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <line x1="12" y1="8" x2="12" y2="12"></line>
-                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                  </svg>
-                  <p class="font-bold text-gray-400">No maintenance reports match your filters</p>
-                  <button type="button" onclick="window.resetPageReportFilters(true)" class="mt-1 px-4 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500 hover:text-slate-950 text-[#10b981] border border-emerald-500/30 text-xs font-bold transition-all cursor-pointer shadow-xs">
-                    Clear All Filters
-                  </button>
+              <td colspan="${colSpan}" class="px-6 py-16 text-center">
+                <div class="flex flex-col items-center justify-center max-w-sm mx-auto">
+                  <div class="w-16 h-16 rounded-3xl bg-teal-500/10 dark:bg-teal-500/15 text-teal-600 dark:text-teal-400 border border-teal-500/30 flex items-center justify-center mb-4 shadow-lg shadow-teal-500/10">
+                    <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.8">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                      <polyline points="14 2 14 8 20 8"/>
+                      <line x1="16" y1="13" x2="8" y2="13"/>
+                      <line x1="16" y1="17" x2="8" y2="17"/>
+                      <polyline points="10 9 9 9 8 9"/>
+                    </svg>
+                  </div>
+                  <h4 class="font-bold text-base text-slate-800 dark:text-white mb-1">
+                    ${isZeroTotal ? 'No Maintenance Reports Filed' : 'No Reports Match Your Filters'}
+                  </h4>
+                  <p class="text-xs text-slate-500 dark:text-gray-400 mb-5 leading-relaxed">
+                    ${isZeroTotal 
+                      ? 'Create and dispatch scheduled maintenance tasks, cleaning logs, and hardware repair requests for technician execution.' 
+                      : 'No maintenance records match your active search terms, status filters, or date range selections.'}
+                  </p>
+                  <div class="flex items-center gap-2.5">
+                    <button type="button" onclick="window.EcoTrackMaintenance?.openCreateReportModal ? window.EcoTrackMaintenance.openCreateReportModal() : (typeof openAddReportModal === 'function' ? openAddReportModal() : null)" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 text-slate-950 font-bold text-xs shadow-lg shadow-teal-500/20 inline-flex items-center gap-2 transition-all cursor-pointer">
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                      Create Report
+                    </button>
+                    ${!isZeroTotal ? `
+                      <button type="button" onclick="window.resetPageReportFilters(true)" class="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-700 dark:text-gray-300 border border-slate-200 dark:border-white/10 text-xs font-bold transition-all cursor-pointer">
+                        Clear Filters
+                      </button>
+                    ` : ''}
+                  </div>
                 </div>
               </td>
             </tr>
@@ -2102,12 +2210,8 @@
               statusBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-300 border border-amber-400 dark:border-amber-400/60 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-amber-600 dark:bg-amber-400 shrink-0"></span>Pending</span>`;
             } else if (effectiveStatus === 'For Verification') {
               statusBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-purple-100 dark:bg-purple-950/80 text-purple-900 dark:text-purple-200 border border-purple-400 dark:border-purple-400/60 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-purple-600 dark:bg-purple-400 animate-pulse shrink-0"></span>For Verification</span>`;
-            } else if (effectiveStatus === 'Need Rework' || effectiveStatus === 'Needs Rework') {
-              statusBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-extrabold rounded-full bg-amber-100 dark:bg-amber-950/90 text-amber-900 dark:text-amber-300 border border-amber-400 dark:border-amber-500/70 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-amber-400 animate-pulse shrink-0"></span>Need Rework</span>`;
-            } else if (effectiveStatus === 'Completed') {
+            } else if (effectiveStatus === 'Completed' || effectiveStatus === 'Verified') {
               statusBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-900 dark:text-emerald-300 border border-emerald-400 dark:border-emerald-400/60 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600 dark:bg-emerald-400 shrink-0"></span>Completed</span>`;
-            } else if (effectiveStatus === 'Verified') {
-              statusBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-900 dark:text-emerald-300 border border-emerald-400 dark:border-emerald-400/60 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600 dark:bg-emerald-400 shrink-0"></span>Verified ✓</span>`;
             } else if (effectiveStatus === 'Needs Repair') {
               statusBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-extrabold rounded-full bg-rose-100 dark:bg-rose-950/90 text-rose-900 dark:text-rose-300 border border-rose-400 dark:border-rose-500/70 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-rose-600 dark:bg-rose-500 shrink-0"></span>Needs Repair</span>`;
             } else if (effectiveStatus === 'Under Repair') {
@@ -2134,8 +2238,9 @@
               priorityBadge = `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-50 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-400/50 dark:border-emerald-500/50 whitespace-nowrap"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>Low</span>`;
             }
 
-            const avatarUrl = getStaffAvatar(r.staffName);
-            const initials = (r.staffName || 'ST').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+            const staffDisplayName = r.staffName || r.staff_name || 'Unassigned';
+            const avatarUrl = getStaffAvatar(staffDisplayName);
+            const initials = staffDisplayName !== 'Unassigned' ? staffDisplayName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : 'UN';
             const airconTypeDisplay = r.airconType || r.aircon_type || 'Split Type (Inverter)';
             const lastUpdated = formatReportUpdate(r);
 
@@ -2152,20 +2257,20 @@
                 style="cursor: pointer;">
                 ${checkboxCell}
                 <td class="px-5 py-3.5 font-mono font-bold text-[#18392B] dark:text-cyan-400 whitespace-nowrap">${r.id}</td>
-                <td class="px-5 py-3.5 font-bold text-gray-800 dark:text-white whitespace-nowrap">${r.airconId}</td>
+                <td class="px-5 py-3.5 font-bold text-gray-800 dark:text-white whitespace-nowrap">${r.airconId || r.aircon_name || r.aircon_id || '—'}</td>
                 <td class="px-5 py-3.5 text-gray-700 dark:text-gray-200 font-medium whitespace-nowrap">
                   <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-gray-100 dark:bg-slate-800/80 text-gray-700 dark:text-gray-300 text-[11px] font-semibold border border-gray-200 dark:border-white/10">
                     ${airconTypeDisplay}
                   </span>
                 </td>
-                <td class="px-5 py-3.5 text-gray-600 dark:text-gray-300 whitespace-nowrap">${r.room}</td>
-                <td class="px-5 py-3.5 text-gray-700 dark:text-gray-200 font-medium whitespace-nowrap">${r.type}</td>
+                <td class="px-5 py-3.5 text-gray-600 dark:text-gray-300 whitespace-nowrap">${r.room || r.room_name || '—'}</td>
+                <td class="px-5 py-3.5 text-gray-700 dark:text-gray-200 font-medium whitespace-nowrap">${r.type || 'Preventive Maintenance'}</td>
                 <td class="px-5 py-3.5 whitespace-nowrap">${priorityBadge}</td>
                 <td class="px-5 py-3.5 whitespace-nowrap">
                   <div class="flex items-center gap-2.5">
                     ${avatarUrl ? `
                       <div class="w-7 h-7 rounded-full overflow-hidden border border-[#10b981]/50 bg-emerald-100 dark:bg-emerald-950/80 flex items-center justify-center font-bold text-[10px] text-[#10b981] shrink-0 shadow-sm">
-                        <img src="${avatarUrl}" alt="${r.staffName}" class="w-full h-full object-cover" onerror="this.style.display='none'; if(this.nextElementSibling) this.nextElementSibling.style.display='flex';">
+                        <img src="${avatarUrl}" alt="${staffDisplayName}" class="w-full h-full object-cover" onerror="this.style.display='none'; if(this.nextElementSibling) this.nextElementSibling.style.display='flex';">
                         <span style="display:none;" class="w-full h-full flex items-center justify-center font-bold text-[10px] text-[#10b981]">${initials}</span>
                       </div>
                     ` : `
@@ -2173,7 +2278,7 @@
                         ${initials}
                       </div>
                     `}
-                    <span class="font-medium text-gray-800 dark:text-gray-200">${r.staffName}</span>
+                    <span class="font-medium text-gray-800 dark:text-gray-200">${staffDisplayName}</span>
                   </div>
                 </td>
                 <td class="px-5 py-3.5 whitespace-nowrap">
@@ -2294,18 +2399,26 @@
       }
 
       async function confirmDeleteReportAction() {
-        if (pendingDeleteReportIds && pendingDeleteReportIds.length > 0) {
-          const idsToDelete = [...pendingDeleteReportIds];
+        const idsToDelete = Array.from(pendingDeleteReportIds || [])
+          .filter(id => typeof id === 'string' || (typeof id === 'number' && Number.isFinite(id)))
+          .map(id => String(id).trim()).filter(Boolean);
+        if (idsToDelete.length > 0) {
           closeDeleteReportModal();
+          let deleted = false;
           if (window.EcoTrackMaintenance) {
             if (typeof window.EcoTrackMaintenance.deleteReports === 'function') {
-              await window.EcoTrackMaintenance.deleteReports(idsToDelete);
+              deleted = await window.EcoTrackMaintenance.deleteReports(idsToDelete);
             } else if (typeof window.EcoTrackMaintenance.deleteReport === 'function') {
+              deleted = true;
               for (const id of idsToDelete) {
-                await window.EcoTrackMaintenance.deleteReport(id);
+                if (await window.EcoTrackMaintenance.deleteReport(id) === false) {
+                  deleted = false;
+                  break;
+                }
               }
             }
           }
+          if (!deleted) return;
           idsToDelete.forEach(id => selectedReportIds.delete(id));
           if (selectedReportIds.size === 0) {
             isReportSelectMode = false;
@@ -2336,7 +2449,7 @@
           cols: 11,
           colWidths: ['w-24', 'w-28', 'w-28', 'w-24', 'w-20', 'w-32', 'w-24', 'w-20', 'w-24', 'w-28', 'w-20']
         });
-        window.EcoTrackSkeletons.renderStatsSkeleton('pageMaintStats', { count: 8 });
+        window.EcoTrackSkeletons.renderStatsSkeleton('pageMaintStats', { count: 7 });
       }
 
       // Initial render & global export

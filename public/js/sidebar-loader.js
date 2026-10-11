@@ -20,197 +20,198 @@ window.addEventListener('storage', (e) => {
   }
 });
 
+// Ensure EcoNetwork, EcoDataBus, and EcoTrackSkeletons are globally loaded on every page
+if (!window.EcoNetwork) {
+  const netScript = document.createElement('script');
+  netScript.src = './js/eco-network.js';
+  (document.head || document.documentElement).appendChild(netScript);
+}
+if (!window.EcoDataBus) {
+  const busScript = document.createElement('script');
+  busScript.src = './js/eco-data-bus.js';
+  (document.head || document.documentElement).appendChild(busScript);
+}
+if (!window.EcoTrackSkeletons) {
+  const skelScript = document.createElement('script');
+  skelScript.src = './js/skeletons.js';
+  (document.head || document.documentElement).appendChild(skelScript);
+}
+
 // ===== SIDEBAR LOADER =====
 // This script loads and injects the sidebar from sidebar-template.html into any page
-// Include this script in the <head> or before closing </body> tag
- 
-// Create a sleek loading overlay to prevent layout shifts and flash
-if (!document.getElementById('eco-loader')) {
-  const currentTheme = localStorage.getItem('ecoTrackTheme');
-  const isDark = currentTheme === 'dark';
-  const bg = isDark ? '#070b19' : '#ffffff';
 
+// Create a sleek, non-blocking top progress bar (NO full-screen blackout, NO blocking spinner)
+if (!document.getElementById('eco-loader')) {
   const loader = document.createElement('div');
   loader.id = 'eco-loader';
-  loader.innerHTML = `
-    <div class="eco-loader-bar"></div>
-    <div class="eco-loader-spinner"></div>
-  `;
-  document.body ? document.body.appendChild(loader) : document.documentElement.appendChild(loader);
+  loader.innerHTML = '<div class="eco-loader-bar"></div>';
+  (document.body || document.documentElement).appendChild(loader);
 
   const style = document.createElement('style');
   style.id = 'eco-loader-style';
   style.textContent = `
     #eco-loader {
       position: fixed;
-      inset: 0;
-      background: ${bg};
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
       z-index: 999999;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: opacity 0.3s ease, visibility 0.3s ease;
+      pointer-events: none;
+      background: transparent;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.12s ease, visibility 0.12s ease;
     }
     .eco-loader-bar {
       position: absolute;
       top: 0;
       left: 0;
-      height: 3px;
-      background: linear-gradient(90deg, #18392B, #10b981);
-      box-shadow: 0 0 15px #10b981;
-      animation: ecoLoadBar 2s cubic-bezier(0.1, 0.8, 0.2, 1) forwards;
-    }
-    .eco-loader-spinner {
-      width: 40px;
-      height: 40px;
-      border: 3px solid rgba(16, 185, 129, 0.15);
-      border-top-color: #10b981;
-      border-radius: 50%;
-      animation: ecoSpin 0.8s linear infinite;
-    }
-    @keyframes ecoLoadBar {
-      0% { width: 0%; }
-      50% { width: 70%; }
-      100% { width: 95%; }
-    }
-    @keyframes ecoSpin {
-      to { transform: rotate(360deg); }
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #10b981, #06b6d4, #10b981);
+      box-shadow: 0 0 10px rgba(16, 185, 129, 0.7);
+      transition: width 0.15s ease-out;
     }
   `;
   if (document.head) document.head.appendChild(style);
 }
 
-// Add click listener to show loader on navigation
+function showLoader() {
+  const loader = document.getElementById('eco-loader');
+  if (!loader) return;
+  const bar = loader.querySelector('.eco-loader-bar');
+  if (bar) {
+    bar.style.transition = 'width 0.15s ease-out';
+    bar.style.width = '70%';
+  }
+  loader.style.opacity = '1';
+  loader.style.visibility = 'visible';
+}
+
+function hideLoader() {
+  const loader = document.getElementById('eco-loader');
+  if (!loader) return;
+  const bar = loader.querySelector('.eco-loader-bar');
+  if (bar) {
+    bar.style.transition = 'width 0.08s ease-out';
+    bar.style.width = '100%';
+  }
+  setTimeout(() => {
+    loader.style.opacity = '0';
+    loader.style.visibility = 'hidden';
+    setTimeout(() => {
+      if (bar) {
+        bar.style.transition = 'none';
+        bar.style.width = '0%';
+      }
+    }, 120);
+  }, 60);
+}
+
+// Add click listener for snappy top progress on navigation
 document.addEventListener('click', (e) => {
   const link = e.target.closest('a');
-  if (link && link.href && !link.href.includes('#') && link.target !== '_blank' && !link.hasAttribute('download')) {
-    const loader = document.getElementById('eco-loader');
-    if (loader) {
-      loader.style.opacity = '1';
-      loader.style.visibility = 'visible';
-      // Reset animation
-      const bar = loader.querySelector('.eco-loader-bar');
-      if (bar) {
-        bar.style.animation = 'none';
-        bar.offsetHeight; /* trigger reflow */
-        bar.style.animation = null;
-      }
-    }
+  if (!link || !link.href) return;
+  
+  const href = link.getAttribute('href');
+  if (!href || href === '#' || href.startsWith('javascript:') || link.target === '_blank' || link.hasAttribute('download')) {
+    return;
   }
+
+  // Skip if same page
+  const currentPath = (window.location.pathname || '').split('/').pop() || 'index.html';
+  const targetPath = href.split('?')[0].split('#')[0].split('/').pop();
+  if (targetPath && targetPath === currentPath && !href.includes('?')) {
+    return;
+  }
+
+  showLoader();
 });
 
 let sidebarLoaded = false;
 
-async function loadSidebar() {
-  try {
-    // Check if sidebar is already loaded to prevent duplicates
-    if (sidebarLoaded || document.querySelector('aside.w-64')) {
-      if (typeof initializeSidebar !== 'undefined') {
-        initializeSidebar();
-      }
-      if (typeof initializeSidebarToggle !== 'undefined') {
-        initializeSidebarToggle();
-      }
-      if (typeof initializeLogout !== 'undefined') {
-        initializeLogout();
-      }
-      
-      const loader = document.getElementById('eco-loader');
-      if (loader) {
-        loader.style.opacity = '0';
-        loader.style.visibility = 'hidden';
-      }
-      
-      return;
-    }
+function initSidebarModules() {
+  if (typeof initializeSidebar !== 'undefined') initializeSidebar();
+  if (typeof initializeSidebarToggle !== 'undefined') initializeSidebarToggle();
+  if (typeof initializeLogout !== 'undefined') initializeLogout();
+  if (typeof initializeSidebarTooltips !== 'undefined') initializeSidebarTooltips();
 
-    // Construct the path to sidebar-template.html with a cache buster
-    const response = await fetch('./sidebar-template.html?v=' + Date.now());
-    const sidebarHTML = await response.text();
-    
-    // Create a container if it doesn't exist
-    const mainContainer = document.querySelector('.flex');
-    if (mainContainer) {
-      // Insert sidebar as the first child
-      mainContainer.insertAdjacentHTML('afterbegin', sidebarHTML);
-      sidebarLoaded = true;
-      
-      // Initialize sidebar after inserting
-      setTimeout(() => {
-        if (typeof initializeSidebar !== 'undefined') {
-          initializeSidebar();
-        }
-        if (typeof initializeSidebarToggle !== 'undefined') {
-          initializeSidebarToggle();
-        }
-        if (typeof initializeLogout !== 'undefined') {
-          initializeLogout();
-        }
-        if (typeof initializeSidebarTooltips !== 'undefined') {
-          initializeSidebarTooltips();
-        }
-        // Ensure Global Notifications module is loaded and badge is synced
-        if (typeof updateGlobalNotificationBadge === 'undefined' && !document.querySelector('script[src*="global-notifications.js"]')) {
-          const notifScript = document.createElement('script');
-          notifScript.src = './js/global-notifications.js?v=' + Date.now();
-          notifScript.onload = () => {
-            if (typeof updateGlobalNotificationBadge !== 'undefined') {
-              updateGlobalNotificationBadge();
-            }
-          };
-          document.head.appendChild(notifScript);
-        } else if (typeof updateGlobalNotificationBadge !== 'undefined') {
-          updateGlobalNotificationBadge();
-        }
+  // Load Global Notifications if needed
+  if (typeof updateGlobalNotificationBadge === 'undefined' && !document.querySelector('script[src*="global-notifications.js"]')) {
+    const notifScript = document.createElement('script');
+    notifScript.src = './js/global-notifications.js';
+    notifScript.onload = () => {
+      if (typeof updateGlobalNotificationBadge !== 'undefined') updateGlobalNotificationBadge();
+    };
+    document.head.appendChild(notifScript);
+  } else if (typeof updateGlobalNotificationBadge !== 'undefined') {
+    updateGlobalNotificationBadge();
+  }
 
-        // Load Maintenance Modal module if not present
-        if (!window.EcoTrackMaintenance && !document.querySelector('script[src*="maintenance-modal.js"]')) {
-          const maintScript = document.createElement('script');
-          maintScript.src = './js/maintenance-modal.js?v=' + Date.now();
-          document.head.appendChild(maintScript);
-        }
-        // Retry badge after data layer is fully ready
-        setTimeout(() => {
-          if (typeof updateGlobalNotificationBadge !== 'undefined') {
-            updateGlobalNotificationBadge();
-          }
-        }, 500);
-        setTimeout(() => {
-          if (typeof updateGlobalNotificationBadge !== 'undefined') {
-            updateGlobalNotificationBadge();
-          }
-        }, 1500);
-        
-        // Hide loader smoothly
-        const loader = document.getElementById('eco-loader');
-        if (loader) {
-          loader.style.opacity = '0';
-          loader.style.visibility = 'hidden';
-        }
-        
-      }, 50);
-    }
-  } catch (error) {
-    console.error('Error loading sidebar:', error);
-    // CRITICAL: Hide loader even on error so the page is never stuck
-    const loader = document.getElementById('eco-loader');
-    if (loader) {
-      loader.style.opacity = '0';
-      loader.style.visibility = 'hidden';
-    }
+  // Load Maintenance Modal if needed
+  if (!window.EcoTrackMaintenance && !document.querySelector('script[src*="maintenance-modal.js"]')) {
+    const maintScript = document.createElement('script');
+    maintScript.src = './js/maintenance-modal.js';
+    document.head.appendChild(maintScript);
   }
 }
 
-// FAILSAFE: Always hide loader after 5 seconds no matter what
-setTimeout(() => {
-  const loader = document.getElementById('eco-loader');
-  if (loader && loader.style.visibility !== 'hidden') {
-    loader.style.opacity = '0';
-    loader.style.visibility = 'hidden';
-  }
-}, 5000);
+async function loadSidebar() {
+  try {
+    // Check if sidebar is already present in DOM
+    if (sidebarLoaded || document.querySelector('aside#sidebar') || document.querySelector('aside.w-64')) {
+      initSidebarModules();
+      hideLoader();
+      return;
+    }
 
-// Load sidebar when DOM is ready
+    const mainContainer = document.querySelector('#sidebar-container') ||
+                          document.querySelector('.app-shell > .flex') ||
+                          document.querySelector('body > .flex') ||
+                          document.querySelector('.flex:not(body)') ||
+                          document.querySelector('.flex');
+
+    if (!mainContainer || mainContainer === document.body) {
+      hideLoader();
+      return;
+    }
+
+    // 1. Instant Synchronous Cache Check with versioning (0ms render!)
+    const SIDEBAR_VERSION = 'v12';
+    const cachedVer = sessionStorage.getItem('ecoTrack_sidebar_ver');
+    const cachedHTML = sessionStorage.getItem('ecoTrack_sidebar_html');
+    if (cachedHTML && cachedVer === SIDEBAR_VERSION) {
+      mainContainer.insertAdjacentHTML('afterbegin', cachedHTML);
+      sidebarLoaded = true;
+      initSidebarModules();
+      hideLoader();
+      return;
+    }
+
+    // 2. Fetch fresh sidebar-template.html if not cached or version mismatch
+    const response = await fetch(`./sidebar-template.html?v=${SIDEBAR_VERSION}`);
+    if (response.ok) {
+      const sidebarHTML = await response.text();
+      try {
+        sessionStorage.setItem('ecoTrack_sidebar_ver', SIDEBAR_VERSION);
+        sessionStorage.setItem('ecoTrack_sidebar_html', sidebarHTML);
+      } catch (_) {}
+      mainContainer.insertAdjacentHTML('afterbegin', sidebarHTML);
+      sidebarLoaded = true;
+      initSidebarModules();
+    }
+  } catch (error) {
+    console.warn('Sidebar load error:', error);
+  } finally {
+    hideLoader();
+  }
+}
+
+// FAILSAFE: Ensure top bar is ALWAYS hidden quickly (max 300ms)
+setTimeout(hideLoader, 300);
+
+// Load sidebar when DOM is ready (or immediately if already parsed)
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', loadSidebar);
 } else {

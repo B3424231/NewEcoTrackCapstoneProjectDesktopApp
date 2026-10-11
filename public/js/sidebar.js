@@ -1,6 +1,9 @@
 // ===== SIDEBAR NAVIGATION =====
 function initializeSidebar() {
-  const currentFile = (window.location.pathname.split('/').pop() || '').toLowerCase();
+  let currentFile = (window.location.pathname.split('/').pop() || '').toLowerCase();
+  if (!currentFile || currentFile === 'index.html') {
+    currentFile = 'dashboard.html';
+  }
 
   // Setup nav links styling only - let anchor tags handle navigation naturally
   const navLinks = document.querySelectorAll('.nav-link');
@@ -13,15 +16,22 @@ function initializeSidebar() {
     const isActive = currentFile && hrefFile === currentFile;
 
     if (isActive) {
-      link.classList.add('active', 'bg-emerald-500/20', 'border-emerald-400/50', 'text-white');
+      link.classList.add('active');
       link.classList.remove('hover:bg-slate-700/50', 'text-gray-300', 'text-cyan-400');
     } else {
       link.classList.remove('active', 'bg-emerald-500/20', 'border-emerald-400/50', 'text-white');
     }
 
     link.addEventListener('click', (e) => {
+      if (!href || href === '#' || href.startsWith('#')) {
+        e.preventDefault();
+        return;
+      }
       const targetFile = (href || '').split('/').pop().toLowerCase().split('?')[0].split('#')[0];
-      if (!href || targetFile === currentFile) return;
+      if (targetFile === currentFile) {
+        e.preventDefault();
+        return;
+      }
       e.preventDefault();
       window.location.href = href;
     });
@@ -99,9 +109,19 @@ function initializeLogout() {
       console.error('Failed to save snapshot on logout:', err);
     }
     
-    // Clear any authentication data
+    // Clear authentication data and Supabase session
+    try {
+      const sb = window.supabaseClient || window.sb;
+      if (sb && sb.auth && typeof sb.auth.signOut === 'function') {
+        await sb.auth.signOut();
+      }
+    } catch (_) {}
+
     localStorage.removeItem('userToken');
+    localStorage.removeItem('ecoTrack_auth_token');
+    localStorage.removeItem('ecoTrack_profile_user');
     localStorage.removeItem('sidebarCollapsed');
+    sessionStorage.clear();
     
     // Redirect to login page
     window.location.href = 'login.html';

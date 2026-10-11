@@ -1,0 +1,11 @@
+{
+  "status": "passed",
+  "board": "esp32:esp32:heltec_wireless_stick_lite_V3",
+  "firmware_version": "cloud-ir-controller-1.6-rxtx",
+  "program_bytes": 1546824,
+  "program_limit": 3342336,
+  "static_ram_bytes": 57348,
+  "ram_limit": 327680,
+  "source_sha256": "1fa728389021611d654a868da2beb9dc4fbc33bed52931d272e9190b8eff7f85",
+  "physical_upload_performed": false
+}

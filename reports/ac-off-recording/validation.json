@@ -1,0 +1,31 @@
+{
+  "database": {
+    "command": "node scripts/test_ac_recording_database.js",
+    "passed": 13
+  },
+  "api": {
+    "command": "venv/Scripts/python.exe -X utf8 scripts/test_cloud_telemetry_sync.py",
+    "passed": 10
+  },
+  "ui": {
+    "command": "node scripts/test_ac_recording_ui.js",
+    "passed": 4
+  },
+  "native": {
+    "command": "scripts/test_logs_climate_modes_render.js",
+    "passed": 3
+  },
+  "data_integrity": {
+    "command": "npm test",
+    "passed": 34
+  },
+  "runtime": {
+    "command": "node scripts/test_runtime_engine.js",
+    "passed": false,
+    "preexisting": true,
+    "baseline_same_failure": true,
+    "error": "Missing cadence defaults to thirty seconds: 0.25 != 0.008333333333333333"
+  },
+  "live_supabase_modified": false,
+  "hardware_tested": false
+}

@@ -1,0 +1,107 @@
+[
+  {
+    "table": "administrators",
+    "http_status": 200,
+    "rows": 2
+  },
+  {
+    "table": "aircons",
+    "http_status": 200,
+    "rows": 0
+  },
+  {
+    "table": "buildings",
+    "http_status": 200,
+    "rows": 3
+  },
+  {
+    "table": "ecotrack_auth_attempts",
+    "http_status": 200,
+    "rows": 0
+  },
+  {
+    "table": "ecotrack_maintenance_operations",
+    "http_status": 200,
+    "rows": 1
+  },
+  {
+    "table": "ecotrack_push_deliveries",
+    "http_status": 200,
+    "rows": 0
+  },
+  {
+    "table": "ecotrack_push_wake_tokens",
+    "http_status": 200,
+    "rows": 0
+  },
+  {
+    "table": "floors",
+    "http_status": 200,
+    "rows": 2
+  },
+  {
+    "table": "maintenance_reports",
+    "http_status": 200,
+    "rows": 1
+  },
+  {
+    "table": "mobile_notification_state",
+    "http_status": 200,
+    "rows": 0
+  },
+  {
+    "table": "mobile_notifications",
+    "http_status": 200,
+    "rows": 0
+  },
+  {
+    "table": "nodes",
+    "http_status": 200,
+    "rows": 0
+  },
+  {
+    "table": "notifications",
+    "http_status": 200,
+    "rows": 0
+  },
+  {
+    "table": "registration_tasks",
+    "http_status": 200,
+    "rows": 0
+  },
+  {
+    "table": "rooms",
+    "http_status": 200,
+    "rows": 0
+  },
+  {
+    "table": "rule_nodes",
+    "http_status": 200,
+    "rows": 0
+  },
+  {
+    "table": "rules",
+    "http_status": 200,
+    "rows": 0
+  },
+  {
+    "table": "staff",
+    "http_status": 200,
+    "rows": 3
+  },
+  {
+    "table": "staff_locations",
+    "http_status": 200,
+    "rows": 0
+  },
+  {
+    "table": "staff_push_tokens",
+    "http_status": 200,
+    "rows": 0
+  },
+  {
+    "table": "telemetry",
+    "http_status": 200,
+    "rows": 0
+  }
+]

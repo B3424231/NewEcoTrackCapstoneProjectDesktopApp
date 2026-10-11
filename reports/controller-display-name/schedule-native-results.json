@@ -1,0 +1,39 @@
+{
+  "passed": 22,
+  "results": [
+    {
+      "theme": "light",
+      "checks": [
+        "Schedule control name uses the device display name instead of the AC profile",
+        "Changed controller names render safely without showing the AC profile name",
+        "Fresh controllers display unset times accurately",
+        "Displayed times agree with the stored input values",
+        "Apply identifies the missing wake field and performs no write",
+        "Picker preserves a stored 10 PM time instead of proposing 5 AM",
+        "Stored times including seconds display correctly",
+        "Apply queues the shown 5-second schedule using the hardware time format",
+        "Queue success keeps delivery status honest and releases the button",
+        "Equal times explain the device will stay awake",
+        "Wake and sleep controls stay aligned when the sleep explanation is visible"
+      ]
+    },
+    {
+      "theme": "dark",
+      "checks": [
+        "Schedule control name uses the device display name instead of the AC profile",
+        "Changed controller names render safely without showing the AC profile name",
+        "Fresh controllers display unset times accurately",
+        "Displayed times agree with the stored input values",
+        "Apply identifies the missing wake field and performs no write",
+        "Picker preserves a stored 10 PM time instead of proposing 5 AM",
+        "Stored times including seconds display correctly",
+        "Apply queues the shown 5-second schedule using the hardware time format",
+        "Queue success keeps delivery status honest and releases the button",
+        "Equal times explain the device will stay awake",
+        "Wake and sleep controls stay aligned when the sleep explanation is visible"
+      ]
+    }
+  ],
+  "live_hardware_tested": false,
+  "live_database_tested": false
+}

@@ -1,0 +1,13 @@
+{
+  "passed": 5,
+  "checks": [
+    "Fresh feature migration: a late failure rolls back schema, RPC replacements and Matrix data changes while retaining credentials.",
+    "Fresh feature migration: retry and repeated successful execution preserve AC identity, assignments and credentials.",
+    "Previously committed old prefix: a late failure rolls back schema, RPC replacements and Matrix data changes while retaining credentials.",
+    "Previously committed old prefix: retry and repeated successful execution preserve AC identity, assignments and credentials.",
+    "Missing prerequisites stop before installing functions or changing data."
+  ],
+  "actual_isolated_postgresql": true,
+  "multi_session_contention_tested": false,
+  "live_database_modified": false
+}

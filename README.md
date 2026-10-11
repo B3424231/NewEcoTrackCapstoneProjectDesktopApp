@@ -118,3 +118,13 @@ Edit `.env` file to change:
 ## License
 
 MIT License
+
+## Data storage and database checks
+
+Supabase owns users, controller/AC registries, locations, rules, notifications and maintenance records. Firmware uploads telemetry to Supabase. The Python backend keeps an independent SQLite telemetry history at `backend/telemetry.db`; `ECOTRACK_SQLITE_DB_PATH` can override this path. Cloud deletions do not automatically erase this local history.
+
+The renderer uses the Supabase client directly for cloud tables and a telemetry adapter for `/api/telemetry`. The old PocketBase service and `PB_URL` are no longer required. Profile/controller caches reconcile successful authenticated cloud results, including empty results; connection errors preserve the cache.
+
+`npm run transfer:sqlite` catches up local telemetry using the same validated importer as automatic backend sync. Missing measurements stay unknown. Demo inserts are separate optional legacy SQL files under `scripts/demo-seeds/`; normal schema setup does not insert demo records. The obsolete analytics snapshot store and save endpoint have been retired.
+
+Run `npm run test:database` for cache/adapter regressions and CRUD/filter tests against a temporary SQLite database. Run `npm test` for the existing mock-data checks. The database audit and cleanup results are in `reports/database-audit/`.

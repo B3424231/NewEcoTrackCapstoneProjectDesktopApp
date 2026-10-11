@@ -1,0 +1,25 @@
+{
+  "passed": 18,
+  "checks": [
+    "Initial markup disables premature detection and removes the same-network requirement",
+    "Resets and forced clicks cannot send an IR command during initial registration",
+    "Wi-Fi Connected and form edits cannot imply cloud success or erase a failure",
+    "Registered controller Edit still learns a real result and releases its controls",
+    "Learning failures retain their actionable cloud error instead of a local-network instruction",
+    "Saving remains Verifying until the asynchronous cloud registration confirms",
+    "Repeated Submit and closing the modal cannot race the active registration",
+    "Cloud success and local persistence complete before the verified message and close",
+    "Missing migration or rejected registration stays incomplete and allows retry",
+    "A failed registration can be retried successfully",
+    "Local persistence failure cannot produce a completed registration UI",
+    "Optional brand-profile saving remains guarded against duplicate registrations",
+    "Optional profile failure releases the save guard and keeps its error visible",
+    "Skipped Wi-Fi setup can register with the repair password and still waits for the cloud heartbeat",
+    "Choosing an existing AC passes its actual ID and exact saved IR variant through the registration handler",
+    "A rejected custom room stays out of the shared cache; retry creates and confirms it before cloud registration",
+    "Controller Edit confirms custom building, floor, and room before linking; rejected locations leave metadata unchanged and allow retry",
+    "Missing device lookup explains cloud registration instead of falsely blaming Bluetooth"
+  ],
+  "physical_hardware_tested": false,
+  "browser_visual_tested": false
+}

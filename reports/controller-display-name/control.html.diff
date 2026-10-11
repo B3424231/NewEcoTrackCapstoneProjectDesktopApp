@@ -1,0 +1,83 @@
+--- before/public/control.html
++++ public/control.html
+@@ -1179,6 +1179,13 @@
+       const controlsContainer = document.getElementById('controlsContainer');
+       const remoteLayoutContainer = document.getElementById('remoteLayoutContainer');
+ 
++      function getControllerDisplayName(device) {
++        const controller = NodeService.getNode(device?.controller_node_id) || NodeService.getNode(device?.node_id);
++        const savedName = typeof controller?.name === 'string' ? controller.name.trim() : '';
++        return savedName && !/^(?:EcoTrack[-_])?esp32s3[-_:][0-9a-f]{12}$/i.test(savedName)
++          ? savedName : 'AC Controller';
++      }
++
+       // Centralized Control Layout Mode Manager (Desktop Standard vs Remote Layout)
+       let currentControlLayout = 'standard';
+       try {
+@@ -1285,7 +1292,7 @@
+           if (selectedAcStatusDot) {
+             selectedAcStatusDot.className = `w-2.5 h-2.5 rounded-full ${isPowerOn ? 'bg-emerald-400 shadow-sm shadow-emerald-400/50' : 'bg-slate-400'} shrink-0`;
+           }
+-          if (selectedAcName) selectedAcName.textContent = activeAc.name;
++          if (selectedAcName) selectedAcName.textContent = getControllerDisplayName(activeAc);
+           if (selectedAcIdBadge) selectedAcIdBadge.textContent = activeAc.device_id;
+           if (selectedAcLocation) selectedAcLocation.textContent = `• ${activeAc.location || activeAc.room_name || 'Unassigned'}`;
+           
+@@ -1311,7 +1318,8 @@
+         const query = (filterText || '').toLowerCase().trim();
+         const filtered = aircons.filter(a => {
+           if (!query) return true;
+-          return (a.name || '').toLowerCase().includes(query) ||
++          return getControllerDisplayName(a).toLowerCase().includes(query) ||
++                 (a.name || '').toLowerCase().includes(query) ||
+                  (a.device_id || '').toLowerCase().includes(query) ||
+                  (a.location || '').toLowerCase().includes(query) ||
+                  (a.node_id || '').toLowerCase().includes(query) ||
+@@ -1358,10 +1366,10 @@
+               <span class="w-2.5 h-2.5 rounded-full ${isPowerOn ? 'bg-emerald-400 shadow-sm shadow-emerald-400/50' : 'bg-slate-400'} shrink-0"></span>
+               <div class="min-w-0">
+                 <div class="flex items-center gap-1.5 flex-wrap">
+-                  <span class="font-bold text-xs truncate">${ac.name}</span>
++                  <span class="ac-controller-name font-bold text-xs truncate"></span>
+                   <span class="px-1.5 py-0.5 rounded font-mono text-[10px] font-bold ${isSelected ? 'bg-teal-500/30 text-teal-800 dark:text-teal-200' : 'bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-300'}">${ac.device_id}</span>
+                 </div>
+-                <div class="text-[10px] text-gray-500 dark:text-gray-400 truncate mt-0.5">${ac.location || 'Unassigned'} • Node: ${ac.node_id}</div>
++                <div class="ac-controller-location text-[10px] text-gray-500 dark:text-gray-400 truncate mt-0.5"></div>
+               </div>
+             </div>
+             <div class="flex items-center gap-2 shrink-0">
+@@ -1371,6 +1379,10 @@
+               ${isSelected ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" class="text-teal-500"><polyline points="20 6 9 17 4 12"></polyline></svg>' : ''}
+             </div>
+           `;
++
++          const controllerName = getControllerDisplayName(ac);
++          item.querySelector('.ac-controller-name').textContent = controllerName;
++          item.querySelector('.ac-controller-location').textContent = `${ac.location || 'Unassigned'} • Controller: ${controllerName}`;
+ 
+           item.addEventListener('click', () => {
+             activeDeviceId = ac.device_id;
+@@ -1493,7 +1505,10 @@
+             device = aircons[0];
+           } else {
+             if (unitNameEl) unitNameEl.textContent = 'Fleet Overview • No Units Registered';
+-            if (unitBrandBadgeEl) unitBrandBadgeEl.textContent = 'Standby';
++            if (unitBrandBadgeEl) {
++              unitBrandBadgeEl.textContent = 'Standby';
++              unitBrandBadgeEl.classList.remove('hidden');
++            }
+             if (unitDetailsEl) unitDetailsEl.textContent = 'No air conditioning units registered in the EcoTrack network.';
+             if (unitPowerHeaderContainer) unitPowerHeaderContainer.classList.add('hidden');
+             if (controlsContainer) {
+@@ -1578,8 +1593,9 @@
+         const isNodeOnline = node ? (node.status.toLowerCase() === 'connected' || node.status.toLowerCase() === 'online') : false;
+ 
+         // Header info
+-        unitNameEl.textContent = device.name;
+-        unitBrandBadgeEl.textContent = device.brand;
++        unitNameEl.textContent = getControllerDisplayName(device);
++        unitBrandBadgeEl.textContent = '';
++        unitBrandBadgeEl.classList.add('hidden');
+         document.querySelectorAll('a[href^="ir-library.html"]:not([href*="learn="])').forEach(link => { link.href = `ir-library.html?id=${encodeURIComponent(activeDeviceId)}`; });
+         unitDetailsEl.textContent = `${device.model} • Location: ${device.location || 'Unassigned'}`;
+ 

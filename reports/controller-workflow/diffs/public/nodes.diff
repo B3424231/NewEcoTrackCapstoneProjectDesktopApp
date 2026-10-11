@@ -1,0 +1,869 @@
+--- before/public/nodes.html
++++ public/nodes.html
+@@ -92,14 +92,15 @@
+   </style>
+   <script src="./js/supabase.umd.js"></script>
+   <script src="./js/supabase-client.js"></script>
+-  <script src="./js/hardware-cloud.js?v=3"></script>
++  <script src="./js/hardware-cloud.js?v=5"></script>
++  <script src="./js/controller-locations.js?v=1"></script>
+   <script src="./js/sidebar.js"></script>
+   <script src="./js/sidebar-loader.js?v=7"></script>
+   <script src="./js/icons.js"></script>
+   <script src="./js/eco-network.js"></script>
+   <script src="./js/eco-data-bus.js"></script>
+   <script src="./js/skeletons.js"></script>
+-  <script src="./js/aircon-system.js"></script>
++  <script src="./js/aircon-system.js?v=14"></script>
+ </head>
+ 
+ <body class="app-shell bg-gray-50 dark:bg-[#0a0f1d] text-slate-800 dark:text-slate-100 transition-colors duration-200">
+@@ -172,6 +173,7 @@
+                 <th class="py-3.5 px-4">WiFi Signal</th>
+                 <th class="py-3.5 px-4">IP / Network</th>
+                 <th class="py-3.5 px-4">Assigned Aircons</th>
++                <th class="py-3.5 px-4">IR Monitoring</th>
+                 <th class="py-3.5 px-4">Last Seen</th>
+                 <th class="py-3.5 px-4 text-right">Actions</th>
+               </tr>
+@@ -477,9 +479,9 @@
+ 
+           <div class="p-3 rounded-xl bg-teal-500/10 border border-teal-500/30 space-y-2">
+             <h4 class="text-xs font-bold text-teal-700 dark:text-teal-300">Auto-Detect Brand with Remote</h4>
+-            <p class="text-xs text-slate-600 dark:text-slate-300">Choose the brand manually, or leave it unspecified and detect it after registration.</p>
+-            <button type="button" id="registerRemoteBtn" disabled aria-describedby="registerRemoteStatus" class="btn-gradient-submit px-3 py-2 rounded-xl text-white text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed">Available after registration</button>
+-            <p id="registerRemoteStatus" role="status" aria-live="polite" class="text-xs text-slate-600 dark:text-slate-300">Save and verify this controller first. Then open its Edit screen and select Listen for Remote Signal.</p>
++            <p class="text-xs text-slate-600 dark:text-slate-300">Press the physical remote toward the receiver. Bluetooth detection works before saving the controller.</p>
++            <button type="button" id="registerRemoteBtn" disabled aria-describedby="registerRemoteStatus" class="btn-gradient-submit px-3 py-2 rounded-xl text-white text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed">Detect via Bluetooth</button>
++            <p id="registerRemoteStatus" role="status" aria-live="polite" class="text-xs text-slate-600 dark:text-slate-300">Connect the ESP32 through Bluetooth to detect its remote without adding a controller.</p>
+           </div>
+ 
+           <!-- Manufacturer Brand Input & Chips -->
+@@ -943,7 +945,7 @@
+               <h3 class="text-base font-bold text-slate-900 dark:text-white">Edit AC Controller Device</h3>
+               <span id="editModalNodeBadge" class="font-mono text-[10px] font-bold px-2 py-0.5 rounded bg-teal-500/15 text-teal-700 dark:text-cyan-400">node-10</span>
+             </div>
+-            <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Modify display name, room assignment, aircon binding, and network</p>
++            <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Modify display name, deployment location, brand, and aircon type</p>
+           </div>
+         </div>
+         <button id="closeEditNodeModalXBtn" type="button" class="w-8 h-8 rounded-xl flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 border-0 bg-transparent cursor-pointer text-lg font-bold">&times;</button>
+@@ -992,36 +994,26 @@
+           <input type="text" id="editNodeBrand" list="nodeBrandOptionsList" placeholder="Type or select the AC brand" class="w-full bg-slate-50 dark:bg-slate-900/80 border border-gray-300 dark:border-white/10 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-white outline-none focus:border-teal-500">
+         </div>
+ 
+-        <!-- Aircon Type & Status -->
+-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+-          <div>
+-            <label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Aircon Type</label>
+-            <select id="editNodeAirconType" class="w-full bg-slate-50 dark:bg-slate-900/80 border border-gray-300 dark:border-white/10 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-white outline-none focus:border-teal-500 cursor-pointer">
+-              <option value="Split Type (Inverter)">Split Type (Inverter)</option>
+-              <option value="Window Type (Inverter)">Window Type (Inverter)</option>
+-              <option value="Floor Mounted AC">Floor Mounted AC</option>
+-              <option value="Cassette Type (Inverter)">Cassette Type (Inverter)</option>
+-              <option value="Centralized HVAC">Centralized HVAC</option>
+-            </select>
+-          </div>
+-          <div>
+-            <label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Status</label>
+-            <select id="editNodeStatus" class="w-full bg-slate-50 dark:bg-slate-900/80 border border-gray-300 dark:border-white/10 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-white outline-none focus:border-teal-500 cursor-pointer">
+-              <option value="Connected">Connected (Online)</option>
+-              <option value="Offline">Offline (Standby)</option>
+-            </select>
+-          </div>
++        <div>
++          <label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Aircon Type</label>
++          <select id="editNodeAirconType" class="w-full bg-slate-50 dark:bg-slate-900/80 border border-gray-300 dark:border-white/10 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 dark:text-white">
++            <option value="Split Type (Inverter)">Split Type (Inverter)</option>
++            <option value="Window Type (Inverter)">Window Type (Inverter)</option>
++            <option value="Floor Mounted AC">Floor Mounted AC</option>
++            <option value="Cassette Type (Inverter)">Cassette Type (Inverter)</option>
++            <option value="Centralized HVAC">Centralized HVAC</option>
++          </select>
+         </div>
+ 
+         <!-- IP Address & Wi-Fi SSID -->
+         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+           <div>
+-            <label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Static IP Address</label>
+-            <input type="text" id="editNodeIp" class="w-full bg-slate-50 dark:bg-slate-900/80 border border-gray-300 dark:border-white/10 rounded-xl px-3 py-2 text-xs font-mono font-semibold text-slate-800 dark:text-white outline-none focus:border-teal-500">
++            <label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Device IP (reported)</label>
++            <input type="text" id="editNodeIp" readonly class="w-full bg-slate-50 dark:bg-slate-900/80 border border-gray-300 dark:border-white/10 rounded-xl px-3 py-2 text-xs font-mono font-semibold text-slate-800 dark:text-white outline-none focus:border-teal-500">
+           </div>
+           <div>
+-            <label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">WiFi SSID</label>
+-            <input type="text" id="editNodeSsid" class="w-full bg-slate-50 dark:bg-slate-900/80 border border-gray-300 dark:border-white/10 rounded-xl px-3 py-2 text-xs font-mono font-semibold text-slate-800 dark:text-white outline-none focus:border-teal-500">
++            <label class="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Wi-Fi SSID (reported)</label>
++            <input type="text" id="editNodeSsid" readonly class="w-full bg-slate-50 dark:bg-slate-900/80 border border-gray-300 dark:border-white/10 rounded-xl px-3 py-2 text-xs font-mono font-semibold text-slate-800 dark:text-white outline-none focus:border-teal-500">
+           </div>
+         </div>
+       </form>
+@@ -1112,7 +1104,7 @@
+         register: { id: 'nodeFormId', ip: 'nodeFormIp', brand: 'nodeFormBrand', modal: 'nodeModal', save: 'saveNodeBtn' },
+         edit: { id: 'editNodeIdHidden', ip: 'editNodeIp', brand: 'editNodeBrand', modal: 'editNodeModal', save: 'saveEditNodeBtn' }
+       };
+-      const registrationRemoteNotice = 'Save and verify this controller first. Then open its Edit screen and select Listen for Remote Signal.';
++      const registrationRemoteNotice = 'Connect the ESP32 through Bluetooth to detect its remote without adding a controller.';
+       let registrationCloudState = 'pending';
+       let registrationSaving = false;
+       function setRegistrationCloudStatus(state, message) {
+@@ -1141,22 +1133,30 @@
+       }
+       function setRemoteBusy(kind, busy) {
+         remoteCapture[kind].busy = busy;
+-        document.getElementById(`${kind}RemoteBtn`).disabled = busy || kind === 'register';
++        document.getElementById(`${kind}RemoteBtn`).disabled = busy || (kind === 'register' && !selectedBleDevice?.info);
+         document.getElementById(remoteFields[kind].save).disabled = busy;
+       }
+       function resetRemoteDetection(kind) {
+         const state = remoteCapture[kind];
+         state.request++;
+         state.protocol = null;
+-        state.brand = null;
++        state.brand = null; state.ambiguous = false; state.capture = null;
+         if (state.busy) setRemoteBusy(kind, false);
+-        document.getElementById(`${kind}RemoteBtn`).disabled = kind === 'register';
+-        document.getElementById(`${kind}RemoteBtn`).textContent = kind === 'register' ? 'Available after registration' : 'Listen for Remote Signal';
++        document.getElementById(`${kind}RemoteBtn`).disabled = kind === 'register' && !selectedBleDevice?.info;
++        document.getElementById(`${kind}RemoteBtn`).textContent = kind === 'register' ? 'Detect via Bluetooth' : 'Listen for Remote Signal';
+         document.getElementById(`${kind}RemoteStatus`).textContent = kind === 'register' ? registrationRemoteNotice : '';
+       }
++      function selectManualBrand(kind, brand) {
++        const state = remoteCapture[kind];
++        if (state.protocol && !state.busy && (state.ambiguous || state.brand?.toLowerCase() === brand.toLowerCase())) { state.brand = brand; return; }
++        resetRemoteDetection(kind);
++      }
+       async function listenForRemote(kind) {
+-        // Initial registration has no device cloud token yet. Learning belongs to Edit after Save verifies it.
+-        if (kind === 'register') { resetRemoteDetection(kind); return; }
++        if (registrationSaving && kind === 'register') return;
++        if (kind === 'register' && !selectedBleDevice?.info) {
++          document.getElementById('registerRemoteStatus').textContent = registrationRemoteNotice;
++          return;
++        }
+         const state = remoteCapture[kind], fields = remoteFields[kind];
+         if (state.busy) return;
+         const nodeId = document.getElementById(fields.id).value.trim();
+@@ -1167,9 +1167,11 @@
+         setRemoteBusy(kind, true);
+         const button = document.getElementById(`${kind}RemoteBtn`), status = document.getElementById(`${kind}RemoteStatus`);
+         button.textContent = 'Listening...';
+-        status.textContent = 'Requesting capture through Supabase. Point your remote at the ESP32 and press a button during its 6-second listening window...';
++        status.textContent = kind === 'register' ? 'Preparing Bluetooth receiver...' : 'Requesting capture through Supabase. Press the AC remote toward the receiver during its 6-second listening window.';
+         try {
+-          const result = await ProtocolAdapter.detectRemoteBrand(nodeId, ip);
++          const result = await ProtocolAdapter.detectRemoteBrand(nodeId, {nearby:kind === 'register', onListening:() => {
++            if (request === state.request) status.textContent = 'Listening for 6 seconds. Press the physical AC remote toward the receiver now.';
++          }});
+           if (request !== state.request) return;
+           if (nodeId !== document.getElementById(fields.id).value.trim() || ip !== document.getElementById(fields.ip).value.trim() ||
+               document.getElementById(fields.modal).classList.contains('hidden')) {
+@@ -1177,13 +1179,15 @@
+             return;
+           }
+           if (result.success) {
+-            document.getElementById(fields.brand).value = result.brand;
+-            state.brand = result.brand;
++            if (result.brand) document.getElementById(fields.brand).value = result.brand;
++            state.brand = result.brand || document.getElementById(fields.brand).value.trim();
++            state.ambiguous = !!result.ambiguous;
++            state.capture = result;
+             state.protocol = result.protocol;
+-            status.textContent = `Detected: ${result.brand} • IR protocol: ${result.protocol}. Review the brand and aircon type, then save.`;
++            status.textContent = result.brand ? `Detected ${result.brand}; protocol ${result.protocol}. Review the details, then save.` : result.message;
+             if (kind === 'register') {
+-              document.getElementById('selectedBrandDisplay').textContent = result.brand;
+-              renderBrandChips(result.brand);
++              document.getElementById('selectedBrandDisplay').textContent = state.brand || 'Not specified';
++              renderBrandChips(state.brand);
+               updateConfigSummary();
+             }
+           } else status.textContent = result.message;
+@@ -1198,7 +1202,7 @@
+       for (const kind of ['register', 'edit']) {
+         document.getElementById(`${kind}RemoteBtn`).addEventListener('click', () => listenForRemote(kind));
+         for (const field of ['brand', 'ip']) {
+-          document.getElementById(remoteFields[kind][field]).addEventListener('input', () => resetRemoteDetection(kind));
++          document.getElementById(remoteFields[kind][field]).addEventListener('input', () => field === 'brand' ? selectManualBrand(kind, document.getElementById(remoteFields[kind].brand).value.trim()) : resetRemoteDetection(kind));
+         }
+       }
+ 
+@@ -1212,6 +1216,19 @@
+       const cancelBtn = document.getElementById('cancelNodeModalBtn');
+       const form = document.getElementById('nodeForm');
+ 
++      function controllerIrSummary(node, attached = []) {
++        const snapshot = {...attached[0]?.control_snapshot,
++          ...window.EcoTrackAirconState.remoteObservation(node.cloud_state?.latest_ir, node.last_seen)};
++        const {state,source} = window.EcoTrackAirconState.selectSettings(snapshot);
++        if (!state) return node.cloud_state?.latest_ir
++          ? 'IR signal received; settings could not be decoded' : 'No remote settings received';
++        const power = state.power === true || state.power === 'on' ? 'ON' : state.power === false || state.power === 'off' ? 'OFF' : 'Unknown power';
++        const temp = Number.isFinite(state.temp) ? state.temp + '°C' : 'No setpoint';
++        const mode = state.mode ? state.mode.toUpperCase() : 'No mode';
++        const fan = state.fan ? state.fan.toUpperCase() + ' fan' : 'No fan setting';
++        const label = ({remote:'Remote',reported:'Reported',requested:'Requested',configured:'Configured'})[source] || 'Unknown';
++        return label + ': ' + [power,temp,mode,fan].join(' • ');
++      }
+       function renderNodes() {
+         const nodes = NodeService.getNodes();
+         const aircons = AirconProfileManager.getAll();
+@@ -1250,7 +1267,7 @@
+         if (!nodes || nodes.length === 0) {
+           tableBody.innerHTML = `
+             <tr>
+-              <td colspan="8" class="text-center py-12 text-slate-500 dark:text-gray-400">
++              <td colspan="9" class="text-center py-12 text-slate-500 dark:text-gray-400">
+                 <div class="flex flex-col items-center justify-center gap-2">
+                   <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5" class="text-slate-400 dark:text-gray-500">
+                     <rect x="4" y="4" width="16" height="16" rx="2" />
+@@ -1297,6 +1314,7 @@
+             <td class="py-3.5 px-4">
+               <div class="font-bold text-slate-900 dark:text-white text-xs">${displayName}</div>
+               <div class="text-[11px] text-slate-500 dark:text-gray-400 font-mono mt-0.5">${n.hardware || 'AC Controller Device (WiFi + IR)'} &bull; ${n.firmware || 'Firmware not reported'}</div>
++              <div class="text-[11px] text-teal-700 dark:text-teal-300 mt-1">${n.capabilities?.ir_receiver === true ? 'IR receiver: monitoring enabled' : 'IR receiver not reported'} · ${n.capabilities?.ir_transmitter === true ? 'IR transmitter: control enabled' : 'IR transmitter required for control'}</div>
+             </td>
+             <td class="py-3.5 px-4">
+               <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all shadow-sm ${
+@@ -1322,6 +1340,7 @@
+                 <span class="text-[11px] text-slate-500 dark:text-gray-400 font-medium truncate max-w-[170px]" title="${attachedDisplay}">${attachedDisplay || 'None assigned'}</span>
+               </div>
+             </td>
++            <td class="py-3.5 px-4"><span class="ir-monitor-summary block text-xs text-slate-700 dark:text-slate-200 max-w-[260px]"></span></td>
+             <td class="py-3.5 px-4 text-slate-600 dark:text-gray-400 font-mono text-[11px] font-medium">${timeAgo}</td>
+             <td class="py-3.5 px-4 text-right">
+               <div class="flex items-center justify-end gap-1.5">
+@@ -1333,6 +1352,7 @@
+             </td>
+           `;
+ 
++          row.querySelector('.ir-monitor-summary').textContent = controllerIrSummary(n,attached);
+           const pingBtn = row.querySelector('.ping-btn');
+           if (pingBtn) {
+             pingBtn.addEventListener('click', (e) => {
+@@ -1597,6 +1617,7 @@
+         updateConfigSummary();
+         renderDiscoveredBleNodes();
+         if (typeof updateNextButtonState === 'function') updateNextButtonState();
++        resetRemoteDetection('register');
+         setConnectionCheck('chkBle', 'success', 'Bluetooth connection verified with the selected ESP32');
+         if (!acceptExistingWifi(device.info, true)) setNodeModalStep(2);
+         if (window.EcoToast) window.EcoToast.show(`Bluetooth connected to ${device.nodeId}`, 'success');
+@@ -2119,7 +2140,8 @@
+             _cachedFloors = fRes.data || [];
+             _cachedRooms = rRes.data || [];
+           } catch (err) {
+-            console.warn('Could not fetch location hierarchy from Supabase:', err);
++            _cachedBuildings = []; _cachedFloors = []; _cachedRooms = [];
++            throw new Error('Could not load deployment locations: ' + err.message);
+           }
+         }
+ 
+@@ -2127,110 +2149,8 @@
+       }
+ 
+       function populateLocationDropdowns() {
+-        const bSelect = document.getElementById('nodeFormBuilding');
+-        const fSelect = document.getElementById('nodeFormFloor');
+-        const rSelect = document.getElementById('nodeFormRoom');
+-        const customBldInput = document.getElementById('nodeFormCustomBuilding');
+-        const customFlrInput = document.getElementById('nodeFormCustomFloor');
+-        const customRoomInput = document.getElementById('nodeFormCustomRoom');
+-
+-        if (!bSelect || !fSelect || !rSelect) return;
+-
+-        // Populate Buildings with custom option
+-        bSelect.innerHTML = [
+-          ..._cachedBuildings.map(b => `<option value="${b.id}">${b.name}</option>`),
+-          '<option value="custom">+ Other / Custom Building...</option>'
+-        ].join('');
+-
+-        function updateFloors() {
+-          const selectedBldId = bSelect.value;
+-          const matchingFloors = (selectedBldId && selectedBldId !== 'custom')
+-            ? _cachedFloors.filter(f => !f.building_id || f.building_id === selectedBldId)
+-            : _cachedFloors;
+-          const floorsToUse = matchingFloors;
+-
+-          fSelect.innerHTML = [
+-            '<option value="">Unassigned</option>',
+-            ...floorsToUse.map(f => `<option value="${f.id}">${f.name}</option>`),
+-            '<option value="custom">+ Other / Custom Floor...</option>'
+-          ].join('');
+-
+-          if (bSelect.value === 'custom') {
+-            if (customBldInput) customBldInput.classList.remove('hidden');
+-          } else {
+-            if (customBldInput) customBldInput.classList.add('hidden');
+-          }
+-
+-          if (fSelect.value === 'custom') {
+-            if (customFlrInput) customFlrInput.classList.remove('hidden');
+-          } else {
+-            if (customFlrInput) customFlrInput.classList.add('hidden');
+-          }
+-
+-          updateRooms();
+-        }
+-
+-        function updateRooms() {
+-          const selectedBldId = bSelect.value;
+-          const selectedFloorId = fSelect.value;
+-          const matchingRooms = _cachedRooms.filter(r => {
+-            if (selectedFloorId && selectedFloorId !== 'custom' && r.floor_id) return r.floor_id === selectedFloorId;
+-            if (selectedBldId && selectedBldId !== 'custom' && r.building_id) return r.building_id === selectedBldId;
+-            return true;
+-          });
+-          const roomsToUse = matchingRooms;
+-
+-          rSelect.innerHTML = [
+-            '<option value="">Unassigned</option>',
+-            ...roomsToUse.map(r => `<option value="${r.id}">${r.name}</option>`),
+-            '<option value="custom">+ Other / Custom Room...</option>'
+-          ].join('');
+-
+-          if (rSelect.value === 'custom') {
+-            if (customRoomInput) customRoomInput.classList.remove('hidden');
+-          } else {
+-            if (customRoomInput) customRoomInput.classList.add('hidden');
+-          }
+-          updateConfigSummary();
+-        }
+-
+-        bSelect.onchange = () => {
+-          if (bSelect.value === 'custom') {
+-            if (customBldInput) {
+-              customBldInput.classList.remove('hidden');
+-              customBldInput.focus();
+-            }
+-          } else {
+-            if (customBldInput) customBldInput.classList.add('hidden');
+-          }
+-          updateFloors();
+-        };
+-
+-        fSelect.onchange = () => {
+-          if (fSelect.value === 'custom') {
+-            if (customFlrInput) {
+-              customFlrInput.classList.remove('hidden');
+-              customFlrInput.focus();
+-            }
+-          } else {
+-            if (customFlrInput) customFlrInput.classList.add('hidden');
+-          }
+-          updateRooms();
+-        };
+-
+-        rSelect.onchange = () => {
+-          if (rSelect.value === 'custom') {
+-            if (customRoomInput) {
+-              customRoomInput.classList.remove('hidden');
+-              customRoomInput.focus();
+-            }
+-          } else {
+-            if (customRoomInput) customRoomInput.classList.add('hidden');
+-          }
+-          updateConfigSummary();
+-        };
+-
+-        updateFloors();
++        window.EcoTrackControllerLocations.bind('nodeForm',
++          {buildings:_cachedBuildings,floors:_cachedFloors,rooms:_cachedRooms}, {}, updateConfigSummary);
+       }
+ 
+       function renderBrandChips(selectedBrand) {
+@@ -2248,7 +2168,7 @@
+           }`;
+           btn.textContent = brand;
+           btn.addEventListener('click', () => {
+-            resetRemoteDetection('register');
++            selectManualBrand('register', brand);
+             const input = document.getElementById('nodeFormBrand');
+             if (input) input.value = brand;
+             const disp = document.getElementById('selectedBrandDisplay');
+@@ -2550,8 +2470,8 @@
+         form.reset();
+         resetConnectionDiagnostics();
+         resetDeviceIpFeedback();
+-        await loadBuildingsFloorsRooms();
+-        await loadRegistrationAirconChoices();
++        try { await loadBuildingsFloorsRooms(); await loadRegistrationAirconChoices(); }
++        catch (error) { window.EcoToast?.show(error.message, 'error'); return; }
+         renderBrandChips('');
+         document.getElementById('nodeFormBrand').value = '';
+         document.getElementById('selectedBrandDisplay').textContent = 'Not specified';
+@@ -2641,6 +2561,10 @@
+         }
+       });
+ 
++      // Enter in a text field must not provision or add a controller implicitly.
++      form.addEventListener('keydown', event => {
++        if (event.key === 'Enter' && event.target.tagName === 'INPUT' && !['submit','button'].includes(event.target.type)) event.preventDefault();
++      });
+       // Save form
+       form.addEventListener('submit', async (e) => {
+         e.preventDefault();
+@@ -2679,121 +2603,40 @@
+         }
+         const selectedAirconId = document.getElementById('nodeFormAircon')?.value || null;
+         const brand = (document.getElementById('nodeFormBrand')?.value || '').trim();
+-        const effectiveBrand = brand || 'Unassigned Brand';
+         const selectedAc = selectedAirconId ? AirconProfileManager.getById(selectedAirconId) : null;
++        const effectiveBrand = brand || selectedAc?.brand || 'Unspecified';
+         const selectedProtocol = remoteCapture.register.brand === brand && remoteCapture.register.protocol ||
+           (selectedAc?.brand === brand ? selectedAc.protocol_name || selectedAc.protocol : null) ||
+           (brand ? CapabilityEngine.resolveProtocolName(brand) : selectedAc?.protocol_name || null);
+         const aircon_type = document.getElementById('nodeFormAirconType').value || 'Split Type (Inverter)';
+-
+-        const bSelect = document.getElementById('nodeFormBuilding');
+-        const fSelect = document.getElementById('nodeFormFloor');
+-        const rSelect = document.getElementById('nodeFormRoom');
+-        const customBldInput = document.getElementById('nodeFormCustomBuilding');
+-        const customFlrInput = document.getElementById('nodeFormCustomFloor');
+-        const customRoomInput = document.getElementById('nodeFormCustomRoom');
+-
+-        const bldText = (bSelect?.value === 'custom' && customBldInput?.value.trim())
+-          ? customBldInput.value.trim()
+-          : (bSelect?.options[bSelect.selectedIndex]?.text || '');
+-        const flrText = (fSelect?.value === 'custom' && customFlrInput?.value.trim())
+-          ? customFlrInput.value.trim()
+-          : (fSelect?.options[fSelect.selectedIndex]?.text || '1st Floor');
+-        const rmText = (rSelect?.value === 'custom' && customRoomInput?.value.trim())
+-          ? customRoomInput.value.trim()
+-          : (rSelect?.options[rSelect.selectedIndex]?.text || 'General Facility');
+-
+-        // Resolve IDs for Building, Floor, and Room (connecting directly to database hierarchy)
+-        let effectiveBldId = (bSelect?.value && bSelect.value !== 'custom') ? bSelect.value : null;
+-        let effectiveFlrId = (fSelect?.value && fSelect.value !== 'custom') ? fSelect.value : null;
+-        let effectiveRoomId = (rSelect?.value && rSelect.value !== 'custom') ? rSelect.value : null;
+-
+         const sb = window.supabaseClient || window.sb;
++        let deployment, effectiveBldId, effectiveFlrId, effectiveRoomId, bldText, flrText, rmText;
+ 
+         let registered;
+         registrationSaving = true;
+         saveNodeBtn.disabled = true;
+         setRegistrationCloudStatus('verifying');
+         try {
+-          // Dynamically save custom building/floor/room into local memory caches & Supabase
+-          if (bSelect?.value === 'custom' && customBldInput?.value.trim()) {
+-            const newBld = customBldInput.value.trim();
+-            let existingBld = _cachedBuildings.find(b => b.name.toLowerCase() === newBld.toLowerCase());
+-            if (!existingBld) {
+-              effectiveBldId = `bld_${Date.now().toString(16)}`;
+-              if (!sb?.from) throw new Error('Supabase is required to save a deployment location.');
+-              if (sb && typeof sb.from === 'function') {
+-                const savedBld = await sb.from('buildings').insert([{ id: effectiveBldId, name: newBld, created: new Date().toISOString() }]).select('id').single();
+-                if (savedBld.error || !savedBld.data?.id) throw new Error(savedBld.error?.message || 'The deployment location could not be confirmed in Supabase.');
+-              }
+-              _cachedBuildings.push({ id: effectiveBldId, name: newBld });
+-            } else {
+-              effectiveBldId = existingBld.id;
+-            }
+-          }
+-
+-          if (fSelect?.value === 'custom' && customFlrInput?.value.trim()) {
+-            const newFlr = customFlrInput.value.trim();
+-            let existingFlr = _cachedFloors.find(f => f.building_id === effectiveBldId && f.name.toLowerCase() === newFlr.toLowerCase());
+-            if (!existingFlr) {
+-              effectiveFlrId = `flr_${Date.now().toString(16)}`;
+-              if (!sb?.from) throw new Error('Supabase is required to save a deployment location.');
+-              if (sb && typeof sb.from === 'function') {
+-                const savedFlr = await sb.from('floors').insert([{ id: effectiveFlrId, name: newFlr, building_id: effectiveBldId, created: new Date().toISOString() }]).select('id').single();
+-                if (savedFlr.error || !savedFlr.data?.id) throw new Error(savedFlr.error?.message || 'The deployment location could not be confirmed in Supabase.');
+-              }
+-              _cachedFloors.push({ id: effectiveFlrId, name: newFlr, building_id: effectiveBldId });
+-            } else {
+-              effectiveFlrId = existingFlr.id;
+-            }
+-          }
+-
+-          if (rSelect?.value === 'custom' && customRoomInput?.value.trim()) {
+-            const newRm = customRoomInput.value.trim();
+-            let existingRm = _cachedRooms.find(r => r.floor_id === effectiveFlrId && r.name.toLowerCase() === newRm.toLowerCase());
+-            if (!existingRm) {
+-              effectiveRoomId = `rm_${Date.now().toString(16)}`;
+-              if (!sb?.from) throw new Error('Supabase is required to save a deployment location.');
+-              if (sb && typeof sb.from === 'function') {
+-                const savedRoom = await sb.from('rooms').insert([{ id: effectiveRoomId, name: newRm, floor_id: effectiveFlrId, created: new Date().toISOString() }]).select('id').single();
+-                if (savedRoom.error || !savedRoom.data?.id) throw new Error(savedRoom.error?.message || 'The deployment location could not be confirmed in Supabase.');
+-              }
+-              _cachedRooms.push({ id: effectiveRoomId, name: newRm, floor_id: effectiveFlrId, building_id: effectiveBldId });
+-            } else {
+-              effectiveRoomId = existingRm.id;
+-            }
+-          }
+-
+-          // If effectiveRoomId still not found, check cached rooms by name
+-          if (!effectiveRoomId && rmText) {
+-            const match = _cachedRooms.find(r => r.floor_id === effectiveFlrId && r.name.toLowerCase() === rmText.toLowerCase());
+-            if (match) effectiveRoomId = match.id;
+-          }
++          deployment = await window.EcoTrackControllerLocations.resolve('nodeForm',
++            {buildings:_cachedBuildings,floors:_cachedFloors,rooms:_cachedRooms}, sb);
++          effectiveBldId = deployment.building_id; effectiveFlrId = deployment.floor_id; effectiveRoomId = deployment.room_id;
++          bldText = deployment.building; flrText = deployment.floor; rmText = deployment.room_name;
+ 
+           registered = await window.EcoTrackHardwareCloud.register({ room_id: effectiveRoomId, brand: brand || null, aircon_type }, credentials);
+           await NodeService.saveNode({
+             node_id: registered.info.device_id, db_id: registered.node.id, cloud_registered: true, aircon_id: selectedAirconId,
+-            name: `${registered.info.device_id} (${name})`, hardware: 'ESP32-S3 IR receiver', status: 'Connected',
++            name, hardware: 'ESP32-S3 IR receiver', status: 'Connected',
+             firmware: registered.info.firmware_version, cloud_state: registered.cloud_state, ip_address: registered.info.ip_address || null,
+             wifi_ssid: registered.info.wifi_ssid || wifi_ssid, capabilities: registered.info.capabilities,
+             ir_rx: true, ir_tx: false, brand: effectiveBrand, aircon_type, protocol_name: selectedProtocol,
+             building: bldText, floor: flrText, room_name: rmText, room_id: effectiveRoomId,
+             floor_id: effectiveFlrId, building_id: effectiveBldId,
+-            location: `${rmText} (${bldText} / ${flrText})`, connection: 'Supabase over Wi-Fi',
++            location: deployment.location, connection: 'Supabase over Wi-Fi',
+             rssi: registered.info.rssi ?? null, controls: ['IR Learning']
+           });
+           document.getElementById('nodeFormPassword').value = '';
+           document.getElementById('registrationWifiPassword').value = '';
+-          if (brand) {
+-            try {
+-              await NodeService.saveRemoteProfile(node_id, {
+-                brand, aircon_type, protocol_name: selectedProtocol
+-              });
+-            } catch (error) {
+-              throw new Error('AC profile was not saved: ' + error.message);
+-            }
+-          }
+-
++          window.EcoTrackHardwareCloud.completeRegistration(registered.node.id);
+           setRegistrationCloudStatus('verified');
+ 
+           // Invalidate scheduler and node caches
+@@ -3071,6 +2914,7 @@
+       const cancelEditBtn = document.getElementById('cancelEditNodeBtn');
+       const saveEditBtn = document.getElementById('saveEditNodeBtn');
+       const editForm = document.getElementById('editNodeForm');
++      let editSaving = false;
+       const editBldSelect = document.getElementById('editNodeBuilding');
+       const editFlrSelect = document.getElementById('editNodeFloor');
+       const editRoomSelect = document.getElementById('editNodeRoom');
+@@ -3079,6 +2923,7 @@
+       const editCustomRoomInput = document.getElementById('editNodeCustomRoom');
+ 
+       function closeEditNodeModal() {
++        if (editSaving) return;
+         resetRemoteDetection('edit');
+         if (editModal) editModal.classList.add('hidden');
+       }
+@@ -3097,288 +2942,50 @@
+       });
+ 
+       async function openEditNodeModal(nodeId) {
++        if (editSaving) return;
+         resetRemoteDetection('edit');
+-        // Ensure facility location hierarchy is available
+-        if (!_cachedBuildings.length || !_cachedRooms.length) {
+-          await loadBuildingsFloorsRooms();
+-        }
+-
+-        const node = NodeService.getNode(nodeId) || { node_id: nodeId, name: nodeId };
++        try { await loadBuildingsFloorsRooms(); }
++        catch (error) { window.EcoToast?.show(error.message, 'error'); return; }
++        const node = NodeService.getNode(nodeId);
++        if (!node) { window.EcoToast?.show('Controller no longer exists. Refresh the device list.', 'error'); return; }
+         document.getElementById('editNodeIdHidden').value = nodeId;
+         document.getElementById('editModalNodeBadge').textContent = nodeId;
+         document.getElementById('editNodeName').value = node.name || nodeId;
+-        document.getElementById('editNodeBrand').value = node.brand || AirconProfileManager.getAll().find(ac => ac.node_id === nodeId || (node.db_id && ac.controller_node_id === node.db_id))?.brand || '';
++        document.getElementById('editNodeBrand').value = node.brand || '';
+         document.getElementById('editNodeAirconType').value = node.aircon_type || 'Split Type (Inverter)';
+-        document.getElementById('editNodeStatus').value = ((node.status || '').toLowerCase() === 'offline') ? 'Offline' : 'Connected';
+-
+         document.getElementById('editNodeIp').value = node.ip_address || '';
+         document.getElementById('editNodeSsid').value = node.wifi_ssid || '';
+-
+-        // Setup cascading building/floor/room dropdowns with custom support for edit modal
+-        function updateEditFloors() {
+-          const selectedBldId = editBldSelect?.value;
+-          const matchingFloors = (selectedBldId && selectedBldId !== 'custom')
+-            ? _cachedFloors.filter(f => !f.building_id || f.building_id === selectedBldId)
+-            : _cachedFloors;
+-          const floorsToUse = matchingFloors;
+-
+-          if (editFlrSelect) {
+-            editFlrSelect.innerHTML = [
+-              '<option value="">Unassigned</option>',
+-            ...floorsToUse.map(f => `<option value="${f.id}">${f.name}</option>`),
+-              '<option value="custom">+ Other / Custom Floor...</option>'
+-            ].join('');
+-          }
+-
+-          if (editBldSelect?.value === 'custom') {
+-            if (editCustomBldInput) {
+-              editCustomBldInput.classList.remove('hidden');
+-              editCustomBldInput.focus();
+-            }
+-          } else {
+-            if (editCustomBldInput) editCustomBldInput.classList.add('hidden');
+-          }
+-
+-          if (editFlrSelect?.value === 'custom') {
+-            if (editCustomFlrInput) editCustomFlrInput.classList.remove('hidden');
+-          } else {
+-            if (editCustomFlrInput) editCustomFlrInput.classList.add('hidden');
+-          }
+-
+-          updateEditRooms();
+-        }
+-
+-        function updateEditRooms() {
+-          const selectedBldId = editBldSelect?.value;
+-          const selectedFloorId = editFlrSelect?.value;
+-          const matchingRooms = _cachedRooms.filter(r => {
+-            if (selectedFloorId && selectedFloorId !== 'custom' && r.floor_id) return r.floor_id === selectedFloorId;
+-            if (selectedBldId && selectedBldId !== 'custom' && r.building_id) return r.building_id === selectedBldId;
+-            return true;
+-          });
+-          const roomsToUse = matchingRooms;
+-
+-          if (editRoomSelect) {
+-            editRoomSelect.innerHTML = [
+-              '<option value="">Unassigned</option>',
+-            ...roomsToUse.map(r => `<option value="${r.id}">${r.name}</option>`),
+-              '<option value="custom">+ Other / Custom Room...</option>'
+-            ].join('');
+-          }
+-
+-          if (editRoomSelect?.value === 'custom') {
+-            if (editCustomRoomInput) editCustomRoomInput.classList.remove('hidden');
+-          } else {
+-            if (editCustomRoomInput) editCustomRoomInput.classList.add('hidden');
+-          }
+-        }
+-
+-        if (editBldSelect) {
+-          editBldSelect.innerHTML = [
+-            '<option value="">Unassigned</option>',
+-            ..._cachedBuildings.map(b => `<option value="${b.id}">${b.name}</option>`),
+-            '<option value="custom">+ Other / Custom Building...</option>'
+-          ].join('');
+-          editBldSelect.onchange = updateEditFloors;
+-        }
+-
+-        if (editFlrSelect) {
+-          editFlrSelect.onchange = () => {
+-            if (editFlrSelect.value === 'custom') {
+-              if (editCustomFlrInput) {
+-                editCustomFlrInput.classList.remove('hidden');
+-                editCustomFlrInput.focus();
+-              }
+-            } else {
+-              if (editCustomFlrInput) editCustomFlrInput.classList.add('hidden');
+-            }
+-            updateEditRooms();
+-          };
+-        }
+-
+-        if (editRoomSelect) {
+-          editRoomSelect.onchange = () => {
+-            if (editRoomSelect.value === 'custom') {
+-              if (editCustomRoomInput) {
+-                editCustomRoomInput.classList.remove('hidden');
+-                editCustomRoomInput.focus();
+-              }
+-            } else {
+-              if (editCustomRoomInput) editCustomRoomInput.classList.add('hidden');
+-            }
+-          };
+-        }
+-
+-        // Reset custom input states
+-        if (editCustomBldInput) { editCustomBldInput.classList.add('hidden'); editCustomBldInput.value = ''; }
+-        if (editCustomFlrInput) { editCustomFlrInput.classList.add('hidden'); editCustomFlrInput.value = ''; }
+-        if (editCustomRoomInput) { editCustomRoomInput.classList.add('hidden'); editCustomRoomInput.value = ''; }
+-
+-        updateEditFloors();
+-
+-        const nodeBld = (node.building || node.building_name || '').trim();
+-        const nodeFlr = (node.floor || node.floor_name || '').trim();
+-        const nodeRoom = (node.room_name || '').trim();
+-
+-        // Match current Building
+-        const matchedBld = _cachedBuildings.find(b => b.id === node.building_id || (nodeBld && b.name && b.name.toLowerCase() === nodeBld.toLowerCase()));
+-        if (matchedBld && editBldSelect) {
+-          editBldSelect.value = matchedBld.id;
+-          updateEditFloors();
+-        } else if (nodeBld && nodeBld.toLowerCase() !== 'unassigned' && nodeBld.toLowerCase() !== 'unknown') {
+-          if (editBldSelect) editBldSelect.value = 'custom';
+-          if (editCustomBldInput) {
+-            editCustomBldInput.value = nodeBld;
+-            editCustomBldInput.classList.remove('hidden');
+-          }
+-          updateEditFloors();
+-        }
+-
+-        // Match current Floor
+-        const matchedFlr = _cachedFloors.find(f => f.id === node.floor_id || (nodeFlr && f.name && f.name.toLowerCase() === nodeFlr.toLowerCase()));
+-        if (matchedFlr && editFlrSelect) {
+-          editFlrSelect.value = matchedFlr.id;
+-          updateEditRooms();
+-        } else if (nodeFlr && nodeFlr.toLowerCase() !== 'unassigned' && nodeFlr.toLowerCase() !== 'unknown') {
+-          if (editFlrSelect) editFlrSelect.value = 'custom';
+-          if (editCustomFlrInput) {
+-            editCustomFlrInput.value = nodeFlr;
+-            editCustomFlrInput.classList.remove('hidden');
+-          }
+-          updateEditRooms();
+-        }
+-
+-        // Match current Room
+-        const matchedRoom = _cachedRooms.find(r => r.id === node.room_id || (nodeRoom && r.name && r.name.toLowerCase() === nodeRoom.toLowerCase()));
+-        if (matchedRoom && editRoomSelect) {
+-          editRoomSelect.value = matchedRoom.id;
+-        } else if (nodeRoom && nodeRoom.toLowerCase() !== 'unassigned' && nodeRoom.toLowerCase() !== 'unknown') {
+-          if (editRoomSelect) editRoomSelect.value = 'custom';
+-          if (editCustomRoomInput) {
+-            editCustomRoomInput.value = nodeRoom;
+-            editCustomRoomInput.classList.remove('hidden');
+-          }
+-        }
+-
+-        if (editModal) editModal.classList.remove('hidden');
+-      }
+-
+-      async function confirmCustomDeployment(table, cache, name, parent = {}) {
+-        const client = window.supabaseClient || window.sb;
+-        if (!client?.from) throw new Error('Supabase is required to save a deployment location.');
+-        const existing = cache.find(row => row.name?.toLowerCase() === name.toLowerCase() &&
+-          Object.entries(parent).every(([key, value]) => row[key] === value));
+-        if (existing) return existing.id;
+-        const id = table.slice(0, 3) + '_' + crypto.randomUUID().replace(/-/g, '');
+-        const { data, error } = await client.from(table).insert([{ id, name, ...parent, created: new Date().toISOString() }]).select('*').single();
+-        if (error || data?.id !== id || data.name !== name ||
+-            !Object.entries(parent).every(([key, value]) => data[key] === value)) throw new Error(error?.message || 'Deployment location was not confirmed in Supabase.');
+-        cache.push(data);
+-        return data.id;
++        window.EcoTrackControllerLocations.bind('editNode',
++          {buildings:_cachedBuildings,floors:_cachedFloors,rooms:_cachedRooms}, node);
++        editModal.classList.remove('hidden');
+       }
+ 
+       async function handleSaveEditNode() {
+         if (remoteCapture.edit.busy || saveEditBtn.disabled) return;
+-        const nodeId = document.getElementById('editNodeIdHidden')?.value.trim();
+-        const name = document.getElementById('editNodeName')?.value.trim();
+-        if (!nodeId || !name) {
+-          if (window.EcoToast) window.EcoToast.show('Please enter a display name.', 'warning');
+-          return;
+-        }
+-
++        if (!editForm.reportValidity()) return;
++        const nodeId = document.getElementById('editNodeIdHidden').value.trim();
++        const name = document.getElementById('editNodeName').value.trim();
++        const node = NodeService.getNode(nodeId);
++        if (!node || !name) { window.EcoToast?.show('Select a controller and enter a display name.', 'warning'); return; }
+         saveEditBtn.disabled = true;
+-        const origHtml = saveEditBtn.innerHTML;
+-        saveEditBtn.innerHTML = `
+-          <svg class="animate-spin -ml-1 mr-1.5 h-3.5 w-3.5 text-white inline-block" viewBox="0 0 24 24" fill="none">
+-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+-          </svg> Saving...
+-        `;
+-
++        editSaving = true;
++        const original = saveEditBtn.innerHTML;
++        saveEditBtn.textContent = 'Saving...';
+         try {
+-          if (editBldSelect?.value === 'custom' && !editCustomBldInput?.value.trim()) {
+-            if (window.EcoToast) window.EcoToast.show('Please enter your custom building name.', 'warning');
+-            editCustomBldInput?.focus();
+-            saveEditBtn.disabled = false;
+-            saveEditBtn.innerHTML = origHtml;
+-            return;
+-          }
+-          if (editFlrSelect?.value === 'custom' && !editCustomFlrInput?.value.trim()) {
+-            if (window.EcoToast) window.EcoToast.show('Please enter your custom floor name.', 'warning');
+-            editCustomFlrInput?.focus();
+-            saveEditBtn.disabled = false;
+-            saveEditBtn.innerHTML = origHtml;
+-            return;
+-          }
+-          if (editRoomSelect?.value === 'custom' && !editCustomRoomInput?.value.trim()) {
+-            if (window.EcoToast) window.EcoToast.show('Please enter your custom room name.', 'warning');
+-            editCustomRoomInput?.focus();
+-            saveEditBtn.disabled = false;
+-            saveEditBtn.innerHTML = origHtml;
+-            return;
+-          }
+-
+-          const bldName = editBldSelect?.value === 'custom'
+-            ? (editCustomBldInput?.value.trim() || 'Custom Building')
+-            : (editBldSelect?.options[editBldSelect.selectedIndex]?.text || 'main campus');
+-
+-          const flrName = editFlrSelect?.value === 'custom'
+-            ? (editCustomFlrInput?.value.trim() || 'Custom Floor')
+-            : (editFlrSelect?.options[editFlrSelect.selectedIndex]?.text || 'first floor');
+-
+-          let roomId = editRoomSelect?.value === 'custom' ? null : (editRoomSelect?.value || null);
+-          const roomName = editRoomSelect?.value === 'custom'
+-            ? (editCustomRoomInput?.value.trim() || 'Custom Room')
+-            : (editRoomSelect?.options[editRoomSelect.selectedIndex]?.text || 'Unassigned');
+-          let buildingId = editBldSelect?.value === 'custom' ? null : editBldSelect?.value || null;
+-          let floorId = editFlrSelect?.value === 'custom' ? null : editFlrSelect?.value || null;
+-          if (editBldSelect?.value === 'custom') buildingId = await confirmCustomDeployment('buildings', _cachedBuildings, bldName);
+-          if (editFlrSelect?.value === 'custom') {
+-            if (!buildingId) throw new Error('Choose a building before creating a floor.');
+-            floorId = await confirmCustomDeployment('floors', _cachedFloors, flrName, { building_id: buildingId });
+-          }
+-          if (editRoomSelect?.value === 'custom') {
+-            if (!floorId) throw new Error('Choose a floor before creating a room.');
+-            roomId = await confirmCustomDeployment('rooms', _cachedRooms, roomName, { floor_id: floorId });
+-          }
+-          const aircon_type = document.getElementById('editNodeAirconType')?.value;
+-          const status = document.getElementById('editNodeStatus')?.value;
+-          const ip_address = document.getElementById('editNodeIp')?.value.trim();
+-          const wifi_ssid = document.getElementById('editNodeSsid')?.value.trim();
++          const deployment = await window.EcoTrackControllerLocations.resolve('editNode',
++            {buildings:_cachedBuildings,floors:_cachedFloors,rooms:_cachedRooms}, window.supabaseClient || window.sb);
+           const brand = document.getElementById('editNodeBrand').value.trim();
+-          const node = NodeService.getNode(nodeId);
+-          if (brand) {
+-            const linkedAc = AirconProfileManager.getAll().find(ac => ac.node_id === nodeId || (node?.db_id && ac.controller_node_id === node.db_id));
+-            const protocol = remoteCapture.edit.brand === brand && remoteCapture.edit.protocol ||
+-              (brand === (node?.brand || linkedAc?.brand) ? node?.protocol_name || linkedAc?.protocol_name || linkedAc?.protocol : null) || CapabilityEngine.resolveProtocolName(brand);
+-            await NodeService.saveRemoteProfile(nodeId, { brand, aircon_type, protocol_name: protocol });
+-          }
+-
+-          await NodeService.editDevice(nodeId, {
+-            name: name,
+-            building: bldName, building_id: buildingId,
+-            floor: flrName, floor_id: floorId,
+-            room_id: roomId,
+-            room_name: roomName,
+-            location: `${roomName} (${bldName} • ${flrName})`,
+-            aircon_type,
+-            status,
+-            ip_address,
+-            wifi_ssid
+-          });
+-
++          const aircon_type = document.getElementById('editNodeAirconType').value;
++          const protocol = remoteCapture.edit.brand === brand && remoteCapture.edit.protocol ||
++            (brand === (node.brand || '') ? node.protocol_name : null) || CapabilityEngine.resolveProtocolName(brand);
++          await NodeService.editDevice(nodeId, {...deployment, name, brand:brand || null, aircon_type, protocol_name:protocol});
++          editSaving = false;
+           closeEditNodeModal();
+           renderNodes();
+-          if (window.EcoToast) {
+-            window.EcoToast.show(`AC Controller Device ${nodeId} updated successfully!`, 'success');
+-          }
+-        } catch (err) {
+-          console.error('Error saving device edits:', err);
+-          if (window.EcoToast) window.EcoToast.show('Error saving device: ' + err.message, 'error');
+-        } finally {
+-          saveEditBtn.disabled = false;
+-          saveEditBtn.innerHTML = origHtml;
+-        }
++          window.EcoToast?.show('Controller changes saved to Supabase.', 'success');
++        } catch (error) {
++          window.EcoToast?.show(error.message || 'Controller changes were not saved.', 'error');
++        } finally { editSaving = false; saveEditBtn.disabled = false; saveEditBtn.innerHTML = original; }
+       }
+ 
+       if (saveEditBtn) saveEditBtn.addEventListener('click', handleSaveEditNode);

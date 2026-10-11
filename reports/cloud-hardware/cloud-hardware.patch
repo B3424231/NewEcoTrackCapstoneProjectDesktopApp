@@ -1,0 +1,3285 @@
+--- before/public/js/aircon-system.js
++++ after/public/js/aircon-system.js
+@@ -391,6 +391,13 @@
+       if (nodesRes.error || airconsRes.error) throw nodesRes.error || airconsRes.error;
+       if (!Array.isArray(nodesRes.data) || !Array.isArray(airconsRes.data)) throw new Error('Unexpected device registry response');
+ 
++      let hardwareStates = [];
++      if (window.EcoTrackHardwareCloud) {
++        try { hardwareStates = await window.EcoTrackHardwareCloud.listStatus(); }
++        catch (error) { console.warn('[HardwareCloud]', error.message); }
++      }
++      if (authVersion !== databaseAuthVersion) return;
++      const hardwareByNode = new Map(hardwareStates.map(item => [item.node_id, item]));
+       const sbNodes = nodesRes.data || [];
+       const sbRooms = roomsRes.data || [];
+       const sbFloors = floorsRes.data || [];
+@@ -443,7 +450,8 @@
+           rInfo = { name: 'Unassigned', floor: '1st Floor', building: 'main campus' };
+         }
+ 
+-        const isOnline = (n.status || 'online').toLowerCase() !== 'offline';
++        const hardware = hardwareByNode.get(n.id);
++        const isOnline = hardware?.connection_status === 'online';
+         const numPart = (n.name || n.id || String(idx + 1)).replace(/\D/g, '') || String(idx + 1);
+         const matchedAcForNode = sbAircons.find(a => 
+           a.node_id === n.name || a.node_id === n.id || 
+@@ -455,22 +463,23 @@
+         return {
+           node_id: n.name || n.id,
+           name: `${n.name} (${rInfo.name})`,
+-          status: isOnline ? 'Connected' : 'Offline',
+-          hardware: 'AC Controller Device (WiFi + IR)',
+-          firmware: 'v2.4.2-WiFi',
++          status: hardware?.connection_status === 'sleeping' ? 'Sleeping' : isOnline ? 'Connected' : 'Offline',
++          hardware: hardware?.capabilities?.ir_transmitter ? 'ESP32-S3 IR controller' : 'ESP32-S3 IR receiver',
++          firmware: hardware?.firmware_version || null,
++          capabilities: hardware?.capabilities || {},
++          cloud_state: hardware || null,
+           connection: 'WiFi (2.4GHz) / Supabase Realtime',
+-          controls: ['Aircon Temperature Control', 'IR Transmission', 'IR Learning'],
+-          ir_tx: true,
+-          ir_rx: true,
++          controls: hardware?.capabilities?.ir_transmitter ? ['IR Control', 'IR Learning'] : ['IR Learning'],
++          ir_tx: hardware?.capabilities?.ir_transmitter === true,
++          ir_rx: hardware?.capabilities?.ir_receiver === true,
+           brand: resolvedBrand,
+           protocol_name: n.protocol_name || matchedAcForNode?.protocol_name || matchedAcForNode?.protocol || null,
+           mac_address: n.mac_address || null,
+-          ip_address: n.ip_address || `192.168.1.10${numPart}`,
+-          wifi_ssid: n.wifi_ssid || 'EcoTrack-IoT',
+-          rssi: isOnline ? (n.rssi || -65) : null,
+-          temp: n.temp !== undefined ? n.temp : 24,
+-          pressure: n.pressure !== undefined ? n.pressure : 0.48,
+-          battery: n.battery !== undefined ? n.battery : 4.1,
++          ip_address: hardware?.ip_address || null,
++          wifi_ssid: hardware?.wifi_ssid || null,
++          rssi: hardware?.rssi ?? null,
++          temp: null,
++          pressure: null,
+           room_id: n.room_id,
+           room_name: rInfo.name,
+           floor: rInfo.floor,
+@@ -478,7 +487,7 @@
+           location: `${rInfo.name} (${rInfo.building} • ${rInfo.floor})`,
+           aircon_type: n.aircon_type || matchedAcForNode?.aircon_type || 'Split Type (Inverter)',
+           db_id: n.id,
+-          last_seen: n.updated || n.created || new Date().toISOString()
++          last_seen: hardware?.last_seen || null
+         };
+       });
+ 
+@@ -611,7 +620,8 @@
+         const cleanRoom = (rInfo.name || '').trim().replace(/\b\w/g, l => l.toUpperCase());
+         const effectiveBrand = n.brand || 'Daikin';
+         const proto = n.protocol_name || CapabilityEngine.resolveProtocolName(effectiveBrand);
+-        const isOnline = (n.status || 'online').toLowerCase() !== 'offline';
++        const hardware = hardwareByNode.get(n.id);
++        const isOnline = hardware?.connection_status === 'online';
+ 
+         const numPart = n.name.replace(/\D/g, '') || String(idx + 1);
+         let acTag = `AC-${numPart.padStart(3, '0')}`;
+@@ -685,6 +695,7 @@
+             scheduleDatabaseSync();
+           })
+           .on('postgres_changes', { event: '*', schema: 'public', table: 'aircons' }, () => scheduleDatabaseSync())
++          .on('postgres_changes', { event: '*', schema: 'public', table: 'ecotrack_device_state' }, () => scheduleDatabaseSync())
+           .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => scheduleDatabaseSync(true))
+           .on('postgres_changes', { event: '*', schema: 'public', table: 'floors' }, () => scheduleDatabaseSync(true))
+           .on('postgres_changes', { event: '*', schema: 'public', table: 'buildings' }, () => scheduleDatabaseSync(true))
+@@ -718,6 +729,11 @@
+             let modified = false;
+             parsed.forEach(n => {
+               if (!n) return;
++              delete n.wifi_password; delete n.password; delete n.device_token;
++              if (window.EcoTrackHardwareCloud) {
++                const status = window.EcoTrackHardwareCloud.describe(n.cloud_state);
++                n.status = status === 'online' ? 'Connected' : status === 'sleeping' ? 'Sleeping' : 'Offline';
++              }
+               if (n.room_name && n.room_name !== 'Unassigned' && n.name && n.name.includes('(Unassigned)')) {
+                 n.name = `${n.node_id || n.name.split(' ')[0]} (${n.room_name})`;
+                 modified = true;
+@@ -809,7 +825,7 @@
+       const merged = {
+         ...current,
+         ...updatedData,
+-        last_seen: new Date().toISOString()
++        last_seen: current.cloud_state?.last_seen || current.last_seen || null
+       };
+       devices[idx] = merged;
+       localStorage.setItem('ecoTrack_nodes', JSON.stringify(devices));
+@@ -996,10 +1012,12 @@
+         }
+       }
+ 
++      const safeDeviceData = { ...deviceData };
++      delete safeDeviceData.wifi_password; delete safeDeviceData.device_token; delete safeDeviceData.password;
+       const mergedDevice = {
+-        ...deviceData,
++        ...safeDeviceData,
+         room_id: effectiveRoomId,
+-        last_seen: new Date().toISOString()
++        last_seen: deviceData.cloud_state?.last_seen || deviceData.last_seen || null
+       };
+ 
+       const devices = this.getDevices();
+@@ -1015,13 +1033,13 @@
+       AirconEvents.emit('devices:synced', devices);
+ 
+       // Persist to Supabase nodes table
+-      if (sb && typeof sb.from === 'function') {
++      if (!deviceData.cloud_registered && sb && typeof sb.from === 'function') {
+         try {
+           const upsertPayload = {
+             id: deviceData.db_id || ('node_' + (deviceData.node_id || '').toLowerCase().replace(/[^a-z0-9]/g, '_')),
+             name: deviceData.node_id || deviceData.name,
+             status: (deviceData.status || 'Connected').toLowerCase() === 'connected' ? 'online' : 'offline',
+-            rssi: deviceData.rssi || -65,
++            rssi: deviceData.rssi ?? null,
+             aircon_type: deviceData.aircon_type || 'Split Type (Inverter)',
+             room_id: effectiveRoomId,
+             ip_address: deviceData.ip_address || null,
+@@ -1030,13 +1048,13 @@
+             sleep_time: deviceData.sleep_time || '22:00',
+             interval_val: deviceData.interval_val || 15,
+             interval_unit: deviceData.interval_unit || 'Minutes',
+-            temp: (deviceData.temp && deviceData.temp > 0) ? deviceData.temp : 24,
+-            pressure: (deviceData.pressure && deviceData.pressure > 0) ? deviceData.pressure : 0.45,
++            temp: deviceData.temp ?? null,
+             updated: new Date().toISOString()
+           };
+-          await sb.from('nodes').upsert([upsertPayload]);
++          const saved = await sb.from('nodes').upsert([upsertPayload]);
++          if (saved.error) throw saved.error;
+         } catch (err) {
+-          console.warn('Could not persist node to Supabase:', err);
++          throw new Error(err.message || 'Controller registration failed');
+         }
+       }
+ 
+@@ -1096,61 +1114,15 @@
+     }
+ 
+     static async reconnectNode(node_id) {
++      await window.EcoTrackHardwareCloud.ping(node_id);
++      const cloud = await window.EcoTrackHardwareCloud.getStatus(node_id);
+       const devices = this.getDevices();
+-      let target = devices.find(n => n.node_id === node_id || n.name === node_id);
+-      if (target) {
+-        target.status = 'Connected';
+-        target.rssi = target.rssi || -65;
+-        target.last_seen = new Date().toISOString();
+-      } else {
+-        target = {
+-          node_id: node_id,
+-          name: `${node_id} (Reconnected)`,
+-          status: 'Connected',
+-          hardware: 'AC Controller Device (WiFi + IR)',
+-          firmware: 'v2.4.2-WiFi',
+-          connection: 'WiFi (2.4GHz) / Supabase Realtime',
+-          controls: ['Aircon Temperature Control', 'IR Transmission', 'IR Learning'],
+-          ir_tx: true,
+-          ir_rx: true,
+-          ip_address: '',
+-          wifi_ssid: '',
+-          rssi: -65,
+-          temp: null,
+-          pressure: null,
+-          battery: null,
+-          room_name: 'Unassigned',
+-          aircon_type: 'Split Type (Inverter)',
+-          last_seen: new Date().toISOString()
+-        };
+-        devices.push(target);
+-      }
++      const target = devices.find(item => item.node_id === node_id || item.db_id === cloud.node_id);
++      if (!target) throw new Error('Registered controller not found. Refresh the device list.');
++      Object.assign(target, { status: 'Connected', cloud_state: cloud, last_seen: cloud.last_seen, rssi: cloud.rssi,
++        ip_address: cloud.ip_address, wifi_ssid: cloud.wifi_ssid, capabilities: cloud.capabilities });
+       localStorage.setItem('ecoTrack_nodes', JSON.stringify(devices));
+-      AirconEvents.emit('node:updated', target);
+-      AirconEvents.emit('device:updated', target);
+-      AirconEvents.emit('devices:synced', devices);
+-
+-      // Persist to Supabase nodes table
+-      try {
+-        const sb = typeof window !== 'undefined' && (window.supabaseClient || window.sb);
+-        if (sb && typeof sb.from === 'function') {
+-          sb.from('nodes').update({
+-            status: 'online',
+-            rssi: target.rssi || -65,
+-            updated: new Date().toISOString()
+-          }).eq('name', node_id).then(() => {}).catch(() => {});
+-        }
+-      } catch (_) {}
+-
+-      CentralLogService.log({
+-        device_id: 'SYSTEM',
+-        node_id: node_id,
+-        module: 'NODE',
+-        event: 'NODE_RECONNECTED',
+-        result: 'SUCCESS',
+-        details: `AC Controller Device ${node_id} manually reconnected and restored to Online.`
+-      });
+-
++      AirconEvents.emit('node:updated', target); AirconEvents.emit('devices:synced', devices);
+       return target;
+     }
+ 
+@@ -1628,38 +1600,11 @@
+ 
+   // ===== PROTOCOL ADAPTER & IR SERVICE =====
+   class ProtocolAdapter {
+-    /** Detect a real AC decoder capture, including before controller registration. */
+-    static async detectRemoteBrand(nodeId, ipAddress) {
+-      const node = NodeService.getNode(nodeId);
+-      const address = String(ipAddress === undefined ? node?.ip_address || '' : ipAddress).trim().toLowerCase();
+-      const endpoint = address.match(/^([^:]+)(?::(\d{1,5}))?$/);
+-      const host = endpoint?.[1] || '', port = endpoint?.[2];
+-      const octets = host.split('.');
+-      const ipv4 = octets.length === 4 && octets.every(part => /^\d{1,3}$/.test(part) && Number(part) <= 255);
+-      const privateIp = ipv4 && (Number(octets[0]) === 10 ||
+-        (Number(octets[0]) === 172 && Number(octets[1]) >= 16 && Number(octets[1]) <= 31) ||
+-        (Number(octets[0]) === 192 && Number(octets[1]) === 168) ||
+-        (Number(octets[0]) === 169 && Number(octets[1]) === 254));
+-      if (!nodeId || !endpoint || (!privateIp && !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.local$/.test(host)) ||
+-          (port !== undefined && (Number(port) < 1 || Number(port) > 65535))) {
+-        return { success: false, message: 'Enter the controller\'s local IP address and connect this PC to its network.' };
+-      }
+-      const request = async route => {
+-        const controller = new AbortController();
+-        const timer = setTimeout(() => controller.abort(), 8000);
+-        try {
+-          const response = await fetch(`http://${address}${route}`, { method: route === '/ping' ? 'GET' : 'POST', signal: controller.signal });
+-          if (!response.ok) throw new Error('Controller request failed.');
+-          return await response.json();
+-        } finally { clearTimeout(timer); }
+-      };
+-      try {
+-        const ping = await request('/ping');
+-        if (ping?.status !== 'online' || ![nodeId, node?.db_id].filter(Boolean).includes(ping.node_id)) {
+-          return { success: false, message: 'Controller identity does not match this device. Check its IP address.' };
+-        }
+-        const data = await request('/sniff-protocol');
+-        const rawType = typeof data?.raw_type === 'string' ? data.raw_type.trim().toUpperCase() : '';
++    /** Learn an actual remote capture through Supabase, from any network. */
++    static async detectRemoteBrand(nodeId) {
++      try {
++        const data = await window.EcoTrackHardwareCloud.learn(nodeId);
++        const rawType = String(data.raw_type || data.protocol || '').trim().toUpperCase();
+         const decoders = [
+           [/^MIDEA(?:24)?$/, 'midea_ir', 'Midea'], [/^GREE$/, 'gree', 'Gree'],
+           [/^DAIKIN(?:2|64|128|152|160|176|200|216|312)?$/, 'daikin', 'Daikin'],
+@@ -1668,91 +1613,18 @@
+           [/^(?:MITSUBISHI_AC|MITSUBISHI112|MITSUBISHI136|MITSUBISHI_HEAVY_88|MITSUBISHI_HEAVY_152)$/, 'mitsubishi', 'Mitsubishi']
+         ];
+         const decoded = decoders.find(([pattern]) => pattern.test(rawType));
+-        if (data?.success !== true || !decoded || ![decoded[1], rawType.toLowerCase()].includes(String(data.protocol).toLowerCase()) ||
+-            typeof data.hex !== 'string' || !/^(?:0x)?[a-f\d]+$/i.test(data.hex.trim())) {
+-          return { success: false, message: 'No recognizable AC signal captured. Press the remote toward the ESP32 receiver, retry, or choose the brand manually.' };
+-        }
+-        return { success: true, brand: decoded[2], protocol: rawType };
+-      } catch (error) {
+-        return { success: false, message: error?.name === 'AbortError' ? 'Listening timed out. Retry or choose the brand manually.' :
+-          'Controller unreachable. Check the local IP and network, then retry or choose the brand manually.' };
+-      }
+-    }
+-
+-    static getSupportedProtocols() {
+-      return CapabilityEngine.getSupportedProtocols();
+-    }
+-
+-    /**
+-     * Auto-detect remote protocol by calling /sniff-protocol on target node
+-     * @param {string} nodeId - Target AC Controller Node ID (e.g. 'node-1')
+-     * @returns {Promise<{ success: boolean, protocol: string, brand?: string, message: string }>}
+-     */
++        if (!decoded || !data.raw_data || !data.hex) return { success: false, message: 'No recognizable AC signal captured. Press the remote toward the ESP32 receiver or choose the brand manually.' };
++        return { success: true, brand: decoded[2], protocol: rawType, raw_data: data.raw_data, hex: data.hex, source: 'supabase' };
++      } catch (error) { return { success: false, message: error.message, code: error.code }; }
++    }
++    static getSupportedProtocols() { return CapabilityEngine.getSupportedProtocols(); }
+     static async sniffProtocol(nodeId) {
+-      const node = NodeService.getNode(nodeId);
+-      const ip = (node && node.ip_address) ? node.ip_address : null;
+-
+-      // 1. If IP is available, send REST call to hardware node /sniff-protocol
+-      if (ip) {
+-        try {
+-          const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+-          const timeoutId = controller ? setTimeout(() => controller.abort(), 8500) : null;
+-          const res = await fetch(`http://${ip}/sniff-protocol`, {
+-            method: 'POST',
+-            signal: controller ? controller.signal : undefined
+-          });
+-          if (timeoutId) clearTimeout(timeoutId);
+-          if (res.ok) {
+-            const data = await res.json();
+-            if (data && data.success === true && data.protocol && data.raw_data) {
+-              CentralLogService.log({
+-                device_id: 'SYSTEM',
+-                node_id: nodeId,
+-                module: 'IR',
+-                event: 'PROTOCOL_AUTO_DETECTED',
+-                result: 'SUCCESS',
+-                details: `Physical remote identified protocol '${data.protocol}' (${data.brand || 'Auto'}) on ${nodeId}`
+-              });
+-              return {
+-                success: true,
+-                protocol: data.protocol.toUpperCase() === 'UNKNOWN' ? null : data.protocol,
+-                brand: data.brand || 'Auto-Detected',
+-                source: 'hardware',
+-                raw_type: data.raw_type || data.protocol,
+-                raw_data: data.raw_data,
+-                hex: data.hex,
+-                sequence: data.sequence,
+-                node_id: data.node_id
+-              };
+-            }
+-          }
+-        } catch (err) {
+-          console.warn(`[ProtocolAdapter] Hardware sniff on ${ip} timed out or unreachable:`, err);
+-        }
+-      }
+-
+-      return {
+-        success: false,
+-        message: ip ? 'No remote frame captured. Press the physical remote while learning.' : 'The node has no known LAN IP.',
+-        source: 'hardware'
+-      };
+-    }
+-
++      try { return await window.EcoTrackHardwareCloud.learn(nodeId); }
++      catch (error) { return { success: false, message: error.message, code: error.code, source: 'supabase' }; }
++    }
+     static async getLatestLearned(nodeId) {
+-      const node = NodeService.getNode(nodeId);
+-      if (!node?.ip_address) return { success: false, message: 'The node has no known LAN IP.' };
+-      const controller = new AbortController();
+-      const timer = setTimeout(() => controller.abort(), 4500);
+-      try {
+-        const response = await fetch(`http://${node.ip_address}/ir/latest-learned`, { signal: controller.signal });
+-        const frame = await response.json();
+-        return response.ok && frame.success === true && frame.raw_data ? frame :
+-          { success: false, message: frame.error || 'No captured remote frame is available.' };
+-      } catch (error) {
+-        return { success: false, message: error.message };
+-      } finally {
+-        clearTimeout(timer);
+-      }
++      try { return await window.EcoTrackHardwareCloud.latest(nodeId); }
++      catch (error) { return { success: false, message: error.message, code: error.code, source: 'supabase' }; }
+     }
+ 
+     static getCommandsForDevice(device_id) {
+@@ -1969,7 +1841,7 @@
+ 
+       // 3. Check Assigned AC Controller Device Status
+       const node = NodeService.getNode(device.node_id);
+-      if (!node || node.status.toLowerCase() === 'offline') {
++      if (!node) {
+         const errorMsg = `Command not sent: Assigned hardware node (${device.node_id}) is currently OFFLINE.`;
+         CentralLogService.log({
+           device_id,
+@@ -2046,6 +1918,20 @@
+           break;
+       }
+ 
++      // IR Studio can submit the selected complete state as one cloud request.
++      if (req.state !== undefined) {
++        const mapping = { power: 'POWER', temperature: 'TEMP', mode: 'MODE', fan: 'FAN', swing: 'SWING', sleep: 'SLEEP', turbo: 'TURBO', eco: 'ECO' };
++        if (!req.state || typeof req.state !== 'object' || Array.isArray(req.state)) return { success: false, code: 'INVALID_STATE', message: 'Invalid complete AC settings.' };
++        for (const [field, selected] of Object.entries(req.state)) {
++          if (!Object.hasOwn(mapping, field) ||
++              (['power','swing','sleep','turbo','eco'].includes(field) && typeof selected !== 'boolean') ||
++              (field === 'temperature' && (typeof selected !== 'number' || !Number.isFinite(selected))) ||
++              (['mode','fan'].includes(field) && typeof selected !== 'string')) return { success: false, code: 'INVALID_STATE', message: `Invalid AC setting: ${field}.` };
++          if (!CapabilityEngine.isSupported(device, mapping[field], selected)) return { success: false, code: 'UNSUPPORTED_CAPABILITY', message: `This AC profile does not support ${field}: ${selected}.` };
++          stateUpdates[field] = field === 'temperature' ? CapabilityEngine.clampTemperature(device, selected) : ['mode','fan'].includes(field) ? selected.toLowerCase() : selected;
++        }
++      }
++
+       // 6. Construct Structured JSON Intent Payload (Dynamic Full-State IR Generation)
+       const protocolName = device.protocol_name || device.protocol || CapabilityEngine.resolveProtocolName(device);
+       const nextPower = stateUpdates.power !== undefined ? (stateUpdates.power ? 'on' : 'off') : ((device.state && device.state.power) ? 'on' : 'off');
+@@ -2077,74 +1963,28 @@
+         device_id,
+         node_id: device.node_id,
+         module: 'IR',
+-        event: 'TRANSMITTING',
++        event: 'REQUESTING_COMMAND',
+         result: 'PENDING',
+-        details: `Dispatched structured intent to ${device.node_id} via ${protocolName}: ${JSON.stringify(intentPayload.state)} (Req: ${requestId})`
++        details: `Requesting cloud command for ${device.node_id} via ${protocolName}: ${JSON.stringify(intentPayload.state)} (Req: ${requestId})`
+       });
+ 
+-      // Store desired AC state in the same record the firmware polls.
+-      const sb = window.supabaseClient || window.sb;
+-      let queuedInCloud = false;
+-      let savedCommand = null;
+-      if (sb && typeof sb.from === 'function') {
+-        try {
+-          const record = await sb.from('aircons').select('id').eq('asset_tag', device.device_id).maybeSingle();
+-          if (record.error || !record.data?.id) throw new Error(record.error?.message || 'Registered aircon not found.');
+-          const { data, error } = await sb.rpc('ecotrack_set_aircon_intent', { p_aircon_id: record.data.id, p_state: intentPayload.state, p_protocol: intentPayload.protocol });
+-          if (error) throw error;
+-          if (!data?.id) throw new Error('No registered aircon record accepted this command.');
+-          savedCommand = data;
+-          queuedInCloud = true;
+-        } catch (error) {
+-          return { success: false, code: 'CLOUD_COMMAND_FAILED', message: error.message, intent: intentPayload };
+-        }
+-      }
+-
+-      // Carry the exact cloud command identity so LAN/cloud delivery receipts agree.
+-      if (savedCommand?.command_id) {
+-        intentPayload.command_id = savedCommand.command_id;
+-        intentPayload.aircon_id = savedCommand.id;
+-      }
+-      let delivered = false;
+-      let hardwareError = null;
+-      if (node && node.ip_address) {
+-        const controller = new AbortController();
+-        const timeoutId = setTimeout(() => controller.abort(), 4500);
+-        try {
+-          const response = await fetch(`http://${node.ip_address}/ir/intent`, {
+-            method: 'POST',
+-            headers: { 'Content-Type': 'application/json' },
+-            body: JSON.stringify(intentPayload),
+-            signal: controller.signal
+-          });
+-          const acknowledgement = await response.json();
+-          delivered = response.ok && acknowledgement.success === true && acknowledgement.result === 'SUCCESS';
+-          if (!delivered) hardwareError = acknowledgement.error || 'Controller did not acknowledge IR transmission.';
+-        } catch (error) {
+-          if (!queuedInCloud) hardwareError = error.message;
+-        } finally {
+-          clearTimeout(timeoutId);
+-        }
+-      }
+-      let deliveryPersistenceError = null;
+-      if (savedCommand?.command_id && (delivered || hardwareError)) {
+-        try {
+-          const result = await sb.rpc('ecotrack_ack_aircon_intent', {
+-            p_aircon_id: savedCommand.id, p_command_id: savedCommand.command_id,
+-            p_status: delivered ? 'transmitted' : 'failed'
+-          });
+-          if (result.error) deliveryPersistenceError = result.error.message;
+-        } catch (error) { deliveryPersistenceError = error.message; }
+-      }
++      let savedCommand;
++      try {
++        const sb = window.supabaseClient || window.sb;
++        if (!window.EcoTrackHardwareCloud || !sb) throw new Error('Supabase hardware transport is unavailable.');
++        const record = await sb.from('aircons').select('id').eq('asset_tag', device.device_id).maybeSingle();
++        if (record.error || !record.data?.id) throw new Error(record.error?.message || 'Registered aircon not found.');
++        savedCommand = await window.EcoTrackHardwareCloud.control(device.node_id, { ...intentPayload, aircon_id: record.data.id });
++      } catch (error) {
++        return { success: false, code: error.code || 'CLOUD_COMMAND_FAILED', message: error.message, intent: intentPayload };
++      }
++      const delivered = false;
++      const deliveryPersistenceError = null;
+       device.control_snapshot = {
+-        desired_state: intentPayload.state, commanded_at: savedCommand?.commanded_at || new Date().toISOString(),
+-        command_id: savedCommand?.command_id, command_status: deliveryPersistenceError ? 'queued' : delivered ? 'transmitted' : hardwareError ? 'failed' : 'queued',
++        desired_state: intentPayload.state, commanded_at: savedCommand.commanded_at,
++        command_id: savedCommand.command_id, command_status: 'queued',
+         reported_state: device.control_snapshot?.reported_state, reported_at: device.control_snapshot?.reported_at
+       };
+-      if (hardwareError || (!delivered && !queuedInCloud)) {
+-        return { success: false, code: 'HARDWARE_COMMAND_FAILED',
+-          message: hardwareError || 'No LAN acknowledgement or cloud queue is available.', intent: intentPayload };
+-      }
+ 
+       // 7. Commit State Update
+       const updatedState = AirconProfileManager.updateState(device_id, stateUpdates, device.control_snapshot);
+--- before/public/js/scheduler.js
++++ after/public/js/scheduler.js
+@@ -1067,195 +1067,57 @@
+ }
+ 
+ async function applyNodeSchedule(nodeId, buttonElement) {
+-  const wakeInput = document.getElementById(`wake-${nodeId}`);
+-  const sleepInput = document.getElementById(`sleep-${nodeId}`);
+-  const intervalValInput = document.getElementById(`interval-val-${nodeId}`);
+-  const intervalUnitInput = document.getElementById(`interval-unit-${nodeId}`);
+-
+-  const wakeTime = wakeInput ? wakeInput.value : '06:00';
+-  const sleepTime = sleepInput ? sleepInput.value : '22:00';
+-  const intervalVal = intervalValInput ? (parseInt(intervalValInput.value, 10) || 15) : 15;
+-  const intervalUnit = intervalUnitInput ? intervalUnitInput.value : 'Minutes';
+-  if (intervalVal <= 0) {
+-    window.EcoToast?.error('Send interval must be greater than zero.');
++  const wakeTime = document.getElementById(`wake-${nodeId}`)?.value;
++  const sleepTime = document.getElementById(`sleep-${nodeId}`)?.value;
++  const intervalVal = Number(document.getElementById(`interval-val-${nodeId}`)?.value);
++  const intervalUnit = document.getElementById(`interval-unit-${nodeId}`)?.value;
++  const multiplier = { Seconds: 1, Minutes: 60, Hours: 3600 }[intervalUnit];
++  const seconds = intervalVal * multiplier;
++  if (!Number.isInteger(intervalVal) || !Number.isInteger(seconds) || seconds < 1 || seconds > 86400 ||
++      !/^([01]\d|2[0-3]):[0-5]\d$/.test(wakeTime || '') || !/^([01]\d|2[0-3]):[0-5]\d$/.test(sleepTime || '')) {
++    window.EcoToast?.error('Enter valid wake/sleep times and a whole-number report interval of 1 second to 24 hours.');
+     return;
+   }
+-  const draft = { wakeTime, sleepTime, intervalVal, intervalUnit, editedAt: Date.now(), pending: true };
+-  scheduleDrafts.set(nodeId, draft);
+-
+-  // Calculate total seconds for the Hardware Node (no collision restriction; nodes can share intervals)
+-  let sleepSecs = intervalVal;
+-  if (intervalUnit === 'Minutes') sleepSecs *= 60;
+-  if (intervalUnit === 'Hours') sleepSecs *= 3600;
+-
+-  // Update the schedule in memory
+-  let targetRoomId = null;
+-  let targetRoom = null;
+-  let targetNodePbId = null;
+-  let targetNodeSnapshot = null;
+-
+-  for (const roomId in savedRooms) {
+-    const room = savedRooms[roomId];
+-    const nodeIndex = room.nodes.findIndex(n => n.id === nodeId || n.name === nodeId);
+-    if (nodeIndex > -1) {
+-      room.nodes[nodeIndex].wakeTime = wakeTime;
+-      room.nodes[nodeIndex].sleepTime = sleepTime;
+-      room.nodes[nodeIndex].intervalVal = intervalVal;
+-      room.nodes[nodeIndex].intervalUnit = intervalUnit;
+-
+-      targetRoomId = roomId;
+-      targetRoom = room;
+-      targetNodePbId = room.nodes[nodeIndex].pb_id;
+-      targetNodeSnapshot = room.nodes[nodeIndex];
+-      break;
+-    }
+-  }
+-
+-  if (currentRoomNodes) {
+-    const foundCurrent = currentRoomNodes.find(n => n.id === nodeId || n.name === nodeId);
+-    if (foundCurrent) {
+-      foundCurrent.wakeTime = wakeTime;
+-      foundCurrent.sleepTime = sleepTime;
+-      foundCurrent.intervalVal = intervalVal;
+-      foundCurrent.intervalUnit = intervalUnit;
+-    }
+-  }
+-
+-  // Also update local storage ecoTrack_nodes
++  if (buttonElement) { buttonElement.disabled = true; buttonElement.textContent = 'Saving...'; }
+   try {
+-    const localNodes = (window.EcoTrackAirconSystem?.NodeService?.getNodes?.()) || JSON.parse(localStorage.getItem('ecoTrack_nodes') || '[]');
+-    const lIdx = localNodes.findIndex(n => n.node_id === nodeId || n.name === nodeId || n.id === targetNodePbId || n.db_id === targetNodePbId);
+-    if (lIdx >= 0) {
+-      localNodes[lIdx].wake_time = wakeTime;
+-      localNodes[lIdx].sleep_time = sleepTime;
+-      localNodes[lIdx].interval_val = intervalVal;
+-      localNodes[lIdx].interval_unit = intervalUnit;
+-      localNodes[lIdx].updated = new Date().toISOString();
+-      localStorage.setItem('ecoTrack_nodes', JSON.stringify(localNodes));
+-    }
+-  } catch (_) {}
+-
+-  // 1. Privileged IPC update to Supabase via Admin Key
+-  let saveSuccess = false;
+-  let saveError = 'Database service unavailable';
+-  if (window.electron && typeof window.electron.invoke === 'function') {
+-    try {
+-      const res = await window.electron.invoke('node-update-schedule', {
+-        id: targetNodePbId,
+-        name: nodeId,
+-        wakeTime,
+-        sleepTime,
+-        intervalVal,
+-        intervalUnit
++    const command = await window.EcoTrackHardwareCloud.request(nodeId, 'configure', { interval_seconds: seconds, interval_val: intervalVal, interval_unit: intervalUnit, wake_time: wakeTime, sleep_time: sleepTime }, { wait: false });
++    scheduleDrafts.delete(nodeId);
++    for (const room of Object.values(savedRooms)) for (const node of room.nodes || []) {
++      if (node.id === nodeId || node.name === nodeId) Object.assign(node, { wakeTime, sleepTime, intervalVal, intervalUnit });
++    }
++    const nodes = window.EcoTrackAirconSystem?.NodeService?.getNodes?.() || [];
++    const node = nodes.find(item => [item.node_id,item.db_id,item.pb_id].includes(nodeId));
++    if (node) {
++      Object.assign(node, { wake_time: wakeTime, sleep_time: sleepTime, interval_val: intervalVal, interval_unit: intervalUnit });
++      localStorage.setItem('ecoTrack_nodes', JSON.stringify(nodes));
++    }
++    window.EcoDataBus?.invalidate('nodes'); window.EcoDataBus?.invalidate('scheduler:data');
++    window.EcoToast?.success('Schedule saved in Supabase. Device application is queued; a sleeping device receives it after waking.');
++    if (buttonElement) {
++      buttonElement.textContent = 'Queued';
++      buttonElement.dataset ||= {};
++      buttonElement.dataset.commandId = command.id;
++    }
++    if (window.EcoTrackHardwareCloud.waitForResult) {
++      void window.EcoTrackHardwareCloud.waitForResult(command, { timeoutMs: 25000 }).then(receipt => {
++        if (buttonElement?.dataset.commandId !== command.id) return;
++        if (receipt.interval_ms !== seconds * 1000 || receipt.wake_time !== wakeTime || receipt.sleep_time !== sleepTime) throw new Error('Device schedule acknowledgement does not match the request.');
++        buttonElement.textContent = 'Applied';
++        window.EcoToast?.success('ESP32 confirmed that the schedule was applied.');
++        window.dispatchEvent(new CustomEvent('ecotrack:schedule-applied', { detail: receipt }));
++      }).catch(error => {
++        if (buttonElement?.dataset.commandId !== command.id) return;
++        buttonElement.textContent = error.code === 'ACK_TIMEOUT' ? 'Queued' : 'Failed';
++        buttonElement.title = error.message;
++        if (error.code !== 'ACK_TIMEOUT') window.EcoToast?.error(error.message);
+       });
+-      if (res && res.success) {
+-        saveSuccess = true;
+-      } else saveError = res?.error || 'No controller was updated';
+-    } catch (ipcErr) {
+-      saveError = ipcErr.message;
+-      console.warn('IPC node-update-schedule error:', ipcErr);
+-    }
+-  }
+-
+-  // Fallback direct update if Electron IPC is not available
+-  if (!saveSuccess && sb) {
+-    const updatePayload = {
+-      wake_time: wakeTime,
+-      sleep_time: sleepTime,
+-      interval_val: intervalVal,
+-      interval_unit: intervalUnit,
+-      updated: new Date().toISOString()
+-    };
+-
+-    try {
+-      let result = targetNodePbId ? await sb.from('nodes').update(updatePayload).eq('id', targetNodePbId).select() : { data: [] };
+-      if (!result.error && !result.data?.length) {
+-        result = await sb.from('nodes').update(updatePayload).eq('name', nodeId).select();
+-      }
+-      if (result.error || !result.data?.length) throw new Error(result.error?.message || 'Controller node not found');
+-      saveSuccess = true;
+-    } catch (err) {
+-      saveError = err.message;
+-      console.warn('Direct Supabase update error:', err);
+-    }
+-  }
+-
+-  draft.pending = false;
+-  draft.editedAt = Date.now();
+-  if (!saveSuccess) {
+-    window.EcoToast?.error(`Schedule was not saved: ${saveError}`);
+-    return;
+-  }
+-
+-  // Invalidate caches & notify
+-  if (window.EcoDataBus) {
+-    window.EcoDataBus.invalidate('scheduler:data');
+-    window.EcoDataBus.invalidate('nodes');
+-  }
+-  try {
+-    if (window.BroadcastChannel) {
+-      const bc = new BroadcastChannel('ecotrack_aircon_channel');
+-      bc.postMessage({ event: 'scheduler:refresh', sender: 'scheduler' });
+-      bc.close();
+-    }
+-  } catch (_) {}
+-  if (typeof window.invalidateScheduleCache === 'function') {
+-    window.invalidateScheduleCache(nodeId);
+-  }
+-  if (typeof notifyScheduleChange === 'function') {
+-    notifyScheduleChange(nodeId, targetRoom ? targetRoom.name : 'Room', wakeTime, sleepTime, targetRoomId);
+-  }
+-  if (typeof window.checkControlSchedules === 'function') {
+-    window.checkControlSchedules(true);
+-  }
+-
+-  // 2. Hardware backend synchronization via /api/set-sleep
+-  try {
+-    const backendUrl = window.electron?.env?.BACKEND_URL || 'http://localhost:5000';
+-    fetch(`${backendUrl}/api/set-sleep`, {
+-      method: 'POST',
+-      headers: { 'Content-Type': 'application/json' },
+-      body: JSON.stringify({
+-        node_id: nodeId,
+-        sleep_seconds: sleepSecs,
+-        wake_time: wakeTime,
+-        sleep_time: sleepTime,
+-        ip: targetNodeSnapshot?.ip_address || undefined,
+-        node_snapshot: targetNodeSnapshot ? {
+-          node_id: targetNodePbId, sensor_name: nodeId,
+-          room_name: targetNodeSnapshot.room_name, floor_name: targetNodeSnapshot.floor_name,
+-          building_name: targetNodeSnapshot.building_name, aircon_type: targetNodeSnapshot.aircon_type,
+-          temperature: targetNodeSnapshot.temp, pressure: targetNodeSnapshot.pressure
+-        } : undefined
+-      })
+-    })
+-      .then(async res => {
+-        const data = await res.json();
+-        if (!res.ok) throw new Error(data.error || 'Schedule forwarding failed');
+-        return data;
+-      })
+-      .then(data => {
+-        console.log("Hardware Schedule Queued:", data);
+-        window.dispatchEvent(new CustomEvent('ecotrack:telemetry-saved', { detail: data }));
+-      })
+-      .catch(err => console.warn("Failed to send sleep command to hardware:", err));
+-  } catch (_) {}
+-
+-  // Provide immediate user feedback
+-  if (buttonElement) {
+-    buttonElement.textContent = '✓ Applied';
+-    buttonElement.classList.replace('bg-[#18392B]', 'bg-[#10b981]');
+-    buttonElement.classList.add('text-[#18392B]');
+-    setTimeout(() => {
+-      buttonElement.textContent = 'Apply';
+-      buttonElement.classList.replace('bg-[#10b981]', 'bg-[#18392B]');
+-      buttonElement.classList.remove('text-[#18392B]');
+-    }, 2000);
+-  }
+-
+-  if (window.EcoToast) {
+-    window.EcoToast.success(`Schedule saved: Interval ${intervalVal} ${intervalUnit}, Wake ${formatTimeDisplay(wakeTime)}, Sleep ${formatTimeDisplay(sleepTime)}`);
+-  }
++    }
++    // A queue write is not proof that the device has applied it.
++    window.dispatchEvent(new CustomEvent('ecotrack:schedule-queued', { detail: command }));
++  } catch (error) {
++    window.EcoToast?.error(error.message);
++    if (buttonElement) buttonElement.textContent = 'Apply';
++  } finally { if (buttonElement) buttonElement.disabled = false; }
+ }
+ 
+ // Custom Warning Modal
+--- before/public/nodes.html
++++ after/public/nodes.html
+@@ -92,6 +92,7 @@
+   </style>
+   <script src="./js/supabase.umd.js"></script>
+   <script src="./js/supabase-client.js"></script>
++  <script src="./js/hardware-cloud.js?v=1"></script>
+   <script src="./js/sidebar.js"></script>
+   <script src="./js/sidebar-loader.js?v=7"></script>
+   <script src="./js/icons.js"></script>
+@@ -254,7 +255,7 @@
+               <polyline points="23 4 23 10 17 10"></polyline>
+               <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+             </svg>
+-            <span id="scanBleLabel">Search for Nearby Bluetooth Nodes</span>
++            <span id="scanBleLabel">Connect Nearby ESP32</span>
+           </button>
+ 
+           <!-- Discovered Devices Container -->
+@@ -357,17 +358,17 @@
+           <div>
+             <div class="flex items-center justify-between mb-1">
+               <label class="block text-[11px] font-bold text-slate-600 dark:text-gray-400 uppercase tracking-wider">
+-                Static IP Address <span class="text-rose-500">*</span>
++                Device IP (informational)
+               </label>
+               <button type="button" id="autoAssignIpBtn" class="text-[9px] font-bold text-teal-600 dark:text-teal-400 hover:underline border-0 bg-transparent cursor-pointer flex items-center gap-0.5">
+                 <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+-                <span>Auto-Assign</span>
++                <span>Read Device IP</span>
+               </button>
+             </div>
+-            <input type="text" id="nodeFormIp" placeholder="e.g. 192.168.1.110" required
++            <input type="text" id="nodeFormIp" placeholder="Reported by ESP32 after Wi-Fi connects" readonly
+               class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/15 text-xs text-slate-900 dark:text-white font-mono focus:outline-none focus:border-teal-500">
+           </div>
+-          <input type="hidden" id="nodeFormStatus" value="Connected">
++          <input type="hidden" id="nodeFormStatus" value="Offline">
+ 
+           <!-- Wi-Fi Verification Checklist Card -->
+           <div class="p-3 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 space-y-2">
+@@ -389,7 +390,7 @@
+               </div>
+               <div class="flex items-center gap-2 text-slate-700 dark:text-slate-300">
+                 <span id="chkIp" class="w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[9px] font-black">✓</span>
+-                <span id="chkIpText" class="text-[11px]">DHCP handshake &amp; IP confirmed (192.168.1.110)</span>
++                <span id="chkIpText" class="text-[11px]">Device connection has not been verified</span>
+               </div>
+             </div>
+           </div>
+@@ -408,7 +409,7 @@
+           </div>
+ 
+           <!-- Hidden Device ID field that stores the paired node ID -->
+-          <input type="hidden" id="nodeFormId" value="">
++          <input type="hidden" id="nodeFormId" readonly value="">
+ 
+           <!-- Friendly Display Name -->
+           <div>
+@@ -647,12 +648,12 @@
+               </svg>
+             </div>
+             <div>
+-              <div id="pingMetricRssi" class="text-2xl font-black text-teal-600 dark:text-teal-300 font-mono tracking-tight">-65 dBm</div>
++              <div id="pingMetricRssi" class="text-2xl font-black text-teal-600 dark:text-teal-300 font-mono tracking-tight">Not reported</div>
+               <div id="pingMetricRssiSub" class="text-[10px] font-semibold text-teal-600 dark:text-teal-400 mt-0.5 truncate">● Strong Signal</div>
+             </div>
+           </div>
+ 
+-          <!-- Metric 3: Packet Success -->
++          <!-- Metric 3: Device Reply -->
+           <div class="p-3 rounded-2xl bg-slate-100/80 dark:bg-white/5 border border-slate-200/80 dark:border-white/10 flex flex-col justify-between">
+             <div class="flex items-center justify-between text-gray-400 mb-1">
+               <span class="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Packet Health</span>
+@@ -672,7 +673,7 @@
+         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3 rounded-2xl bg-slate-100/60 dark:bg-black/30 border border-slate-200 dark:border-white/5 font-mono text-[11px]">
+           <div>
+             <span class="text-[9px] uppercase tracking-wider text-gray-400 font-bold block font-sans">IP Address</span>
+-            <div id="pingDetailIp" class="font-bold text-slate-800 dark:text-cyan-300 truncate">192.168.1.10225</div>
++            <div id="pingDetailIp" class="font-bold text-slate-800 dark:text-cyan-300 truncate">Not reported</div>
+           </div>
+           <div>
+             <span class="text-[9px] uppercase tracking-wider text-gray-400 font-bold block font-sans">WiFi SSID</span>
+@@ -696,7 +697,7 @@
+                 <polyline points="4 17 10 11 4 5"></polyline>
+                 <line x1="12" y1="19" x2="20" y2="19"></line>
+               </svg>
+-              ICMP Probe Console Trace
++              Cloud Device Response
+             </span>
+             <span id="pingProbeTimestamp" class="font-mono text-[10px] text-gray-400">Just now</span>
+           </div>
+@@ -707,9 +708,9 @@
+                 <span class="w-2.5 h-2.5 rounded-full bg-rose-500/90 inline-block"></span>
+                 <span class="w-2.5 h-2.5 rounded-full bg-amber-500/90 inline-block"></span>
+                 <span class="w-2.5 h-2.5 rounded-full bg-emerald-500/90 inline-block"></span>
+-                <span id="pingTerminalTitle" class="font-mono text-[10px] ml-2 truncate max-w-xs font-bold" style="color: #f1f5f9 !important;">probe@ecotrack: ping 192.168.1.10225</span>
++                <span id="pingTerminalTitle" class="font-mono text-[10px] ml-2 truncate max-w-xs font-bold" style="color: #f1f5f9 !important;">Waiting for cloud probe</span>
+               </div>
+-              <span class="font-mono text-[9px] font-extrabold px-2 py-0.5 rounded" style="background: rgba(6, 182, 212, 0.15) !important; color: #22d3ee !important; border: 1px solid rgba(6, 182, 212, 0.3) !important;">ICMP ECHO</span>
++              <span class="font-mono text-[9px] font-extrabold px-2 py-0.5 rounded" style="background: rgba(6, 182, 212, 0.15) !important; color: #22d3ee !important; border: 1px solid rgba(6, 182, 212, 0.3) !important;">SUPABASE</span>
+             </div>
+             <div id="pingTerminalOutput" class="p-3.5 font-mono text-[11px] leading-relaxed max-h-48 overflow-y-auto select-all m-0" style="background: #060c18 !important; color: #e2e8f0 !important; scrollbar-width: thin !important; scrollbar-color: rgba(255, 255, 255, 0.25) transparent !important;"></div>
+           </div>
+@@ -853,10 +854,10 @@
+ 
+           <div class="p-3.5 rounded-xl bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 space-y-2">
+             <span class="text-[10px] font-bold uppercase tracking-wider text-teal-700 dark:text-cyan-400 block">Network &amp; Provisioning</span>
+-            <div class="text-xs flex justify-between"><span class="text-gray-500">IP Address:</span> <span id="viewIpAddress" class="font-mono font-bold text-teal-600 dark:text-cyan-400">192.168.1.110</span></div>
++            <div class="text-xs flex justify-between"><span class="text-gray-500">IP Address:</span> <span id="viewIpAddress" class="font-mono font-bold text-teal-600 dark:text-cyan-400">Not reported</span></div>
+             <div class="text-xs flex justify-between"><span class="text-gray-500">WiFi SSID:</span> <span id="viewWifiSsid" class="font-mono font-semibold text-slate-800 dark:text-white">EcoTrack-IoT</span></div>
+             <div class="text-xs flex justify-between"><span class="text-gray-500">MAC Address:</span> <span id="viewMacAddress" class="font-mono text-slate-800 dark:text-white">3C:71:BF:24:A8:12</span></div>
+-            <div class="text-xs flex justify-between"><span class="text-gray-500">Signal RSSI:</span> <span class="font-mono text-slate-800 dark:text-white flex items-center gap-1.5"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="text-teal-500 shrink-0"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line></svg><span id="viewRssiVal">-65 dBm</span></span></div>
++            <div class="text-xs flex justify-between"><span class="text-gray-500">Signal RSSI:</span> <span class="font-mono text-slate-800 dark:text-white flex items-center gap-1.5"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="text-teal-500 shrink-0"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line></svg><span id="viewRssiVal">Not reported</span></span></div>
+           </div>
+         </div>
+ 
+@@ -1239,10 +1240,10 @@
+             }
+           }
+ 
+-          const timeAgo = n.last_seen ? new Date(n.last_seen).toLocaleTimeString() : 'Just now';
++          const timeAgo = n.last_seen ? new Date(n.last_seen).toLocaleTimeString() : 'Not reported';
+           const numPart = (n.node_id || '').replace(/\D/g, '') || '1';
+-          const ip = n.ip_address || `192.168.1.10${numPart}`;
+-          const ssid = n.wifi_ssid || 'EcoTrack-IoT';
++          const ip = n.ip_address || 'Not reported';
++          const ssid = n.wifi_ssid || 'Not reported';
+ 
+           const row = document.createElement('tr');
+           row.className = 'hover:bg-slate-50/80 dark:hover:bg-white/5 transition-colors cursor-pointer select-none';
+@@ -1257,7 +1258,7 @@
+             <td class="py-3.5 px-4 font-mono font-bold text-teal-700 dark:text-cyan-400 text-xs">${n.node_id}</td>
+             <td class="py-3.5 px-4">
+               <div class="font-bold text-slate-900 dark:text-white text-xs">${displayName}</div>
+-              <div class="text-[11px] text-slate-500 dark:text-gray-400 font-mono mt-0.5">${n.hardware || 'AC Controller Device (WiFi + IR)'} &bull; ${n.firmware || 'v2.4.2-WiFi'}</div>
++              <div class="text-[11px] text-slate-500 dark:text-gray-400 font-mono mt-0.5">${n.hardware || 'AC Controller Device (WiFi + IR)'} &bull; ${n.firmware || 'Firmware not reported'}</div>
+             </td>
+             <td class="py-3.5 px-4">
+               <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all shadow-sm ${
+@@ -1336,89 +1337,19 @@
+       let discoveredBleDevices = [];
+       let selectedBleDevice = null;
+       let isBleScanning = false;
+-
+-      function getNextAvailableIp(nodeIdOrNum) {
+-        const existingNodes = NodeService.getNodes();
+-        const usedIps = new Set(existingNodes.map(n => n.ip_address).filter(Boolean));
+-        let num = 1;
+-        if (typeof nodeIdOrNum === 'number') {
+-          num = nodeIdOrNum;
+-        } else if (nodeIdOrNum) {
+-          const parsed = parseInt(nodeIdOrNum.toString().replace(/\D/g, ''), 10);
+-          if (!isNaN(parsed) && parsed > 0) num = parsed;
+-        }
+-
+-        let candidate = num < 10 ? `192.168.1.10${num}` : `192.168.1.${100 + num}`;
+-        if (!usedIps.has(candidate)) return candidate;
+-
+-        for (let i = 101; i <= 250; i++) {
+-          const testIp = `192.168.1.${i}`;
+-          if (!usedIps.has(testIp)) return testIp;
+-        }
+-        return `192.168.1.150`;
+-      }
++      let wifiConfirmedFor = null;
++      let pingProbeRevision = 0;
+ 
+       async function scanForBleDevices() {
+-        discoveredBleDevices = [];
+-
+-        // 1. Primary: Use Electron IPC ('scan-ble')
+-        if (window.electron && typeof window.electron.invoke === 'function') {
+-          try {
+-            const result = await window.electron.invoke('scan-ble');
+-            if (result && result.success && Array.isArray(result.devices) && result.devices.length > 0) {
+-              discoveredBleDevices = result.devices;
+-              return;
+-            }
+-          } catch (ipcErr) {
+-            console.warn('[BLE] Electron IPC scan error:', ipcErr);
+-          }
+-        }
+-
+-        // 2. Secondary fallback: Local Flask backend service (/api/ble/scan)
+         try {
+-          const res = await fetch('http://localhost:5000/api/ble/scan', { cache: 'no-store' });
+-          if (res.ok) {
+-            const data = await res.json();
+-            if (data && data.success && Array.isArray(data.devices) && data.devices.length > 0) {
+-              discoveredBleDevices = data.devices;
+-              return;
+-            }
+-          }
+-        } catch (fetchErr) {
+-          console.warn('[BLE] REST BLE scan unavailable:', fetchErr);
+-        }
+-
+-        // 3. Tertiary: Web Bluetooth API if available in environment
+-        if (navigator.bluetooth && typeof navigator.bluetooth.requestDevice === 'function') {
+-          try {
+-            const device = await Promise.race([
+-              navigator.bluetooth.requestDevice({
+-                acceptAllDevices: true,
+-                optionalServices: ['4fafc201-1fb5-459e-8fcc-c5c9c331914b']
+-              }),
+-              new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2500))
+-            ]);
+-            if (device) {
+-              const existingNodes = NodeService.getNodes();
+-              const existingIds = new Set(existingNodes.map(n => n.node_id));
+-              let nextNum = 1;
+-              while (existingIds.has(`node-${nextNum}`) || discoveredBleDevices.some(d => d.nodeId === `node-${nextNum}`)) nextNum++;
+-
+-              discoveredBleDevices.push({
+-                id: device.name || `EcoTrack-node-${nextNum} (ESP32-S3)`,
+-                nodeId: `node-${nextNum}`,
+-                mac: device.id || '3C:71:BF:24:A8:12',
+-                rssi: -58,
+-                status: 'Ready to pair',
+-                ip: getNextAvailableIp(nextNum)
+-              });
+-              return;
+-            }
+-          } catch (bleErr) {
+-            console.warn('[BLE] Web Bluetooth discovery note:', bleErr.message);
+-          }
+-        }
+-
++          const info = await window.EcoTrackHardwareCloud.connect();
++          discoveredBleDevices = [{ id: info.device_id, nodeId: info.device_id, mac: info.mac_address || 'Not reported',
++            rssi: info.rssi ?? null, status: 'Bluetooth connected', ip: info.ip_address || '', info }];
++          selectBleDevice(discoveredBleDevices[0]);
++        } catch (error) {
++          discoveredBleDevices = [];
++          window.EcoToast?.show(error.message, 'error');
++        }
+       }
+ 
+       function renderDiscoveredBleNodes() {
+@@ -1428,7 +1359,7 @@
+         if (discoveredBleDevices.length === 0) {
+           container.innerHTML = `
+             <div class="p-4 text-center text-xs text-slate-400 dark:text-gray-500 bg-slate-50 dark:bg-black/20 rounded-xl border border-dashed border-slate-200 dark:border-white/10">
+-              No Bluetooth devices discovered yet. Click "Search for Nearby Bluetooth Nodes" to scan, or use "Enter Node ID Manually" below.
++              No Bluetooth devices discovered yet. Click "Connect Nearby ESP32" to scan, or use "Enter Node ID Manually" below.
+             </div>
+           `;
+           return;
+@@ -1444,7 +1375,7 @@
+               : 'bg-white dark:bg-slate-900/60 border-slate-200 dark:border-white/10 hover:border-teal-500/50 hover:bg-teal-500/[0.03] dark:hover:bg-teal-500/[0.06] text-slate-800 dark:text-slate-200 shadow-xs'
+           }`;
+ 
+-          const signalColor = device.rssi > -65 ? 'text-emerald-500 dark:text-emerald-400' : (device.rssi > -75 ? 'text-teal-500 dark:text-teal-400' : 'text-amber-500 dark:text-amber-400');
++          const signalColor = Number.isFinite(device.rssi) && device.rssi > -65 ? 'text-emerald-500 dark:text-emerald-400' : (device.rssi > -75 ? 'text-teal-500 dark:text-teal-400' : 'text-amber-500 dark:text-amber-400');
+ 
+           card.innerHTML = `
+             <div class="flex items-center gap-2.5 min-w-0 flex-1">
+@@ -1458,7 +1389,7 @@
+                 <div class="text-[10px] text-slate-500 dark:text-gray-400 font-mono mt-0.5 flex items-center gap-2 flex-wrap">
+                   <span class="px-1.5 py-0.2 rounded bg-teal-500/15 text-teal-700 dark:text-teal-300 font-bold">${device.nodeId}</span>
+                   <span class="text-slate-300 dark:text-white/20">&bull;</span>
+-                  <span class="${signalColor} font-semibold">${device.rssi} dBm</span>
++                  <span class="${signalColor} font-semibold">${Number.isFinite(device.rssi) ? device.rssi + ' dBm' : 'Signal not reported'}</span>
+                   <span class="text-slate-300 dark:text-white/20">&bull;</span>
+                   <span class="truncate max-w-[120px]">${device.mac}</span>
+                 </div>
+@@ -1486,12 +1417,13 @@
+         const nameInput = document.getElementById('nodeFormName');
+         if (nameInput && !nameInput.value) nameInput.value = device.id;
+ 
+-        const cleanIp = device.ip || getNextAvailableIp(device.nodeId);
++        const cleanIp = device.ip || '';
++        wifiConfirmedFor = null;
+         const ipInput = document.getElementById('nodeFormIp');
+         if (ipInput) {
+           ipInput.value = cleanIp;
+           const chkIpText = document.getElementById('chkIpText');
+-          if (chkIpText) chkIpText.textContent = `DHCP handshake & IP confirmed (${cleanIp})`;
++          if (chkIpText) chkIpText.textContent = cleanIp ? `ESP32 reported IP: ${cleanIp}` : 'Connect Wi-Fi to read the device IP';
+         }
+ 
+         // Update paired banner
+@@ -1503,7 +1435,7 @@
+         if (banner) banner.classList.remove('hidden');
+         if (bannerName) bannerName.textContent = device.id || 'ESP32-S3 AC Controller';
+         if (bannerBadge) bannerBadge.textContent = device.nodeId;
+-        if (bannerMac) bannerMac.textContent = `MAC: ${device.mac} • Signal: ${device.rssi} dBm`;
++        if (bannerMac) bannerMac.textContent = `Hardware ID: ${device.nodeId}${Number.isFinite(device.rssi) ? ' | Signal: ' + device.rssi + ' dBm' : ''}`;
+ 
+         // Update step 3 badges
+         const step3Node = document.getElementById('step3NodeBadge');
+@@ -1514,7 +1446,7 @@
+         updateConfigSummary();
+         renderDiscoveredBleNodes();
+         if (typeof updateNextButtonState === 'function') updateNextButtonState();
+-        if (window.EcoToast) window.EcoToast.show(`Paired with ${device.id} (${device.nodeId})`, 'success');
++        if (window.EcoToast) window.EcoToast.show(`Bluetooth connected to ${device.nodeId}`, 'success');
+       }
+ 
+       // Wire BLE Discovery and Manual Pairing UI
+@@ -1538,37 +1470,12 @@
+           isBleScanning = false;
+           scanBleBtn.disabled = false;
+           if (scanBleIcon) scanBleIcon.classList.remove('animate-spin');
+-          if (scanBleLabel) scanBleLabel.textContent = 'Search for Nearby Bluetooth Nodes';
++          if (scanBleLabel) scanBleLabel.textContent = 'Connect Nearby ESP32';
+           renderDiscoveredBleNodes();
+           if (discoveredBleDevices.length > 0) {
+             if (window.EcoToast) window.EcoToast.show(`Discovered ${discoveredBleDevices.length} nearby Bluetooth AC Controller node(s).`, 'info');
+           } else {
+-            if (window.EcoToast) window.EcoToast.show('No Bluetooth devices found. Please use "Enter Node ID Manually" below.', 'warning');
+-          }
+-        });
+-      }
+-
+-      // Real-time Electron BLE stream listener if active
+-      if (window.electron && typeof window.electron.on === 'function') {
+-        window.electron.on('ble-devices-discovered', (deviceList) => {
+-          if (Array.isArray(deviceList) && deviceList.length > 0) {
+-            deviceList.forEach(dev => {
+-              const cleanName = dev.deviceName || dev.deviceId || 'ESP32-S3 Controller';
+-              const match = cleanName.match(/node-(\d+)/i);
+-              const nodeNum = match ? match[1] : discoveredBleDevices.length + 1;
+-              const nodeId = `node-${nodeNum}`;
+-              if (!discoveredBleDevices.some(d => d.mac === dev.deviceId || d.nodeId === nodeId)) {
+-                discoveredBleDevices.unshift({
+-                  id: cleanName,
+-                  nodeId: nodeId,
+-                  mac: dev.deviceId,
+-                  rssi: -55,
+-                  status: 'Ready to pair',
+-                  ip: getNextAvailableIp(nodeId)
+-                });
+-              }
+-            });
+-            renderDiscoveredBleNodes();
++            if (window.EcoToast) window.EcoToast.show('No compatible ESP32 connected. Check Bluetooth and install the cloud receiver sketch.', 'warning');
+           }
+         });
+       }
+@@ -1588,29 +1495,7 @@
+       }
+ 
+       function handleManualPairing() {
+-        if (!manualInput) return;
+-        const val = manualInput.value.trim();
+-        if (!val) {
+-          if (window.EcoToast) window.EcoToast.show('Please enter a Node ID or Hardware Identifier.', 'warning');
+-          manualInput.focus();
+-          return;
+-        }
+-        const cleanIp = getNextAvailableIp(val);
+-        const customDevice = {
+-          id: `Manual Controller (${val})`,
+-          nodeId: val,
+-          mac: '—',
+-          rssi: -60,
+-          status: 'Ready to pair',
+-          ip: cleanIp
+-        };
+-
+-        if (!discoveredBleDevices.some(d => d.nodeId.toLowerCase() === val.toLowerCase())) {
+-          discoveredBleDevices.unshift(customDevice);
+-        }
+-        selectBleDevice(customDevice);
+-        manualContainer.classList.add('hidden');
+-        if (window.EcoToast) window.EcoToast.show(`Paired with manual Node ID ${val}`, 'info');
++        window.EcoToast?.show('Use Connect Nearby ESP32 to read its real identity and provision Wi-Fi securely.', 'warning');
+       }
+ 
+       if (confirmManualBtn) confirmManualBtn.addEventListener('click', handleManualPairing);
+@@ -1833,20 +1718,13 @@
+       }
+ 
+       const autoAssignIpBtn = document.getElementById('autoAssignIpBtn');
+-      if (autoAssignIpBtn) {
+-        autoAssignIpBtn.addEventListener('click', () => {
+-          const nodeId = document.getElementById('nodeFormId')?.value.trim() || 'node-1';
+-          const cleanIp = getNextAvailableIp(nodeId);
+-          const ipInput = document.getElementById('nodeFormIp');
+-          if (ipInput) ipInput.value = cleanIp;
+-
+-          const chkIpText = document.getElementById('chkIpText');
+-          if (chkIpText) chkIpText.textContent = `DHCP handshake & IP confirmed (${cleanIp})`;
+-
+-          updateConfigSummary();
+-          if (window.EcoToast) window.EcoToast.show(`Assigned static IP: ${cleanIp}`, 'success');
+-        });
+-      }
++      autoAssignIpBtn?.addEventListener('click', async () => {
++        try {
++          const info = await window.EcoTrackHardwareCloud.readInfo();
++          document.getElementById('nodeFormIp').value = info.ip_address || '';
++          document.getElementById('chkIpText').textContent = info.ip_address ? `ESP32 reported IP: ${info.ip_address}` : 'Wi-Fi is not connected yet.';
++        } catch (error) { window.EcoToast?.show(error.message, 'error'); }
++      });
+ 
+       const togglePassBtn = document.getElementById('toggleWifiPassBtn');
+       const passInput = document.getElementById('nodeFormPassword');
+@@ -1889,85 +1767,33 @@
+         });
+       }
+ 
+-      // Step 2 Wi-Fi Diagnostics & Strict Credential Validation
++      // Write the supplied credentials to the real ESP32 and wait for its reply.
+       const verifyWifiBtn = document.getElementById('verifyWifiBtn');
+-      if (verifyWifiBtn) {
+-        verifyWifiBtn.addEventListener('click', () => {
+-          const ssid = document.getElementById('nodeFormSsid')?.value.trim();
+-          const pass = document.getElementById('nodeFormPassword')?.value || '';
+-          const ip = document.getElementById('nodeFormIp')?.value.trim();
+-          const chkWifi = document.getElementById('chkWifi');
+-          const chkIp = document.getElementById('chkIp');
+-          const chkIpText = document.getElementById('chkIpText');
+-          const ipRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+-
+-          if (!ssid) {
+-            if (window.EcoToast) window.EcoToast.show('Please select or enter the Target Wi-Fi SSID.', 'warning');
+-            document.getElementById('nodeFormSsid')?.focus();
+-            return;
+-          }
+-          if (!pass) {
+-            if (window.EcoToast) window.EcoToast.show('Please enter the Wi-Fi Password to test connection.', 'warning');
+-            const passEl = document.getElementById('nodeFormPassword');
+-            passEl?.focus();
+-            passEl?.classList.add('border-rose-500');
+-            return;
+-          }
+-          if (pass.length < 8) {
+-            if (window.EcoToast) window.EcoToast.show('Authentication Failed: Wi-Fi password must be at least 8 characters (WPA2 standard).', 'error');
+-            const passEl = document.getElementById('nodeFormPassword');
+-            passEl?.focus();
+-            passEl?.classList.add('border-rose-500', 'ring-2', 'ring-rose-500/40');
+-            setTimeout(() => passEl?.classList.remove('ring-2', 'ring-rose-500/40'), 2500);
+-
+-            if (chkWifi) {
+-              chkWifi.className = 'w-4 h-4 rounded-full bg-rose-500 text-white flex items-center justify-center text-[9px] font-black';
+-              chkWifi.textContent = '✕';
+-            }
+-            if (chkIp) {
+-              chkIp.className = 'w-4 h-4 rounded-full bg-rose-500 text-white flex items-center justify-center text-[9px] font-black';
+-              chkIp.textContent = '✕';
+-            }
+-            if (chkIpText) {
+-              chkIpText.textContent = 'Authentication Failed: Password does not meet 8-character WPA2 requirement.';
+-              chkIpText.className = 'text-[11px] text-rose-500 font-semibold';
+-            }
+-            return;
+-          }
+-          if (!ip || !ipRegex.test(ip)) {
+-            if (window.EcoToast) window.EcoToast.show('Please enter a valid Static IPv4 address (e.g. 192.168.1.110).', 'warning');
+-            document.getElementById('nodeFormIp')?.focus();
+-            return;
+-          }
+-
+-          verifyWifiBtn.disabled = true;
+-          verifyWifiBtn.innerHTML = `
+-            <svg class="animate-spin" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10" stroke-opacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>
+-            <span>Testing Connection...</span>
+-          `;
+-
+-          setTimeout(() => {
+-            verifyWifiBtn.disabled = false;
+-            verifyWifiBtn.innerHTML = `
+-              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+-              <span>Test Connection</span>
+-            `;
+-            if (chkWifi) {
+-              chkWifi.className = 'w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[9px] font-black';
+-              chkWifi.textContent = '✓';
+-            }
+-            if (chkIp) {
+-              chkIp.className = 'w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[9px] font-black';
+-              chkIp.textContent = '✓';
+-            }
+-            if (chkIpText) {
+-              chkIpText.textContent = `DHCP handshake & IP confirmed (${ip})`;
+-              chkIpText.className = 'text-[11px] text-slate-700 dark:text-slate-300';
+-            }
+-            if (window.EcoToast) window.EcoToast.show(`Wi-Fi credentials verified! Target ${ip} responds with 14ms latency.`, 'success');
+-          }, 600);
+-        });
+-      }
++      verifyWifiBtn?.addEventListener('click', async () => {
++        verifyWifiBtn.disabled = true;
++        const previous = verifyWifiBtn.innerHTML;
++        verifyWifiBtn.textContent = 'Connecting ESP32...';
++        wifiConfirmedFor = null;
++        try {
++          const ssid = document.getElementById('nodeFormSsid').value.trim();
++          const pass = document.getElementById('nodeFormPassword').value;
++          const info = await window.EcoTrackHardwareCloud.provision({ ssid, pass });
++          if (info.device_id !== selectedBleDevice?.nodeId) throw new Error('Wrong Bluetooth device connected.');
++          wifiConfirmedFor = ssid;
++          document.getElementById('nodeFormIp').value = info.ip_address || '';
++          document.getElementById('chkIpText').textContent = info.ip_address ? `ESP32 connected; IP: ${info.ip_address}` : 'ESP32 confirmed Wi-Fi connection.';
++          document.getElementById('chkWifi').textContent = 'OK';
++          document.getElementById('chkIp').textContent = 'OK';
++          window.EcoToast?.show('ESP32 confirmed Wi-Fi. Register it to verify Supabase access.', 'success');
++        } catch (error) {
++          document.getElementById('chkIpText').textContent = error.message;
++          window.EcoToast?.show(error.message, 'error');
++        } finally {
++          verifyWifiBtn.disabled = false; verifyWifiBtn.innerHTML = previous;
++          updateNextButtonState(); updateConfigSummary();
++        }
++      });
++      for (const field of ['nodeFormSsid','nodeFormPassword']) document.getElementById(field)?.addEventListener('input', () => { wifiConfirmedFor = null; updateNextButtonState(); });
+ 
+       // Real-time Wi-Fi Password validation listener
+       const nodePassInput = document.getElementById('nodeFormPassword');
+@@ -2258,7 +2084,7 @@
+         const nextBtn = document.getElementById('nodeNextStepBtn');
+         const stepTab2 = document.getElementById('nodeStepTab2');
+         const stepTab3 = document.getElementById('nodeStepTab3');
+-        const isBlePaired = !!(selectedBleDevice && selectedBleDevice.nodeId) || !!document.getElementById('nodeFormId')?.value.trim();
++        const isBlePaired = !!selectedBleDevice?.info;
+ 
+         // Visual lock cues on tabs if Bluetooth not paired
+         if (stepTab2) {
+@@ -2273,7 +2099,7 @@
+         if (stepTab3) {
+           const ssid = document.getElementById('nodeFormSsid')?.value.trim();
+           const pass = document.getElementById('nodeFormPassword')?.value || '';
+-          const isWifiValid = isBlePaired && !!ssid && pass.length >= 8;
++          const isWifiValid = isBlePaired && !!ssid && pass.length >= 8 && wifiConfirmedFor === ssid;
+           if (!isWifiValid) {
+             stepTab3.classList.add('opacity-40', 'cursor-not-allowed');
+             stepTab3.title = !isBlePaired ? 'Bluetooth pairing required first' : 'Complete valid Wi-Fi credentials first (min 8 chars)';
+@@ -2296,7 +2122,7 @@
+         } else if (currentModalStep === 2) {
+           const ssid = document.getElementById('nodeFormSsid')?.value.trim();
+           const pass = document.getElementById('nodeFormPassword')?.value || '';
+-          const isValid = !!ssid && pass.length >= 8;
++          const isValid = !!ssid && pass.length >= 8 && wifiConfirmedFor === ssid;
+           nextBtn.disabled = !isValid;
+           if (!isValid) {
+             nextBtn.classList.add('opacity-40', 'cursor-not-allowed');
+@@ -2382,12 +2208,8 @@
+             if (window.EcoToast) window.EcoToast.show('Wi-Fi Restriction: Password must be at least 8 characters (WPA2 security standard).', 'error');
+             return;
+           }
+-          if (!ipVal || !ipRegex.test(ipVal)) {
+-            const el = document.getElementById('nodeFormIp');
+-            el?.focus();
+-            el?.classList.add('border-rose-500', 'ring-1', 'ring-rose-500');
+-            setTimeout(() => el?.classList.remove('border-rose-500', 'ring-1', 'ring-rose-500'), 2500);
+-            if (window.EcoToast) window.EcoToast.show('Please enter a valid Static IPv4 address (e.g. 192.168.1.110).', 'warning');
++          if (wifiConfirmedFor !== ssidVal) {
++            window.EcoToast?.show('Click Test Connection and wait for the ESP32 Wi-Fi confirmation first.', 'warning');
+             return;
+           }
+         }
+@@ -2597,7 +2419,8 @@
+ 
+         document.getElementById('nodeFormHw').value = 'AC Controller Device (WiFi + IR)';
+         document.getElementById('nodeFormFw').value = 'v2.4.2-WiFi';
+-        document.getElementById('nodeFormStatus').value = 'Connected';
++        document.getElementById('nodeFormStatus').value = 'Offline';
++        wifiConfirmedFor = null;
+ 
+         // Hide paired banner
+         const banner = document.getElementById('pairedDeviceBanner');
+@@ -2647,7 +2470,7 @@
+         const firmware = document.getElementById('nodeFormFw').value.trim() || 'v2.4.2-WiFi';
+         const ip_address = document.getElementById('nodeFormIp').value.trim();
+         const wifi_ssid = document.getElementById('nodeFormSsid').value.trim();
+-        const wifi_password = document.getElementById('nodeFormPassword').value.trim();
++        const wifi_password = document.getElementById('nodeFormPassword').value;
+         if (!wifi_password) {
+           setNodeModalStep(2);
+           document.getElementById('nodeFormPassword')?.focus();
+@@ -2731,28 +2554,26 @@
+           if (match) effectiveRoomId = match.id;
+         }
+ 
+-        await NodeService.saveNode({
+-          node_id,
+-          name: `${node_id} (${name || rmText + ' Node'})`,
+-          hardware,
+-          status,
+-          firmware,
+-          ip_address,
+-          wifi_ssid,
+-          wifi_password,
+-          brand: effectiveBrand,
+-          aircon_type,
+-          building: bldText,
+-          floor: flrText,
+-          room_name: rmText,
+-          room_id: effectiveRoomId,
+-          floor_id: effectiveFlrId,
+-          building_id: effectiveBldId,
+-          location: `${rmText} (${bldText} • ${flrText})`,
+-          connection: 'WiFi (2.4GHz) / Supabase Realtime',
+-          rssi: status === 'Connected' ? -65 : null,
+-          controls: ['Aircon Temperature', 'IR Control']
+-        });
++        let registered;
++        saveNodeBtn.disabled = true;
++        try {
++          registered = await window.EcoTrackHardwareCloud.register({ room_id: effectiveRoomId, brand: brand || null, aircon_type }, { ssid: wifi_ssid, pass: wifi_password });
++          await NodeService.saveNode({
++            node_id: registered.info.device_id, db_id: registered.node.id, cloud_registered: true,
++            name: `${registered.info.device_id} (${name})`, hardware: 'ESP32-S3 IR receiver', status: 'Connected',
++            firmware: registered.info.firmware_version, cloud_state: registered.cloud_state, ip_address: registered.info.ip_address || null,
++            wifi_ssid: registered.info.wifi_ssid || wifi_ssid, capabilities: registered.info.capabilities,
++            ir_rx: true, ir_tx: false, brand: effectiveBrand, aircon_type,
++            building: bldText, floor: flrText, room_name: rmText, room_id: effectiveRoomId,
++            floor_id: effectiveFlrId, building_id: effectiveBldId,
++            location: `${rmText} (${bldText} / ${flrText})`, connection: 'Supabase over Wi-Fi',
++            rssi: registered.info.rssi ?? null, controls: ['IR Learning']
++          });
++          document.getElementById('nodeFormPassword').value = '';
++        } catch (error) {
++          window.EcoToast?.show(error.message, 'error');
++          return;
++        } finally { saveNodeBtn.disabled = false; }
+         if (brand) {
+           try {
+             await NodeService.saveRemoteProfile(node_id, {
+@@ -2945,15 +2766,15 @@
+           status: 'Connected',
+           hardware: 'AC Controller Device (WiFi + IR)',
+           firmware: 'v2.4.2-WiFi',
+-          rssi: -65
++          rssi: null
+         };
+ 
+         const isOnline = (node.status || '').toLowerCase() === 'connected' || (node.status || '').toLowerCase() === 'online';
+         const numPart = (node.node_id || '').replace(/\D/g, '') || '1';
+-        const ip = node.ip_address || `192.168.1.10${numPart}`;
+-        const ssid = node.wifi_ssid || 'EcoTrack-IoT';
++        const ip = node.ip_address || 'Not reported';
++        const ssid = node.wifi_ssid || 'Not reported';
+         const hw = node.hardware || 'AC Controller Device (WiFi + IR)';
+-        const fw = node.firmware || 'v2.4.2-WiFi';
++        const fw = node.firmware || 'Not reported';
+ 
+         // Attached aircons
+         const allAircons = AirconProfileManager.getAll();
+@@ -3404,6 +3225,7 @@
+       let currentPingTargetId = null;
+ 
+       function closePingDiagnosticsModal() {
++        pingProbeRevision++;
+         if (pingModal) pingModal.classList.add('hidden');
+       }
+ 
+@@ -3421,152 +3243,45 @@
+         }
+       });
+ 
+-      function openPingDiagnosticsModal(id, isRetest = false) {
+-        const n = NodeService.getNode(id) || {
+-          node_id: id,
+-          name: id,
+-          hardware: 'AC Controller Device (WiFi + IR)',
+-          firmware: 'v2.4.2-WiFi',
+-          status: 'Connected',
+-          rssi: -65
+-        };
+-
++      async function openPingDiagnosticsModal(id, isRetest = false) {
++        const revision = ++pingProbeRevision;
+         currentPingTargetId = id;
+-
+-        const ip = n.ip_address || '';
+-        const ssid = n.wifi_ssid || '—';
+-        const hw = (n.hardware && n.hardware !== 'AC Controller Device (WiFi + IR)') ? n.hardware : 'WiFi + IR Blaster';
+-        const fw = n.firmware || 'v2.4.2-WiFi';
+-
+-        // Populate modal headers & metadata
+-        document.getElementById('pingModalDeviceName').textContent = n.name || id;
+-        document.getElementById('pingModalNodeBadge').textContent = n.node_id || id;
+-        document.getElementById('pingDetailIp').textContent = ip || 'Not configured';
+-        document.getElementById('pingDetailSsid').textContent = ssid;
+-        const hwEl = document.getElementById('pingDetailHw');
+-        if (hwEl) {
+-          hwEl.textContent = hw;
+-          hwEl.title = hw;
+-        }
+-        document.getElementById('pingDetailFw').textContent = fw;
+-        document.getElementById('pingTerminalTitle').textContent = `probe@ecotrack: ping -c 3 ${ip || '—'}`;
+-        document.getElementById('pingProbeTimestamp').textContent = new Date().toLocaleTimeString();
+-
+-        const statusTitle = document.getElementById('pingStatusTitle');
+-        const statusSub = document.getElementById('pingStatusSubtitle');
+-        const latencyPill = document.getElementById('pingLatencyPill');
+-        const termOutput = document.getElementById('pingTerminalOutput');
+-        const rssiVal = n.rssi != null ? n.rssi : '—';
+-
+-        if (!ip) {
+-          statusTitle.textContent = 'No Static IP Configured';
+-          statusSub.textContent = 'Assign an IPv4 address to enable ICMP diagnostic probes.';
+-          latencyPill.textContent = 'NO IP';
+-          latencyPill.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-500/20 text-slate-300 border border-slate-500/30';
+-          document.getElementById('pingMetricLatency').textContent = '—';
+-          document.getElementById('pingMetricLatencySub').textContent = 'No probe sent';
+-          document.getElementById('pingMetricRssi').textContent = typeof rssiVal === 'number' ? `${rssiVal} dBm` : '—';
+-          document.getElementById('pingMetricRssiSub').textContent = 'Link state unknown';
+-          document.getElementById('pingMetricPackets').textContent = '0%';
+-          document.getElementById('pingMetricPacketsSub').textContent = 'No packets sent';
+-          if (termOutput) {
+-            termOutput.innerHTML = '<div style="color: #f87171 !important; font-weight: 700;">Error: AC Controller device has no static IPv4 address configured.</div>';
+-          }
+-          return;
+-        }
+-
+-        // Run real ICMP ping via electron IPC if available
+-        statusTitle.textContent = 'Probing Controller via WiFi...';
+-        statusSub.textContent = `Sending ICMP Echo packets to ${ip}...`;
+-        latencyPill.textContent = 'PROBING';
+-        latencyPill.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30';
+-
+-        (async () => {
+-          let pingRes = null;
+-          if (window.electron && typeof window.electron.invoke === 'function') {
+-            try {
+-              pingRes = await window.electron.invoke('ping-node', ip);
+-            } catch (err) {
+-              console.warn('[Ping] IPC error:', err);
+-            }
+-          }
+-
+-          const nowStr = new Date().toLocaleTimeString();
+-          if (pingRes && pingRes.success && pingRes.reachable) {
+-            const avg = pingRes.avg || '25';
+-            statusTitle.textContent = 'Device Reachable via WiFi (2.4 GHz)';
+-            statusSub.textContent = 'Bidirectional ICMP handshake verified • Ready for IR commands';
+-            latencyPill.textContent = `${avg}ms RTT`;
+-            latencyPill.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
+-
+-            document.getElementById('pingMetricLatency').textContent = `${avg} ms`;
+-            document.getElementById('pingMetricLatencySub').textContent = pingRes.min ? `● Min: ${pingRes.min}ms / Max: ${pingRes.max}ms` : '● Stable Link';
+-            document.getElementById('pingMetricRssi').textContent = typeof rssiVal === 'number' ? `${rssiVal} dBm` : '—';
+-            document.getElementById('pingMetricRssiSub').textContent = '● Link active';
+-            document.getElementById('pingMetricPackets').textContent = `${100 - (pingRes.packetLoss || 0)}%`;
+-            document.getElementById('pingMetricPacketsSub').textContent = `${pingRes.packetLoss || 0}% Loss`;
+-
+-            if (termOutput) {
+-              termOutput.innerHTML = `<pre style="color: #cbd5e1 !important; margin: 0; white-space: pre-wrap; font-family: monospace;">${pingRes.stdout || `Reply from ${ip}: time=${avg}ms`}</pre>`;
+-            }
+-          } else {
+-            statusTitle.textContent = 'Device Unreachable via WiFi';
+-            statusSub.textContent = 'ICMP probe timed out • Check device power and router subnet link.';
+-            latencyPill.textContent = 'OFFLINE';
+-            latencyPill.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30';
+-
+-            document.getElementById('pingMetricLatency').textContent = 'Timeout';
+-            document.getElementById('pingMetricLatencySub').textContent = '● Host unreachable';
+-            document.getElementById('pingMetricRssi').textContent = typeof rssiVal === 'number' ? `${rssiVal} dBm` : '—';
+-            document.getElementById('pingMetricRssiSub').textContent = '● No response';
+-            document.getElementById('pingMetricPackets').textContent = '0%';
+-            document.getElementById('pingMetricPacketsSub').textContent = '100% Loss';
+-
+-            if (termOutput) {
+-              termOutput.innerHTML = `<pre style="color: #f87171 !important; margin: 0; white-space: pre-wrap; font-family: monospace;">${pingRes?.stdout || `Request timed out for ${ip}. Destination host unreachable.`}</pre>`;
+-            }
+-          }
+-        })();
+-
+-        // Audit Log
+-        CentralLogService.log({
+-          device_id: 'SYSTEM',
+-          node_id: id,
+-          module: 'CONTROLLER',
+-          event: 'PING_REQUEST',
+-          result: 'SUCCESS',
+-          details: `Ping to AC Controller Device ${id} via WiFi returned round-trip ${avg}ms (WiFi RSSI: ${rssiVal} dBm)`
+-        });
+-
+-        // Display Modal
++        const n = NodeService.getNode(id) || { node_id: id };
++        const set = (name, value) => { const el = document.getElementById(name); if (el) el.textContent = value; };
++        set('pingModalDeviceName', n.name || id); set('pingModalNodeBadge', id);
++        set('pingDetailIp', n.ip_address || 'Not reported'); set('pingDetailSsid', n.wifi_ssid || 'Not reported');
++        set('pingDetailHw', n.hardware || 'Not reported'); set('pingDetailFw', n.firmware || 'Not reported');
++        set('pingTerminalTitle', 'EcoTrack -> Supabase -> ESP32 -> acknowledgement');
++        set('pingProbeTimestamp', new Date().toLocaleTimeString());
++        set('pingStatusTitle', 'Waiting for cloud device reply'); set('pingStatusSubtitle', 'The PC and ESP32 can use different networks.');
++        set('pingLatencyPill', 'WAITING'); set('pingMetricLatency', '--'); set('pingMetricLatencySub', 'Includes cloud delivery and polling');
++        set('pingMetricRssi', '--'); set('pingMetricRssiSub', 'Awaiting measured Wi-Fi signal');
++        set('pingMetricPackets', '--'); set('pingMetricPacketsSub', 'Awaiting acknowledgement');
++        set('pingTerminalOutput', 'Queued a cloud ping. Waiting for the registered ESP32 to respond.');
+         pingModal.classList.remove('hidden');
+-      }
+-
+-      // Re-Test Ping Button
+-      if (retestPingBtn) {
+-        retestPingBtn.addEventListener('click', () => {
+-          if (!currentPingTargetId) return;
+-          const spinner = document.getElementById('retestPingSpinner');
+-          const icon = document.getElementById('retestPingIcon');
+-          const label = document.getElementById('retestPingLabel');
+-
+-          spinner.classList.remove('hidden');
+-          icon.classList.add('hidden');
+-          label.textContent = 'Probing Target...';
+-          retestPingBtn.disabled = true;
+-
+-          setTimeout(() => {
+-            openPingDiagnosticsModal(currentPingTargetId, true);
+-            spinner.classList.add('hidden');
+-            icon.classList.remove('hidden');
+-            label.textContent = 'Re-Test Connection';
+-            retestPingBtn.disabled = false;
+-            if (window.EcoToast) {
+-              window.EcoToast.show(`Diagnostics refreshed for ${currentPingTargetId}.`, 'success');
+-            }
+-          }, 420);
+-        });
+-      }
++        try {
++          const response = await window.EcoTrackHardwareCloud.ping(id);
++          if (revision !== pingProbeRevision || currentPingTargetId !== id) return;
++          set('pingStatusTitle', 'ESP32 replied through Supabase'); set('pingStatusSubtitle', 'Cloud command and device acknowledgement verified.');
++          set('pingLatencyPill', `${response.round_trip_ms} ms`); set('pingMetricLatency', `${response.round_trip_ms} ms`);
++          set('pingMetricRssi', Number.isFinite(response.rssi) ? `${response.rssi} dBm` : 'Not reported');
++          set('pingMetricRssiSub', 'Measured by ESP32'); set('pingMetricPackets', 'Received'); set('pingMetricPacketsSub', 'Device acknowledgement');
++          set('pingTerminalOutput', JSON.stringify(response, null, 2));
++          CentralLogService.log({ device_id: 'SYSTEM', node_id: id, module: 'CONTROLLER', event: 'CLOUD_PING', result: 'SUCCESS', details: `Device acknowledged in ${response.round_trip_ms} ms through Supabase.` });
++        } catch (error) {
++          if (revision !== pingProbeRevision || currentPingTargetId !== id) return;
++          set('pingStatusTitle', error.code === 'DEVICE_SLEEPING' ? 'Controller is sleeping' : 'No device acknowledgement');
++          set('pingStatusSubtitle', error.message); set('pingLatencyPill', 'NO REPLY'); set('pingMetricPackets', 'Not received');
++          set('pingTerminalOutput', error.message);
++        }
++      }
++
++      if (retestPingBtn) retestPingBtn.addEventListener('click', async () => {
++        if (!currentPingTargetId || retestPingBtn.disabled) return;
++        retestPingBtn.disabled = true;
++        try { await openPingDiagnosticsModal(currentPingTargetId, true); }
++        finally { retestPingBtn.disabled = false; }
++      });
+ 
+       // Copy Diagnostics Button
+       if (copyPingBtn) {
+@@ -3657,6 +3372,8 @@
+       loadBuildingsFloorsRooms().catch(() => {});
+       loadNodesWithSWR();
+ 
++      setInterval(() => { if (!document.hidden) refreshNodes(true); }, 15000);
++
+       // Trigger one-time background Supabase sync on page start
+       if (window.EcoTrackAirconSystem?.syncWithDatabase) {
+         window.EcoTrackAirconSystem.syncWithDatabase().catch(() => {});
+--- before/public\aircons.html
++++ after/public\aircons.html
+@@ -26,6 +26,7 @@
+   <link rel="stylesheet" href="./styles.css?v=53">
+   <script src="./js/supabase.umd.js"></script>
+   <script src="./js/supabase-client.js"></script>
++  <script src="./js/hardware-cloud.js?v=1"></script>
+   <script src="./js/sidebar.js"></script>
+   <script src="./js/sidebar-loader.js?v=7"></script>
+   <script src="./js/icons.js"></script>
+--- before/public\control.html
++++ after/public\control.html
+@@ -41,6 +41,7 @@
+   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+   <script src="./js/supabase.umd.js"></script>
+   <script src="./js/supabase-client.js"></script>
++  <script src="./js/hardware-cloud.js?v=1"></script>
+   <script src="./js/sidebar.js"></script>
+   <script src="./js/sidebar-loader.js?v=7"></script>
+   <script src="./js/icons.js"></script>
+@@ -309,7 +310,7 @@
+                     <div class="flex items-center justify-between text-[10px] pb-2 border-b border-cyan-500/20">
+                       <span class="font-bold tracking-wider text-cyan-400 uppercase flex items-center gap-1 text-[11px]" id="remoteBrandTitle">
+                         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line></svg>
+-                        Koppel Remote
++                        Smart Remote
+                       </span>
+                       <span id="remoteLcdModeBadge" class="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-extrabold text-[9px] border border-cyan-500/30 flex items-center gap-1">
+                         <span id="remoteLcdModeIcon">—</span> <span id="remoteLcdMode">—</span>
+@@ -406,13 +407,13 @@
+                   <div class="p-4 rounded-2xl bg-black/10 dark:bg-black/30 border border-gray-200 dark:border-white/10 flex flex-col gap-3 shadow-sm">
+                     <div class="flex items-center justify-between">
+                       <span class="text-[11px] font-bold text-slate-600 dark:text-gray-400 uppercase tracking-wider">Live Climate Sync</span>
+-                      <span id="remoteSyncBadge" class="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">TRANSMITTER SYNCED</span>
++                      <span id="remoteSyncBadge" class="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-slate-500/15 text-slate-500 dark:text-gray-400 border border-slate-500/30">STANDBY</span>
+                     </div>
+                     
+                     <div class="grid grid-cols-2 gap-2 text-center">
+                       <div class="p-2.5 rounded-xl bg-white/70 dark:bg-black/30 border border-gray-200 dark:border-white/5">
+                         <span class="text-[10px] text-gray-500 dark:text-gray-400 font-semibold uppercase block">Room Ambient</span>
+-                        <span id="compRoomAmbient" class="text-xl font-extrabold text-slate-800 dark:text-white">24.1°C</span>
++                        <span id="compRoomAmbient" class="text-xl font-extrabold text-slate-800 dark:text-white">—</span>
+                       </div>
+                       <div class="p-2.5 rounded-xl bg-white/70 dark:bg-black/30 border border-gray-200 dark:border-white/5">
+                         <span class="text-[10px] text-teal-600 dark:text-teal-400 font-semibold uppercase block">Remote Setpoint</span>
+@@ -420,9 +421,9 @@
+                       </div>
+                     </div>
+ 
+-                    <div class="p-2.5 rounded-xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-between text-xs">
+-                      <span class="text-teal-700 dark:text-teal-300 font-medium">Compressor State:</span>
+-                      <span id="compCompressorStatus" class="font-bold text-teal-600 dark:text-teal-300">Active Cooling</span>
++                    <div class="p-2.5 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 flex items-center justify-between text-xs">
++                      <span class="text-slate-600 dark:text-gray-400 font-medium">Compressor State:</span>
++                      <span id="compCompressorStatus" class="font-bold text-slate-500 dark:text-slate-400">STANDBY</span>
+                     </div>
+                   </div>
+ 
+@@ -432,17 +433,17 @@
+                     <div class="flex justify-between py-1 border-b border-gray-200 dark:border-white/5 items-center">
+                       <span class="text-gray-500 dark:text-gray-400">Target Node</span>
+                       <div class="flex items-center gap-1.5">
+-                        <span id="compTargetNode" class="font-mono font-bold text-slate-800 dark:text-white">--</span>
+-                        <span id="compTargetNodeBadge" class="font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">ONLINE</span>
++                        <span id="compTargetNode" class="font-mono font-bold text-slate-800 dark:text-white">—</span>
++                        <span id="compTargetNodeBadge" class="font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-slate-500/15 text-slate-400 border border-slate-500/30">OFFLINE</span>
+                       </div>
+                     </div>
+                     <div class="flex justify-between py-1 border-b border-gray-200 dark:border-white/5">
+                       <span class="text-gray-500 dark:text-gray-400">Infrared Protocol</span>
+-                      <span id="compProtocol" class="font-mono font-bold text-cyan-600 dark:text-cyan-400">KOPPEL_RAW</span>
++                      <span id="compProtocol" class="font-mono font-bold text-slate-700 dark:text-gray-300">—</span>
+                     </div>
+                     <div class="flex justify-between py-1">
+                       <span class="text-gray-500 dark:text-gray-400">Last IR Latency</span>
+-                      <span id="compLatency" class="font-mono font-bold text-emerald-600 dark:text-emerald-400">42ms (Instant ACK)</span>
++                      <span id="compLatency" class="font-mono font-bold text-slate-500 dark:text-gray-400">—</span>
+                     </div>
+                   </div>
+                 </div>
+@@ -535,7 +536,7 @@
+                 </div>
+                 <div class="p-2.5 rounded-xl bg-slate-50 dark:bg-black/25 border border-slate-200 dark:border-white/5">
+                   <span class="text-[10px] text-slate-500 dark:text-gray-400 block uppercase font-medium">Connection</span>
+-                  <span id="dispNodeStatus" class="font-bold text-emerald-600 dark:text-emerald-400 font-medium">● Connecting...</span>
++                  <span id="dispNodeStatus" class="font-bold text-slate-400 dark:text-gray-500 font-medium">● Offline</span>
+                 </div>
+                 <div class="p-2.5 rounded-xl bg-slate-50 dark:bg-black/25 border border-slate-200 dark:border-white/5">
+                   <span class="text-[10px] text-slate-500 dark:text-gray-400 block uppercase font-medium">WiFi Signal</span>
+@@ -555,12 +556,12 @@
+                 </div>
+                 <div class="col-span-2 p-2.5 rounded-xl bg-slate-50 dark:bg-black/25 border border-slate-200 dark:border-white/5 flex items-center justify-between">
+                   <span class="text-[10px] text-slate-500 dark:text-gray-400 block uppercase font-medium">Battery Level</span>
+-                  <span id="dispNodeBattery" class="font-bold text-emerald-600 dark:text-emerald-400 font-mono flex items-center gap-1.5">
+-                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" class="text-emerald-500 shrink-0">
++                  <span id="dispNodeBattery" class="font-bold text-slate-400 dark:text-gray-500 font-mono flex items-center gap-1.5">
++                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" class="shrink-0">
+                       <rect x="2" y="7" width="16" height="10" rx="2" ry="2"></rect>
+                       <line x1="22" y1="11" x2="22" y2="13"></line>
+                     </svg>
+-                    <span id="dispNodeBatteryText">98%</span>
++                    <span id="dispNodeBatteryText">—</span>
+                   </span>
+                 </div>
+               </div>
+@@ -614,11 +615,11 @@
+               <div class="space-y-3 text-xs">
+                 <div class="p-3 rounded-xl bg-slate-50 dark:bg-black/25 border border-slate-200/60 dark:border-white/5">
+                   <span class="text-[10px] text-slate-500 dark:text-gray-400 uppercase block font-semibold">Commanded IR State</span>
+-                  <span id="ovCommanded" class="text-sm font-black text-slate-800 dark:text-white mt-1 block">POWER ON • COOL 24°C • FAN AUTO</span>
++                  <span id="ovCommanded" class="text-sm font-black text-slate-800 dark:text-white mt-1 block">—</span>
+                 </div>
+                 <div class="p-3 rounded-xl bg-slate-50 dark:bg-black/25 border border-slate-200/60 dark:border-white/5">
+                   <span class="text-[10px] text-teal-600 dark:text-teal-400 uppercase block font-semibold">Active Profile State</span>
+-                  <span id="ovOperational" class="text-sm font-black text-teal-600 dark:text-teal-300 mt-1 block">READY / CONFIGURED</span>
++                  <span id="ovOperational" class="text-sm font-black text-teal-600 dark:text-teal-300 mt-1 block">STANDBY / NO DEVICE</span>
+                 </div>
+               </div>
+             </div>
+@@ -633,7 +634,7 @@
+                 <!-- Dynamically populated -->
+               </div>
+               <div class="pt-3 border-t border-slate-100 dark:border-white/5 text-[11px] text-slate-500 dark:text-gray-400">
+-                Operating Range: <span id="ovTempRange" class="font-bold text-slate-800 dark:text-white">16°C – 30°C (Step: 1°C)</span>
++                Operating Range: <span id="ovTempRange" class="font-bold text-slate-800 dark:text-white">—</span>
+               </div>
+             </div>
+           </div>
+@@ -1174,6 +1175,8 @@
+         const up = document.getElementById('unitPowerHeaderContainer');
+         const mainGrid = document.getElementById('controlMainGrid');
+         const mainPanel = document.querySelector('.lg\\:col-span-7.glass-panel');
++        const zeroState = document.getElementById('controlZeroAirconState');
++        const isZeroState = zeroState && !zeroState.classList.contains('hidden');
+ 
+         if (currentControlLayout === 'remote') {
+           // REMOTE LAYOUT: Erase Unit Power from header, display remote handset
+@@ -1185,8 +1188,13 @@
+             controlsContainer.style.setProperty('display', 'none', 'important');
+           }
+           if (remoteLayoutContainer) {
+-            remoteLayoutContainer.classList.remove('hidden');
+-            remoteLayoutContainer.style.setProperty('display', 'flex', 'important');
++            if (isZeroState) {
++              remoteLayoutContainer.classList.add('hidden');
++              remoteLayoutContainer.style.setProperty('display', 'none', 'important');
++            } else {
++              remoteLayoutContainer.classList.remove('hidden');
++              remoteLayoutContainer.style.setProperty('display', 'flex', 'important');
++            }
+           }
+           
+           // ERASE UNIT POWER WHEN REMOTE LAYOUT
+@@ -1207,19 +1215,29 @@
+           if (viewStandardBtn) viewStandardBtn.className = 'px-3 py-1 rounded-lg font-bold bg-teal-500/20 text-teal-300 border border-teal-500/40 transition-colors';
+           if (viewRemoteBtn) viewRemoteBtn.className = 'px-3 py-1 rounded-lg font-medium text-gray-400 hover:text-white transition-colors';
+           
+-          if (controlsContainer) {
+-            controlsContainer.classList.remove('hidden');
+-            controlsContainer.style.removeProperty('display');
+-          }
+           if (remoteLayoutContainer) {
+             remoteLayoutContainer.classList.add('hidden');
+             remoteLayoutContainer.style.setProperty('display', 'none', 'important');
+           }
++          if (controlsContainer) {
++            if (isZeroState) {
++              controlsContainer.classList.add('hidden');
++              controlsContainer.style.setProperty('display', 'none', 'important');
++            } else {
++              controlsContainer.classList.remove('hidden');
++              controlsContainer.style.removeProperty('display');
++            }
++          }
+           
+-          // DO NOT ERASE UNIT POWER IF DESKTOP LAYOUT
++          // DO NOT ERASE UNIT POWER IF DESKTOP LAYOUT AND NOT ZERO STATE
+           if (up) {
+-            up.classList.remove('hidden');
+-            up.style.removeProperty('display');
++            if (isZeroState) {
++              up.classList.add('hidden');
++              up.style.setProperty('display', 'none', 'important');
++            } else {
++              up.classList.remove('hidden');
++              up.style.removeProperty('display');
++            }
+           }
+           document.body.classList.remove('remote-layout-active');
+           if (mainGrid) {
+@@ -1455,14 +1473,68 @@
+             activeDeviceId = aircons[0].device_id;
+             device = aircons[0];
+           } else {
+-            if (unitNameEl) unitNameEl.textContent = 'No Air Conditioners';
+-            if (unitBrandBadgeEl) unitBrandBadgeEl.textContent = 'EcoTrack';
+-            if (unitDetailsEl) unitDetailsEl.textContent = 'Register an air conditioning unit to begin climate control.';
++            if (unitNameEl) unitNameEl.textContent = 'Fleet Overview • No Units Registered';
++            if (unitBrandBadgeEl) unitBrandBadgeEl.textContent = 'Standby';
++            if (unitDetailsEl) unitDetailsEl.textContent = 'No air conditioning units registered in the EcoTrack network.';
+             if (unitPowerHeaderContainer) unitPowerHeaderContainer.classList.add('hidden');
+-            if (controlsContainer) controlsContainer.classList.add('hidden');
++            if (controlsContainer) {
++              controlsContainer.classList.add('hidden');
++              controlsContainer.style.setProperty('display', 'none', 'important');
++            }
++            if (remoteLayoutContainer) {
++              remoteLayoutContainer.classList.add('hidden');
++              remoteLayoutContainer.style.setProperty('display', 'none', 'important');
++            }
+             if (zeroStateEl) {
+               zeroStateEl.classList.remove('hidden');
+               zeroStateEl.classList.add('flex');
++            }
++            if (dispNodeBatteryText) dispNodeBatteryText.textContent = '—';
++
++            // Clean up Companion / Right panel readouts
++            const compAmbient = document.getElementById('compRoomAmbient');
++            if (compAmbient) compAmbient.textContent = '—';
++            const compTarget = document.getElementById('compTargetSetpoint');
++            if (compTarget) compTarget.textContent = '—';
++            const compCompressor = document.getElementById('compCompressorStatus');
++            if (compCompressor) {
++              compCompressor.textContent = 'STANDBY';
++              compCompressor.className = 'font-bold text-slate-400 dark:text-gray-500';
++            }
++            const compNode = document.getElementById('compTargetNode');
++            if (compNode) compNode.textContent = '—';
++            const compNodeBadge = document.getElementById('compTargetNodeBadge');
++            if (compNodeBadge) {
++              compNodeBadge.textContent = 'OFFLINE';
++              compNodeBadge.className = 'font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-slate-500/15 text-slate-400 border border-slate-500/30';
++            }
++            const compProto = document.getElementById('compProtocol');
++            if (compProto) compProto.textContent = '—';
++            const compLatencyEl = document.getElementById('compLatency');
++            if (compLatencyEl) {
++              compLatencyEl.textContent = '—';
++              compLatencyEl.className = 'font-mono font-bold text-slate-400 dark:text-gray-500';
++            }
++            const remoteSyncBadge = document.getElementById('remoteSyncBadge');
++            if (remoteSyncBadge) {
++              remoteSyncBadge.textContent = 'STANDBY';
++              remoteSyncBadge.className = 'text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-slate-500/15 text-slate-400 border border-slate-500/30';
++            }
++
++            if (dispCommandedState) dispCommandedState.textContent = 'STANDBY';
++            if (dispClassifiedState) dispClassifiedState.textContent = 'STANDBY';
++            if (liveSetpointReadout) liveSetpointReadout.textContent = '—';
++            if (liveTempReadout) liveTempReadout.textContent = '—';
++            if (dispNodeId) dispNodeId.textContent = '—';
++            if (dispNodeStatus) {
++              dispNodeStatus.textContent = '● Offline';
++              dispNodeStatus.className = 'font-bold text-slate-400 dark:text-gray-500 font-medium';
++            }
++            if (dispNodeRssi) dispNodeRssi.textContent = '—';
++            if (dispNodeSnr) dispNodeSnr.textContent = '—';
++
++            if (typeof renderWorkspaceTabData === 'function') {
++              renderWorkspaceTabData('overview');
+             }
+             return;
+           }
+@@ -1589,7 +1661,7 @@
+ 
+         // Battery status calculation
+         const rawBat = node?.battery;
+-        let batPercent = 98;
++        let batPercent = null;
+         if (rawBat !== undefined && rawBat !== null) {
+           const num = parseFloat(rawBat);
+           if (!isNaN(num)) {
+@@ -1601,10 +1673,19 @@
+           }
+         }
+         if (dispNodeBatteryText) {
+-          dispNodeBatteryText.textContent = isNodeOnline ? `${batPercent}%` : '—';
+-          dispNodeBatteryText.className = isNodeOnline 
+-            ? (batPercent >= 50 ? 'font-bold text-emerald-600 dark:text-emerald-400 font-mono' : (batPercent >= 20 ? 'font-bold text-amber-600 dark:text-amber-400 font-mono' : 'font-bold text-rose-600 dark:text-rose-400 font-mono'))
+-            : 'font-bold text-slate-400 dark:text-gray-500 font-mono';
++          const dispNodeBattery = document.getElementById('dispNodeBattery');
++          if (isNodeOnline && batPercent !== null) {
++            dispNodeBatteryText.textContent = `${batPercent}%`;
++            const colorClass = batPercent >= 50 
++              ? 'text-emerald-600 dark:text-emerald-400' 
++              : (batPercent >= 20 ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400');
++            dispNodeBatteryText.className = `font-bold ${colorClass} font-mono`;
++            if (dispNodeBattery) dispNodeBattery.className = `font-bold ${colorClass} font-mono flex items-center gap-1.5`;
++          } else {
++            dispNodeBatteryText.textContent = '—';
++            dispNodeBatteryText.className = 'font-bold text-slate-400 dark:text-gray-500 font-mono';
++            if (dispNodeBattery) dispNodeBattery.className = 'font-bold text-slate-400 dark:text-gray-500 font-mono flex items-center gap-1.5';
++          }
+         }
+ 
+         // Remote layout LCD & Smart Handset updates
+@@ -1685,14 +1766,15 @@
+ 
+         // Companion Panel updates
+         const compAmbient = document.getElementById('compRoomAmbient');
+-        if (compAmbient) compAmbient.textContent = node?.temp ? `${node.temp.toFixed(1)}°C` : '24.1°C';
++        if (compAmbient) compAmbient.textContent = (node?.temp && Number.isFinite(node.temp)) ? `${node.temp.toFixed(1)}°C` : '—';
+ 
+         const compTarget = document.getElementById('compTargetSetpoint');
+         if (compTarget) compTarget.textContent = hasSettings && Number.isFinite(state.temperature) ? `${state.temperature}°C` : '—';
+ 
+         const compCompressor = document.getElementById('compCompressorStatus');
+         if (compCompressor) {
+-          compCompressor.textContent = window.EcoTrackAirconState.describeAirconState(device.control_snapshot).summary;
++          const desc = window.EcoTrackAirconState ? window.EcoTrackAirconState.describeAirconState(device.control_snapshot) : null;
++          compCompressor.textContent = desc?.summary || (isPowerOn ? 'ACTIVE' : 'STANDBY');
+           compCompressor.className = isPowerOn ? 'font-bold text-teal-600 dark:text-teal-300' : 'font-bold text-slate-500 dark:text-slate-400';
+         }
+ 
+@@ -1708,7 +1790,7 @@
+         }
+ 
+         const compProto = document.getElementById('compProtocol');
+-        if (compProto) compProto.textContent = device.protocol || 'KOPPEL_RAW';
++        if (compProto) compProto.textContent = device.protocol || 'RAW';
+ 
+         if (typeof renderWorkspaceTabData === 'function') {
+           renderWorkspaceTabData('overview');
+@@ -1926,68 +2008,30 @@
+         });
+       }
+ 
+-      // Live Ping Probe inside Modal
+-      if (cmdTestPingBtn) {
+-        cmdTestPingBtn.addEventListener('click', async () => {
+-          const pingLabel = document.getElementById('cmdTestPingLabel');
+-          const pingBox = document.getElementById('cmdErrorPingBox');
+-          const pingOutput = document.getElementById('cmdPingOutput');
+-          const pingPill = document.getElementById('cmdPingResultPill');
+-          const reconnectLabel = document.getElementById('cmdReconnectLabel');
+-
+-          const device = AirconProfileManager.getById(pendingFailedCommand?.device_id || activeDeviceId);
+-          const nodeId = device?.node_id || '';
+-          const node = nodeId ? NodeService.getNode(nodeId) : null;
+-          const nodeIp = node?.ip_address || '';
+-
+-          if (pingLabel) pingLabel.textContent = 'Probing...';
+-          cmdTestPingBtn.disabled = true;
+-
+-          if (pingBox) pingBox.classList.remove('hidden');
+-          if (!nodeIp) {
+-            if (pingOutput) pingOutput.textContent = 'Ping failed: No Static IP address configured for this node.';
+-            if (pingPill) {
+-              pingPill.textContent = 'UNREACHABLE • NO IP';
+-              pingPill.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30';
+-            }
+-            if (pingLabel) pingLabel.textContent = 'Probe Again';
+-            cmdTestPingBtn.disabled = false;
+-            return;
+-          }
+-
+-          if (pingOutput) {
+-            pingOutput.textContent = `Initiating ICMP Echo probe to ${nodeIp}...`;
+-          }
+-
+-          let pingRes = null;
+-          if (window.electron && typeof window.electron.invoke === 'function') {
+-            try {
+-              pingRes = await window.electron.invoke('ping-node', nodeIp);
+-            } catch (err) {
+-              console.warn('[Ping] IPC error:', err);
+-            }
+-          }
+-
+-          if (pingRes && pingRes.success && pingRes.reachable) {
+-            if (pingOutput) pingOutput.textContent = pingRes.stdout || `Reply from ${nodeIp}: time=${pingRes.avg}ms`;
+-            if (pingPill) {
+-              pingPill.textContent = `REACHABLE • ${pingRes.avg}ms RTT`;
+-              pingPill.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
+-            }
+-            if (reconnectLabel) reconnectLabel.textContent = 'Device Reachable — Reconnect Now';
+-          } else {
+-            if (pingOutput) pingOutput.textContent = pingRes?.stdout || `Ping request timed out for ${nodeIp}. Node is physically unreachable.`;
+-            if (pingPill) {
+-              pingPill.textContent = 'UNREACHABLE';
+-              pingPill.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30';
+-            }
+-          }
+-
+-          if (pingLabel) pingLabel.textContent = 'Probe Again';
+-          if (reconnectLabel) reconnectLabel.textContent = 'Device Reachable — Reconnect Now';
++      // Diagnostics use a cloud device acknowledgement, from any network.
++      if (cmdTestPingBtn) cmdTestPingBtn.addEventListener('click', async () => {
++        const label = document.getElementById('cmdTestPingLabel');
++        const box = document.getElementById('cmdErrorPingBox');
++        const output = document.getElementById('cmdPingOutput');
++        const pill = document.getElementById('cmdPingResultPill');
++        const device = AirconProfileManager.getById(pendingFailedCommand?.device_id || activeDeviceId);
++        cmdTestPingBtn.disabled = true;
++        if (label) label.textContent = 'Waiting for ESP32...';
++        box?.classList.remove('hidden');
++        if (output) output.textContent = 'UI -> Supabase -> ESP32 -> device acknowledgement';
++        try {
++          if (!device?.node_id) throw new Error('Assign a registered controller first.');
++          const reply = await window.EcoTrackHardwareCloud.ping(device.node_id);
++          if (output) output.textContent = JSON.stringify(reply, null, 2);
++          if (pill) pill.textContent = `DEVICE REPLIED | ${reply.round_trip_ms} ms`;
++        } catch (error) {
++          if (output) output.textContent = error.message;
++          if (pill) pill.textContent = 'NO DEVICE ACKNOWLEDGEMENT';
++        } finally {
++          if (label) label.textContent = 'Probe Again';
+           cmdTestPingBtn.disabled = false;
+-        });
+-      }
++        }
++      });
+ 
+       // Master Power Click
+       masterPowerBtn.addEventListener('click', () => {
+@@ -2113,29 +2157,135 @@
+       });
+ 
+       function renderWorkspaceTabData(tabKey) {
+-        const device = AirconProfileManager.getById(activeDeviceId);
+-        if (!device) return;
++        let device = AirconProfileManager.getById(activeDeviceId);
++        if (!device) {
++          const aircons = AirconProfileManager.getAll();
++          if (aircons.length > 0) {
++            activeDeviceId = aircons[0].device_id;
++            device = aircons[0];
++          }
++        }
++
++        if (!device) {
++          if (tabKey === 'overview') {
++            const ovDevId = document.getElementById('ovDeviceId');
++            const ovUnit = document.getElementById('ovUnitName');
++            const ovBr = document.getElementById('ovBrand');
++            const ovMod = document.getElementById('ovModel');
++            const ovLoc = document.getElementById('ovLocation');
++            const ovNode = document.getElementById('ovNodeId');
++            const ovCmd = document.getElementById('ovCommanded');
++            const ovOp = document.getElementById('ovOperational');
++            const capsList = document.getElementById('ovCapsList');
++            const tempRangeEl = document.getElementById('ovTempRange');
++
++            if (ovDevId) ovDevId.textContent = '—';
++            if (ovUnit) ovUnit.textContent = '—';
++            if (ovBr) ovBr.textContent = '—';
++            if (ovMod) ovMod.textContent = '—';
++            if (ovLoc) ovLoc.textContent = '—';
++            if (ovNode) ovNode.textContent = '—';
++            if (ovCmd) ovCmd.textContent = '—';
++            if (ovOp) {
++              ovOp.textContent = 'STANDBY / NO DEVICE';
++              ovOp.className = 'text-sm font-black text-slate-500 dark:text-gray-400 mt-1 block';
++            }
++            if (capsList) {
++              capsList.innerHTML = '<span class="text-xs text-slate-400 dark:text-gray-500 italic">No device profile loaded</span>';
++            }
++            if (tempRangeEl) tempRangeEl.textContent = '—';
++          } else if (tabKey === 'ir-remote') {
++            const simBrand = document.getElementById('simBrandTitle');
++            if (simBrand) simBrand.textContent = 'Remote';
++            const covBrand = document.getElementById('irCoverageBrand');
++            if (covBrand) covBrand.textContent = 'No Device Selected';
++            const modeEl = document.getElementById('simLcdMode');
++            if (modeEl) modeEl.textContent = '—';
++            const tempEl = document.getElementById('simLcdTemp');
++            if (tempEl) tempEl.textContent = '—';
++            const fanEl = document.getElementById('simLcdFan');
++            if (fanEl) fanEl.textContent = '—';
++            const tbody = document.getElementById('irCommandsCoverageBody');
++            if (tbody) tbody.innerHTML = '<tr><td colspan="4" class="text-center py-8 text-slate-400 dark:text-gray-500">No air conditioner selected.</td></tr>';
++            const covPill = document.getElementById('irCoveragePill');
++            if (covPill) {
++              covPill.textContent = '0/0 (0% Covered)';
++              covPill.className = 'px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-500/15 text-slate-600 dark:text-slate-400 border border-slate-500/30';
++            }
++          } else if (tabKey === 'diagnostics') {
++            const diagNodeId = document.getElementById('diagNodeId');
++            if (diagNodeId) diagNodeId.textContent = '—';
++            const statusEl = document.getElementById('diagNodeStatus');
++            if (statusEl) {
++              statusEl.textContent = '● No Device';
++              statusEl.className = 'font-bold text-slate-400';
++            }
++            const statusBadge = document.getElementById('diagStatusBadge');
++            if (statusBadge) {
++              statusBadge.textContent = 'NO DEVICE';
++              statusBadge.className = 'text-[11px] font-bold px-2 py-0.5 rounded-md bg-slate-500/15 text-slate-600 dark:text-slate-400 border border-slate-500/30';
++            }
++            const rssiEl = document.getElementById('diagNodeRssi');
++            if (rssiEl) rssiEl.textContent = 'N/A';
++            const snrEl = document.getElementById('diagNodeSnr');
++            if (snrEl) snrEl.textContent = 'N/A';
++            const reportEl = document.getElementById('diagMismatchReport');
++            if (reportEl) {
++              reportEl.innerHTML = '<div class="p-4 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-500 dark:text-gray-400 text-xs">No air conditioner profile active.</div>';
++            }
++          } else if (tabKey === 'config') {
++            const devTag = document.getElementById('cfgDeviceIdTag');
++            if (devTag) devTag.textContent = '—';
++          } else if (tabKey === 'logs') {
++            const unitLabel = document.getElementById('logsUnitIdLabel');
++            if (unitLabel) unitLabel.textContent = '—';
++            deviceLogsCurrentPage = 1;
++            renderDeviceLogsTable();
++          }
++          return;
++        }
+ 
+         const caps = device.capabilities || {};
+         const state = device.state || {};
+         const op = device.operational_state || {};
+         const node = NodeService.getNode(device.node_id);
++        const description = window.EcoTrackAirconState ? window.EcoTrackAirconState.describeAirconState(device.control_snapshot) : null;
+ 
+         if (tabKey === 'overview') {
+-          document.getElementById('ovDeviceId').textContent = device.device_id;
+-          document.getElementById('ovUnitName').textContent = device.name;
+-          document.getElementById('ovBrand').textContent = device.brand;
+-          document.getElementById('ovModel').textContent = device.model || 'Universal';
+-          document.getElementById('ovLocation').textContent = device.location || 'Unassigned';
+-          document.getElementById('ovNodeId').textContent = device.node_id;
+-
+-          document.getElementById('ovCommanded').textContent = state.power 
+-            ? `POWER ON • ${(state.mode || 'cool').toUpperCase()} ${state.temperature || 24}°C • FAN ${(state.fan || 'auto').toUpperCase()}`
+-            : 'POWER OFF • Standby';
+-
+-          document.getElementById('ovOperational').textContent = state.power ? 'ACTIVE / READY' : 'STANDBY';
+-
++          const ovDevId = document.getElementById('ovDeviceId');
++          const ovUnit = document.getElementById('ovUnitName');
++          const ovBr = document.getElementById('ovBrand');
++          const ovMod = document.getElementById('ovModel');
++          const ovLoc = document.getElementById('ovLocation');
++          const ovNode = document.getElementById('ovNodeId');
++          const ovCmd = document.getElementById('ovCommanded');
++          const ovOp = document.getElementById('ovOperational');
+           const capsList = document.getElementById('ovCapsList');
++          const tempRangeEl = document.getElementById('ovTempRange');
++
++          if (ovDevId) ovDevId.textContent = device.device_id || '—';
++          if (ovUnit) ovUnit.textContent = device.name || '—';
++          if (ovBr) ovBr.textContent = device.brand || '—';
++          if (ovMod) ovMod.textContent = device.model || 'Universal';
++          if (ovLoc) ovLoc.textContent = device.location || device.room_name || 'Unassigned';
++          if (ovNode) ovNode.textContent = device.node_id || '—';
++
++          if (ovCmd) {
++            ovCmd.textContent = state.power 
++              ? `POWER ON • ${(state.mode || 'cool').toUpperCase()} ${state.temperature || 24}°C • FAN ${(state.fan || 'auto').toUpperCase()}`
++              : 'POWER OFF • Standby';
++          }
++
++          if (ovOp) {
++            if (state.power) {
++              ovOp.textContent = description?.confirmed ? 'ACTIVE / READY' : (description?.label || 'ACTIVE / READY');
++              ovOp.className = 'text-sm font-black text-teal-600 dark:text-teal-300 mt-1 block';
++            } else {
++              ovOp.textContent = description?.confirmed ? 'OFF / STANDBY' : (description?.label || 'STANDBY');
++              ovOp.className = 'text-sm font-black text-slate-500 dark:text-slate-400 mt-1 block';
++            }
++          }
++
+           if (capsList) {
+             capsList.innerHTML = '';
+             const capPills = [];
+@@ -2149,12 +2299,15 @@
+             if (caps.eco) capPills.push('Eco Mode');
+             if (caps.timer) capPills.push('Timer');
+ 
+-            capPills.forEach(p => {
+-              capsList.innerHTML += `<span class="px-2 py-0.5 rounded-lg bg-teal-500/10 text-teal-700 dark:text-teal-300 border border-teal-500/20 font-semibold text-[11px]">${p}</span>`;
+-            });
+-          }
+-
+-          const tempRangeEl = document.getElementById('ovTempRange');
++            if (capPills.length === 0) {
++              capsList.innerHTML = '<span class="text-xs text-slate-400 dark:text-gray-500 italic">Universal Basic Profile</span>';
++            } else {
++              capPills.forEach(p => {
++                capsList.innerHTML += `<span class="px-2 py-0.5 rounded-lg bg-teal-500/10 text-teal-700 dark:text-teal-300 border border-teal-500/20 font-semibold text-[11px]">${p}</span>`;
++              });
++            }
++          }
++
+           if (tempRangeEl) {
+             tempRangeEl.textContent = `${caps.temperature_min || 16}°C – ${caps.temperature_max || 30}°C (Step: ${caps.temperature_step || 1}°C)`;
+           }
+--- before/public\dashboard.html
++++ after/public\dashboard.html
+@@ -25,6 +25,7 @@
+   <link rel="stylesheet" href="./styles.css?v=53">
+   <script src="./js/supabase.umd.js"></script>
+   <script src="./js/supabase-client.js"></script>
++  <script src="./js/hardware-cloud.js?v=1"></script>
+   <script src="./js/sidebar.js"></script>
+   <script src="./js/sidebar-loader.js?v=7"></script>
+   <script src="./js/icons.js"></script>
+--- before/public\ir-library.html
++++ after/public\ir-library.html
+@@ -25,6 +25,7 @@
+   <link rel="stylesheet" href="./styles.css?v=54">
+   <script src="./js/supabase.umd.js"></script>
+   <script src="./js/supabase-client.js"></script>
++  <script src="./js/hardware-cloud.js?v=1"></script>
+   <script src="./js/sidebar.js"></script>
+   <script src="./js/sidebar-loader.js?v=7"></script>
+   <script src="./js/icons.js"></script>
+@@ -512,11 +513,12 @@
+         const res = await CommandManager.dispatch({
+           device_id: currentDevice.device_id,
+           command: 'TEMP',
+-          value: targetTemp
++          value: targetTemp,
++          state: { power: pwr, temperature: targetTemp, mode, fan }
+         });
+ 
+         if (res && res.success) {
+-          showToast(`Full-state intent transmitted to ${currentDevice.node_id}!`, 'success');
++          showToast(res.message || `Full-state request queued for ${currentDevice.node_id}.`, 'success');
+         } else {
+           showToast(res?.message || 'Intent dispatch failed.', 'error');
+         }
+--- before/public\ir-profiles.html
++++ after/public\ir-profiles.html
+@@ -25,6 +25,7 @@
+   <link rel="stylesheet" href="./styles.css?v=54">
+   <script src="./js/supabase.umd.js"></script>
+   <script src="./js/supabase-client.js"></script>
++  <script src="./js/hardware-cloud.js?v=1"></script>
+   <script src="./js/sidebar.js"></script>
+   <script src="./js/sidebar-loader.js?v=7"></script>
+   <script src="./js/icons.js"></script>
+--- before/public\logs.html
++++ after/public\logs.html
+@@ -1204,6 +1204,7 @@
+     }
+   </script>
+   <script src="./js/supabase-client.js"></script>
++  <script src="./js/hardware-cloud.js?v=1"></script>
+   <script src="./js/node-sync.js?v=3"></script>
+   <script src="./js/shared.js"></script>
+   <script src="./js/global-notifications.js"></script>
+--- before/public\nodes.html
++++ after/public\nodes.html
+@@ -92,6 +92,7 @@
+   </style>
+   <script src="./js/supabase.umd.js"></script>
+   <script src="./js/supabase-client.js"></script>
++  <script src="./js/hardware-cloud.js?v=1"></script>
+   <script src="./js/sidebar.js"></script>
+   <script src="./js/sidebar-loader.js?v=7"></script>
+   <script src="./js/icons.js"></script>
+@@ -254,7 +255,7 @@
+               <polyline points="23 4 23 10 17 10"></polyline>
+               <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+             </svg>
+-            <span id="scanBleLabel">Search for Nearby Bluetooth Nodes</span>
++            <span id="scanBleLabel">Connect Nearby ESP32</span>
+           </button>
+ 
+           <!-- Discovered Devices Container -->
+@@ -357,17 +358,17 @@
+           <div>
+             <div class="flex items-center justify-between mb-1">
+               <label class="block text-[11px] font-bold text-slate-600 dark:text-gray-400 uppercase tracking-wider">
+-                Static IP Address <span class="text-rose-500">*</span>
++                Device IP (informational)
+               </label>
+               <button type="button" id="autoAssignIpBtn" class="text-[9px] font-bold text-teal-600 dark:text-teal-400 hover:underline border-0 bg-transparent cursor-pointer flex items-center gap-0.5">
+                 <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+-                <span>Auto-Assign</span>
++                <span>Read Device IP</span>
+               </button>
+             </div>
+-            <input type="text" id="nodeFormIp" placeholder="e.g. 192.168.1.110" required
++            <input type="text" id="nodeFormIp" placeholder="Reported by ESP32 after Wi-Fi connects" readonly
+               class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/15 text-xs text-slate-900 dark:text-white font-mono focus:outline-none focus:border-teal-500">
+           </div>
+-          <input type="hidden" id="nodeFormStatus" value="Connected">
++          <input type="hidden" id="nodeFormStatus" value="Offline">
+ 
+           <!-- Wi-Fi Verification Checklist Card -->
+           <div class="p-3 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 space-y-2">
+@@ -389,7 +390,7 @@
+               </div>
+               <div class="flex items-center gap-2 text-slate-700 dark:text-slate-300">
+                 <span id="chkIp" class="w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[9px] font-black">✓</span>
+-                <span id="chkIpText" class="text-[11px]">DHCP handshake &amp; IP confirmed (192.168.1.110)</span>
++                <span id="chkIpText" class="text-[11px]">Device connection has not been verified</span>
+               </div>
+             </div>
+           </div>
+@@ -408,7 +409,7 @@
+           </div>
+ 
+           <!-- Hidden Device ID field that stores the paired node ID -->
+-          <input type="hidden" id="nodeFormId" value="">
++          <input type="hidden" id="nodeFormId" readonly value="">
+ 
+           <!-- Friendly Display Name -->
+           <div>
+@@ -647,12 +648,12 @@
+               </svg>
+             </div>
+             <div>
+-              <div id="pingMetricRssi" class="text-2xl font-black text-teal-600 dark:text-teal-300 font-mono tracking-tight">-65 dBm</div>
++              <div id="pingMetricRssi" class="text-2xl font-black text-teal-600 dark:text-teal-300 font-mono tracking-tight">Not reported</div>
+               <div id="pingMetricRssiSub" class="text-[10px] font-semibold text-teal-600 dark:text-teal-400 mt-0.5 truncate">● Strong Signal</div>
+             </div>
+           </div>
+ 
+-          <!-- Metric 3: Packet Success -->
++          <!-- Metric 3: Device Reply -->
+           <div class="p-3 rounded-2xl bg-slate-100/80 dark:bg-white/5 border border-slate-200/80 dark:border-white/10 flex flex-col justify-between">
+             <div class="flex items-center justify-between text-gray-400 mb-1">
+               <span class="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Packet Health</span>
+@@ -672,7 +673,7 @@
+         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3 rounded-2xl bg-slate-100/60 dark:bg-black/30 border border-slate-200 dark:border-white/5 font-mono text-[11px]">
+           <div>
+             <span class="text-[9px] uppercase tracking-wider text-gray-400 font-bold block font-sans">IP Address</span>
+-            <div id="pingDetailIp" class="font-bold text-slate-800 dark:text-cyan-300 truncate">192.168.1.10225</div>
++            <div id="pingDetailIp" class="font-bold text-slate-800 dark:text-cyan-300 truncate">Not reported</div>
+           </div>
+           <div>
+             <span class="text-[9px] uppercase tracking-wider text-gray-400 font-bold block font-sans">WiFi SSID</span>
+@@ -696,7 +697,7 @@
+                 <polyline points="4 17 10 11 4 5"></polyline>
+                 <line x1="12" y1="19" x2="20" y2="19"></line>
+               </svg>
+-              ICMP Probe Console Trace
++              Cloud Device Response
+             </span>
+             <span id="pingProbeTimestamp" class="font-mono text-[10px] text-gray-400">Just now</span>
+           </div>
+@@ -707,9 +708,9 @@
+                 <span class="w-2.5 h-2.5 rounded-full bg-rose-500/90 inline-block"></span>
+                 <span class="w-2.5 h-2.5 rounded-full bg-amber-500/90 inline-block"></span>
+                 <span class="w-2.5 h-2.5 rounded-full bg-emerald-500/90 inline-block"></span>
+-                <span id="pingTerminalTitle" class="font-mono text-[10px] ml-2 truncate max-w-xs font-bold" style="color: #f1f5f9 !important;">probe@ecotrack: ping 192.168.1.10225</span>
++                <span id="pingTerminalTitle" class="font-mono text-[10px] ml-2 truncate max-w-xs font-bold" style="color: #f1f5f9 !important;">Waiting for cloud probe</span>
+               </div>
+-              <span class="font-mono text-[9px] font-extrabold px-2 py-0.5 rounded" style="background: rgba(6, 182, 212, 0.15) !important; color: #22d3ee !important; border: 1px solid rgba(6, 182, 212, 0.3) !important;">ICMP ECHO</span>
++              <span class="font-mono text-[9px] font-extrabold px-2 py-0.5 rounded" style="background: rgba(6, 182, 212, 0.15) !important; color: #22d3ee !important; border: 1px solid rgba(6, 182, 212, 0.3) !important;">SUPABASE</span>
+             </div>
+             <div id="pingTerminalOutput" class="p-3.5 font-mono text-[11px] leading-relaxed max-h-48 overflow-y-auto select-all m-0" style="background: #060c18 !important; color: #e2e8f0 !important; scrollbar-width: thin !important; scrollbar-color: rgba(255, 255, 255, 0.25) transparent !important;"></div>
+           </div>
+@@ -853,10 +854,10 @@
+ 
+           <div class="p-3.5 rounded-xl bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-white/10 space-y-2">
+             <span class="text-[10px] font-bold uppercase tracking-wider text-teal-700 dark:text-cyan-400 block">Network &amp; Provisioning</span>
+-            <div class="text-xs flex justify-between"><span class="text-gray-500">IP Address:</span> <span id="viewIpAddress" class="font-mono font-bold text-teal-600 dark:text-cyan-400">192.168.1.110</span></div>
++            <div class="text-xs flex justify-between"><span class="text-gray-500">IP Address:</span> <span id="viewIpAddress" class="font-mono font-bold text-teal-600 dark:text-cyan-400">Not reported</span></div>
+             <div class="text-xs flex justify-between"><span class="text-gray-500">WiFi SSID:</span> <span id="viewWifiSsid" class="font-mono font-semibold text-slate-800 dark:text-white">EcoTrack-IoT</span></div>
+             <div class="text-xs flex justify-between"><span class="text-gray-500">MAC Address:</span> <span id="viewMacAddress" class="font-mono text-slate-800 dark:text-white">3C:71:BF:24:A8:12</span></div>
+-            <div class="text-xs flex justify-between"><span class="text-gray-500">Signal RSSI:</span> <span class="font-mono text-slate-800 dark:text-white flex items-center gap-1.5"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="text-teal-500 shrink-0"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line></svg><span id="viewRssiVal">-65 dBm</span></span></div>
++            <div class="text-xs flex justify-between"><span class="text-gray-500">Signal RSSI:</span> <span class="font-mono text-slate-800 dark:text-white flex items-center gap-1.5"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="text-teal-500 shrink-0"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line></svg><span id="viewRssiVal">Not reported</span></span></div>
+           </div>
+         </div>
+ 
+@@ -1239,10 +1240,10 @@
+             }
+           }
+ 
+-          const timeAgo = n.last_seen ? new Date(n.last_seen).toLocaleTimeString() : 'Just now';
++          const timeAgo = n.last_seen ? new Date(n.last_seen).toLocaleTimeString() : 'Not reported';
+           const numPart = (n.node_id || '').replace(/\D/g, '') || '1';
+-          const ip = n.ip_address || `192.168.1.10${numPart}`;
+-          const ssid = n.wifi_ssid || 'EcoTrack-IoT';
++          const ip = n.ip_address || 'Not reported';
++          const ssid = n.wifi_ssid || 'Not reported';
+ 
+           const row = document.createElement('tr');
+           row.className = 'hover:bg-slate-50/80 dark:hover:bg-white/5 transition-colors cursor-pointer select-none';
+@@ -1257,7 +1258,7 @@
+             <td class="py-3.5 px-4 font-mono font-bold text-teal-700 dark:text-cyan-400 text-xs">${n.node_id}</td>
+             <td class="py-3.5 px-4">
+               <div class="font-bold text-slate-900 dark:text-white text-xs">${displayName}</div>
+-              <div class="text-[11px] text-slate-500 dark:text-gray-400 font-mono mt-0.5">${n.hardware || 'AC Controller Device (WiFi + IR)'} &bull; ${n.firmware || 'v2.4.2-WiFi'}</div>
++              <div class="text-[11px] text-slate-500 dark:text-gray-400 font-mono mt-0.5">${n.hardware || 'AC Controller Device (WiFi + IR)'} &bull; ${n.firmware || 'Firmware not reported'}</div>
+             </td>
+             <td class="py-3.5 px-4">
+               <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all shadow-sm ${
+@@ -1336,89 +1337,19 @@
+       let discoveredBleDevices = [];
+       let selectedBleDevice = null;
+       let isBleScanning = false;
+-
+-      function getNextAvailableIp(nodeIdOrNum) {
+-        const existingNodes = NodeService.getNodes();
+-        const usedIps = new Set(existingNodes.map(n => n.ip_address).filter(Boolean));
+-        let num = 1;
+-        if (typeof nodeIdOrNum === 'number') {
+-          num = nodeIdOrNum;
+-        } else if (nodeIdOrNum) {
+-          const parsed = parseInt(nodeIdOrNum.toString().replace(/\D/g, ''), 10);
+-          if (!isNaN(parsed) && parsed > 0) num = parsed;
+-        }
+-
+-        let candidate = num < 10 ? `192.168.1.10${num}` : `192.168.1.${100 + num}`;
+-        if (!usedIps.has(candidate)) return candidate;
+-
+-        for (let i = 101; i <= 250; i++) {
+-          const testIp = `192.168.1.${i}`;
+-          if (!usedIps.has(testIp)) return testIp;
+-        }
+-        return `192.168.1.150`;
+-      }
++      let wifiConfirmedFor = null;
++      let pingProbeRevision = 0;
+ 
+       async function scanForBleDevices() {
+-        discoveredBleDevices = [];
+-
+-        // 1. Primary: Use Electron IPC ('scan-ble')
+-        if (window.electron && typeof window.electron.invoke === 'function') {
+-          try {
+-            const result = await window.electron.invoke('scan-ble');
+-            if (result && result.success && Array.isArray(result.devices) && result.devices.length > 0) {
+-              discoveredBleDevices = result.devices;
+-              return;
+-            }
+-          } catch (ipcErr) {
+-            console.warn('[BLE] Electron IPC scan error:', ipcErr);
+-          }
+-        }
+-
+-        // 2. Secondary fallback: Local Flask backend service (/api/ble/scan)
+         try {
+-          const res = await fetch('http://localhost:5000/api/ble/scan', { cache: 'no-store' });
+-          if (res.ok) {
+-            const data = await res.json();
+-            if (data && data.success && Array.isArray(data.devices) && data.devices.length > 0) {
+-              discoveredBleDevices = data.devices;
+-              return;
+-            }
+-          }
+-        } catch (fetchErr) {
+-          console.warn('[BLE] REST BLE scan unavailable:', fetchErr);
+-        }
+-
+-        // 3. Tertiary: Web Bluetooth API if available in environment
+-        if (navigator.bluetooth && typeof navigator.bluetooth.requestDevice === 'function') {
+-          try {
+-            const device = await Promise.race([
+-              navigator.bluetooth.requestDevice({
+-                acceptAllDevices: true,
+-                optionalServices: ['4fafc201-1fb5-459e-8fcc-c5c9c331914b']
+-              }),
+-              new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2500))
+-            ]);
+-            if (device) {
+-              const existingNodes = NodeService.getNodes();
+-              const existingIds = new Set(existingNodes.map(n => n.node_id));
+-              let nextNum = 1;
+-              while (existingIds.has(`node-${nextNum}`) || discoveredBleDevices.some(d => d.nodeId === `node-${nextNum}`)) nextNum++;
+-
+-              discoveredBleDevices.push({
+-                id: device.name || `EcoTrack-node-${nextNum} (ESP32-S3)`,
+-                nodeId: `node-${nextNum}`,
+-                mac: device.id || '3C:71:BF:24:A8:12',
+-                rssi: -58,
+-                status: 'Ready to pair',
+-                ip: getNextAvailableIp(nextNum)
+-              });
+-              return;
+-            }
+-          } catch (bleErr) {
+-            console.warn('[BLE] Web Bluetooth discovery note:', bleErr.message);
+-          }
+-        }
+-
++          const info = await window.EcoTrackHardwareCloud.connect();
++          discoveredBleDevices = [{ id: info.device_id, nodeId: info.device_id, mac: info.mac_address || 'Not reported',
++            rssi: info.rssi ?? null, status: 'Bluetooth connected', ip: info.ip_address || '', info }];
++          selectBleDevice(discoveredBleDevices[0]);
++        } catch (error) {
++          discoveredBleDevices = [];
++          window.EcoToast?.show(error.message, 'error');
++        }
+       }
+ 
+       function renderDiscoveredBleNodes() {
+@@ -1428,7 +1359,7 @@
+         if (discoveredBleDevices.length === 0) {
+           container.innerHTML = `
+             <div class="p-4 text-center text-xs text-slate-400 dark:text-gray-500 bg-slate-50 dark:bg-black/20 rounded-xl border border-dashed border-slate-200 dark:border-white/10">
+-              No Bluetooth devices discovered yet. Click "Search for Nearby Bluetooth Nodes" to scan, or use "Enter Node ID Manually" below.
++              No Bluetooth devices discovered yet. Click "Connect Nearby ESP32" to scan, or use "Enter Node ID Manually" below.
+             </div>
+           `;
+           return;
+@@ -1444,7 +1375,7 @@
+               : 'bg-white dark:bg-slate-900/60 border-slate-200 dark:border-white/10 hover:border-teal-500/50 hover:bg-teal-500/[0.03] dark:hover:bg-teal-500/[0.06] text-slate-800 dark:text-slate-200 shadow-xs'
+           }`;
+ 
+-          const signalColor = device.rssi > -65 ? 'text-emerald-500 dark:text-emerald-400' : (device.rssi > -75 ? 'text-teal-500 dark:text-teal-400' : 'text-amber-500 dark:text-amber-400');
++          const signalColor = Number.isFinite(device.rssi) && device.rssi > -65 ? 'text-emerald-500 dark:text-emerald-400' : (device.rssi > -75 ? 'text-teal-500 dark:text-teal-400' : 'text-amber-500 dark:text-amber-400');
+ 
+           card.innerHTML = `
+             <div class="flex items-center gap-2.5 min-w-0 flex-1">
+@@ -1458,7 +1389,7 @@
+                 <div class="text-[10px] text-slate-500 dark:text-gray-400 font-mono mt-0.5 flex items-center gap-2 flex-wrap">
+                   <span class="px-1.5 py-0.2 rounded bg-teal-500/15 text-teal-700 dark:text-teal-300 font-bold">${device.nodeId}</span>
+                   <span class="text-slate-300 dark:text-white/20">&bull;</span>
+-                  <span class="${signalColor} font-semibold">${device.rssi} dBm</span>
++                  <span class="${signalColor} font-semibold">${Number.isFinite(device.rssi) ? device.rssi + ' dBm' : 'Signal not reported'}</span>
+                   <span class="text-slate-300 dark:text-white/20">&bull;</span>
+                   <span class="truncate max-w-[120px]">${device.mac}</span>
+                 </div>
+@@ -1486,12 +1417,13 @@
+         const nameInput = document.getElementById('nodeFormName');
+         if (nameInput && !nameInput.value) nameInput.value = device.id;
+ 
+-        const cleanIp = device.ip || getNextAvailableIp(device.nodeId);
++        const cleanIp = device.ip || '';
++        wifiConfirmedFor = null;
+         const ipInput = document.getElementById('nodeFormIp');
+         if (ipInput) {
+           ipInput.value = cleanIp;
+           const chkIpText = document.getElementById('chkIpText');
+-          if (chkIpText) chkIpText.textContent = `DHCP handshake & IP confirmed (${cleanIp})`;
++          if (chkIpText) chkIpText.textContent = cleanIp ? `ESP32 reported IP: ${cleanIp}` : 'Connect Wi-Fi to read the device IP';
+         }
+ 
+         // Update paired banner
+@@ -1503,7 +1435,7 @@
+         if (banner) banner.classList.remove('hidden');
+         if (bannerName) bannerName.textContent = device.id || 'ESP32-S3 AC Controller';
+         if (bannerBadge) bannerBadge.textContent = device.nodeId;
+-        if (bannerMac) bannerMac.textContent = `MAC: ${device.mac} • Signal: ${device.rssi} dBm`;
++        if (bannerMac) bannerMac.textContent = `Hardware ID: ${device.nodeId}${Number.isFinite(device.rssi) ? ' | Signal: ' + device.rssi + ' dBm' : ''}`;
+ 
+         // Update step 3 badges
+         const step3Node = document.getElementById('step3NodeBadge');
+@@ -1514,7 +1446,7 @@
+         updateConfigSummary();
+         renderDiscoveredBleNodes();
+         if (typeof updateNextButtonState === 'function') updateNextButtonState();
+-        if (window.EcoToast) window.EcoToast.show(`Paired with ${device.id} (${device.nodeId})`, 'success');
++        if (window.EcoToast) window.EcoToast.show(`Bluetooth connected to ${device.nodeId}`, 'success');
+       }
+ 
+       // Wire BLE Discovery and Manual Pairing UI
+@@ -1538,37 +1470,12 @@
+           isBleScanning = false;
+           scanBleBtn.disabled = false;
+           if (scanBleIcon) scanBleIcon.classList.remove('animate-spin');
+-          if (scanBleLabel) scanBleLabel.textContent = 'Search for Nearby Bluetooth Nodes';
++          if (scanBleLabel) scanBleLabel.textContent = 'Connect Nearby ESP32';
+           renderDiscoveredBleNodes();
+           if (discoveredBleDevices.length > 0) {
+             if (window.EcoToast) window.EcoToast.show(`Discovered ${discoveredBleDevices.length} nearby Bluetooth AC Controller node(s).`, 'info');
+           } else {
+-            if (window.EcoToast) window.EcoToast.show('No Bluetooth devices found. Please use "Enter Node ID Manually" below.', 'warning');
+-          }
+-        });
+-      }
+-
+-      // Real-time Electron BLE stream listener if active
+-      if (window.electron && typeof window.electron.on === 'function') {
+-        window.electron.on('ble-devices-discovered', (deviceList) => {
+-          if (Array.isArray(deviceList) && deviceList.length > 0) {
+-            deviceList.forEach(dev => {
+-              const cleanName = dev.deviceName || dev.deviceId || 'ESP32-S3 Controller';
+-              const match = cleanName.match(/node-(\d+)/i);
+-              const nodeNum = match ? match[1] : discoveredBleDevices.length + 1;
+-              const nodeId = `node-${nodeNum}`;
+-              if (!discoveredBleDevices.some(d => d.mac === dev.deviceId || d.nodeId === nodeId)) {
+-                discoveredBleDevices.unshift({
+-                  id: cleanName,
+-                  nodeId: nodeId,
+-                  mac: dev.deviceId,
+-                  rssi: -55,
+-                  status: 'Ready to pair',
+-                  ip: getNextAvailableIp(nodeId)
+-                });
+-              }
+-            });
+-            renderDiscoveredBleNodes();
++            if (window.EcoToast) window.EcoToast.show('No compatible ESP32 connected. Check Bluetooth and install the cloud receiver sketch.', 'warning');
+           }
+         });
+       }
+@@ -1588,29 +1495,7 @@
+       }
+ 
+       function handleManualPairing() {
+-        if (!manualInput) return;
+-        const val = manualInput.value.trim();
+-        if (!val) {
+-          if (window.EcoToast) window.EcoToast.show('Please enter a Node ID or Hardware Identifier.', 'warning');
+-          manualInput.focus();
+-          return;
+-        }
+-        const cleanIp = getNextAvailableIp(val);
+-        const customDevice = {
+-          id: `Manual Controller (${val})`,
+-          nodeId: val,
+-          mac: '—',
+-          rssi: -60,
+-          status: 'Ready to pair',
+-          ip: cleanIp
+-        };
+-
+-        if (!discoveredBleDevices.some(d => d.nodeId.toLowerCase() === val.toLowerCase())) {
+-          discoveredBleDevices.unshift(customDevice);
+-        }
+-        selectBleDevice(customDevice);
+-        manualContainer.classList.add('hidden');
+-        if (window.EcoToast) window.EcoToast.show(`Paired with manual Node ID ${val}`, 'info');
++        window.EcoToast?.show('Use Connect Nearby ESP32 to read its real identity and provision Wi-Fi securely.', 'warning');
+       }
+ 
+       if (confirmManualBtn) confirmManualBtn.addEventListener('click', handleManualPairing);
+@@ -1833,20 +1718,13 @@
+       }
+ 
+       const autoAssignIpBtn = document.getElementById('autoAssignIpBtn');
+-      if (autoAssignIpBtn) {
+-        autoAssignIpBtn.addEventListener('click', () => {
+-          const nodeId = document.getElementById('nodeFormId')?.value.trim() || 'node-1';
+-          const cleanIp = getNextAvailableIp(nodeId);
+-          const ipInput = document.getElementById('nodeFormIp');
+-          if (ipInput) ipInput.value = cleanIp;
+-
+-          const chkIpText = document.getElementById('chkIpText');
+-          if (chkIpText) chkIpText.textContent = `DHCP handshake & IP confirmed (${cleanIp})`;
+-
+-          updateConfigSummary();
+-          if (window.EcoToast) window.EcoToast.show(`Assigned static IP: ${cleanIp}`, 'success');
+-        });
+-      }
++      autoAssignIpBtn?.addEventListener('click', async () => {
++        try {
++          const info = await window.EcoTrackHardwareCloud.readInfo();
++          document.getElementById('nodeFormIp').value = info.ip_address || '';
++          document.getElementById('chkIpText').textContent = info.ip_address ? `ESP32 reported IP: ${info.ip_address}` : 'Wi-Fi is not connected yet.';
++        } catch (error) { window.EcoToast?.show(error.message, 'error'); }
++      });
+ 
+       const togglePassBtn = document.getElementById('toggleWifiPassBtn');
+       const passInput = document.getElementById('nodeFormPassword');
+@@ -1889,85 +1767,33 @@
+         });
+       }
+ 
+-      // Step 2 Wi-Fi Diagnostics & Strict Credential Validation
++      // Write the supplied credentials to the real ESP32 and wait for its reply.
+       const verifyWifiBtn = document.getElementById('verifyWifiBtn');
+-      if (verifyWifiBtn) {
+-        verifyWifiBtn.addEventListener('click', () => {
+-          const ssid = document.getElementById('nodeFormSsid')?.value.trim();
+-          const pass = document.getElementById('nodeFormPassword')?.value || '';
+-          const ip = document.getElementById('nodeFormIp')?.value.trim();
+-          const chkWifi = document.getElementById('chkWifi');
+-          const chkIp = document.getElementById('chkIp');
+-          const chkIpText = document.getElementById('chkIpText');
+-          const ipRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+-
+-          if (!ssid) {
+-            if (window.EcoToast) window.EcoToast.show('Please select or enter the Target Wi-Fi SSID.', 'warning');
+-            document.getElementById('nodeFormSsid')?.focus();
+-            return;
+-          }
+-          if (!pass) {
+-            if (window.EcoToast) window.EcoToast.show('Please enter the Wi-Fi Password to test connection.', 'warning');
+-            const passEl = document.getElementById('nodeFormPassword');
+-            passEl?.focus();
+-            passEl?.classList.add('border-rose-500');
+-            return;
+-          }
+-          if (pass.length < 8) {
+-            if (window.EcoToast) window.EcoToast.show('Authentication Failed: Wi-Fi password must be at least 8 characters (WPA2 standard).', 'error');
+-            const passEl = document.getElementById('nodeFormPassword');
+-            passEl?.focus();
+-            passEl?.classList.add('border-rose-500', 'ring-2', 'ring-rose-500/40');
+-            setTimeout(() => passEl?.classList.remove('ring-2', 'ring-rose-500/40'), 2500);
+-
+-            if (chkWifi) {
+-              chkWifi.className = 'w-4 h-4 rounded-full bg-rose-500 text-white flex items-center justify-center text-[9px] font-black';
+-              chkWifi.textContent = '✕';
+-            }
+-            if (chkIp) {
+-              chkIp.className = 'w-4 h-4 rounded-full bg-rose-500 text-white flex items-center justify-center text-[9px] font-black';
+-              chkIp.textContent = '✕';
+-            }
+-            if (chkIpText) {
+-              chkIpText.textContent = 'Authentication Failed: Password does not meet 8-character WPA2 requirement.';
+-              chkIpText.className = 'text-[11px] text-rose-500 font-semibold';
+-            }
+-            return;
+-          }
+-          if (!ip || !ipRegex.test(ip)) {
+-            if (window.EcoToast) window.EcoToast.show('Please enter a valid Static IPv4 address (e.g. 192.168.1.110).', 'warning');
+-            document.getElementById('nodeFormIp')?.focus();
+-            return;
+-          }
+-
+-          verifyWifiBtn.disabled = true;
+-          verifyWifiBtn.innerHTML = `
+-            <svg class="animate-spin" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10" stroke-opacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>
+-            <span>Testing Connection...</span>
+-          `;
+-
+-          setTimeout(() => {
+-            verifyWifiBtn.disabled = false;
+-            verifyWifiBtn.innerHTML = `
+-              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+-              <span>Test Connection</span>
+-            `;
+-            if (chkWifi) {
+-              chkWifi.className = 'w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[9px] font-black';
+-              chkWifi.textContent = '✓';
+-            }
+-            if (chkIp) {
+-              chkIp.className = 'w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[9px] font-black';
+-              chkIp.textContent = '✓';
+-            }
+-            if (chkIpText) {
+-              chkIpText.textContent = `DHCP handshake & IP confirmed (${ip})`;
+-              chkIpText.className = 'text-[11px] text-slate-700 dark:text-slate-300';
+-            }
+-            if (window.EcoToast) window.EcoToast.show(`Wi-Fi credentials verified! Target ${ip} responds with 14ms latency.`, 'success');
+-          }, 600);
+-        });
+-      }
++      verifyWifiBtn?.addEventListener('click', async () => {
++        verifyWifiBtn.disabled = true;
++        const previous = verifyWifiBtn.innerHTML;
++        verifyWifiBtn.textContent = 'Connecting ESP32...';
++        wifiConfirmedFor = null;
++        try {
++          const ssid = document.getElementById('nodeFormSsid').value.trim();
++          const pass = document.getElementById('nodeFormPassword').value;
++          const info = await window.EcoTrackHardwareCloud.provision({ ssid, pass });
++          if (info.device_id !== selectedBleDevice?.nodeId) throw new Error('Wrong Bluetooth device connected.');
++          wifiConfirmedFor = ssid;
++          document.getElementById('nodeFormIp').value = info.ip_address || '';
++          document.getElementById('chkIpText').textContent = info.ip_address ? `ESP32 connected; IP: ${info.ip_address}` : 'ESP32 confirmed Wi-Fi connection.';
++          document.getElementById('chkWifi').textContent = 'OK';
++          document.getElementById('chkIp').textContent = 'OK';
++          window.EcoToast?.show('ESP32 confirmed Wi-Fi. Register it to verify Supabase access.', 'success');
++        } catch (error) {
++          document.getElementById('chkIpText').textContent = error.message;
++          window.EcoToast?.show(error.message, 'error');
++        } finally {
++          verifyWifiBtn.disabled = false; verifyWifiBtn.innerHTML = previous;
++          updateNextButtonState(); updateConfigSummary();
++        }
++      });
++      for (const field of ['nodeFormSsid','nodeFormPassword']) document.getElementById(field)?.addEventListener('input', () => { wifiConfirmedFor = null; updateNextButtonState(); });
+ 
+       // Real-time Wi-Fi Password validation listener
+       const nodePassInput = document.getElementById('nodeFormPassword');
+@@ -2258,7 +2084,7 @@
+         const nextBtn = document.getElementById('nodeNextStepBtn');
+         const stepTab2 = document.getElementById('nodeStepTab2');
+         const stepTab3 = document.getElementById('nodeStepTab3');
+-        const isBlePaired = !!(selectedBleDevice && selectedBleDevice.nodeId) || !!document.getElementById('nodeFormId')?.value.trim();
++        const isBlePaired = !!selectedBleDevice?.info;
+ 
+         // Visual lock cues on tabs if Bluetooth not paired
+         if (stepTab2) {
+@@ -2273,7 +2099,7 @@
+         if (stepTab3) {
+           const ssid = document.getElementById('nodeFormSsid')?.value.trim();
+           const pass = document.getElementById('nodeFormPassword')?.value || '';
+-          const isWifiValid = isBlePaired && !!ssid && pass.length >= 8;
++          const isWifiValid = isBlePaired && !!ssid && pass.length >= 8 && wifiConfirmedFor === ssid;
+           if (!isWifiValid) {
+             stepTab3.classList.add('opacity-40', 'cursor-not-allowed');
+             stepTab3.title = !isBlePaired ? 'Bluetooth pairing required first' : 'Complete valid Wi-Fi credentials first (min 8 chars)';
+@@ -2296,7 +2122,7 @@
+         } else if (currentModalStep === 2) {
+           const ssid = document.getElementById('nodeFormSsid')?.value.trim();
+           const pass = document.getElementById('nodeFormPassword')?.value || '';
+-          const isValid = !!ssid && pass.length >= 8;
++          const isValid = !!ssid && pass.length >= 8 && wifiConfirmedFor === ssid;
+           nextBtn.disabled = !isValid;
+           if (!isValid) {
+             nextBtn.classList.add('opacity-40', 'cursor-not-allowed');
+@@ -2382,12 +2208,8 @@
+             if (window.EcoToast) window.EcoToast.show('Wi-Fi Restriction: Password must be at least 8 characters (WPA2 security standard).', 'error');
+             return;
+           }
+-          if (!ipVal || !ipRegex.test(ipVal)) {
+-            const el = document.getElementById('nodeFormIp');
+-            el?.focus();
+-            el?.classList.add('border-rose-500', 'ring-1', 'ring-rose-500');
+-            setTimeout(() => el?.classList.remove('border-rose-500', 'ring-1', 'ring-rose-500'), 2500);
+-            if (window.EcoToast) window.EcoToast.show('Please enter a valid Static IPv4 address (e.g. 192.168.1.110).', 'warning');
++          if (wifiConfirmedFor !== ssidVal) {
++            window.EcoToast?.show('Click Test Connection and wait for the ESP32 Wi-Fi confirmation first.', 'warning');
+             return;
+           }
+         }
+@@ -2597,7 +2419,8 @@
+ 
+         document.getElementById('nodeFormHw').value = 'AC Controller Device (WiFi + IR)';
+         document.getElementById('nodeFormFw').value = 'v2.4.2-WiFi';
+-        document.getElementById('nodeFormStatus').value = 'Connected';
++        document.getElementById('nodeFormStatus').value = 'Offline';
++        wifiConfirmedFor = null;
+ 
+         // Hide paired banner
+         const banner = document.getElementById('pairedDeviceBanner');
+@@ -2647,7 +2470,7 @@
+         const firmware = document.getElementById('nodeFormFw').value.trim() || 'v2.4.2-WiFi';
+         const ip_address = document.getElementById('nodeFormIp').value.trim();
+         const wifi_ssid = document.getElementById('nodeFormSsid').value.trim();
+-        const wifi_password = document.getElementById('nodeFormPassword').value.trim();
++        const wifi_password = document.getElementById('nodeFormPassword').value;
+         if (!wifi_password) {
+           setNodeModalStep(2);
+           document.getElementById('nodeFormPassword')?.focus();
+@@ -2731,28 +2554,26 @@
+           if (match) effectiveRoomId = match.id;
+         }
+ 
+-        await NodeService.saveNode({
+-          node_id,
+-          name: `${node_id} (${name || rmText + ' Node'})`,
+-          hardware,
+-          status,
+-          firmware,
+-          ip_address,
+-          wifi_ssid,
+-          wifi_password,
+-          brand: effectiveBrand,
+-          aircon_type,
+-          building: bldText,
+-          floor: flrText,
+-          room_name: rmText,
+-          room_id: effectiveRoomId,
+-          floor_id: effectiveFlrId,
+-          building_id: effectiveBldId,
+-          location: `${rmText} (${bldText} • ${flrText})`,
+-          connection: 'WiFi (2.4GHz) / Supabase Realtime',
+-          rssi: status === 'Connected' ? -65 : null,
+-          controls: ['Aircon Temperature', 'IR Control']
+-        });
++        let registered;
++        saveNodeBtn.disabled = true;
++        try {
++          registered = await window.EcoTrackHardwareCloud.register({ room_id: effectiveRoomId, brand: brand || null, aircon_type }, { ssid: wifi_ssid, pass: wifi_password });
++          await NodeService.saveNode({
++            node_id: registered.info.device_id, db_id: registered.node.id, cloud_registered: true,
++            name: `${registered.info.device_id} (${name})`, hardware: 'ESP32-S3 IR receiver', status: 'Connected',
++            firmware: registered.info.firmware_version, cloud_state: registered.cloud_state, ip_address: registered.info.ip_address || null,
++            wifi_ssid: registered.info.wifi_ssid || wifi_ssid, capabilities: registered.info.capabilities,
++            ir_rx: true, ir_tx: false, brand: effectiveBrand, aircon_type,
++            building: bldText, floor: flrText, room_name: rmText, room_id: effectiveRoomId,
++            floor_id: effectiveFlrId, building_id: effectiveBldId,
++            location: `${rmText} (${bldText} / ${flrText})`, connection: 'Supabase over Wi-Fi',
++            rssi: registered.info.rssi ?? null, controls: ['IR Learning']
++          });
++          document.getElementById('nodeFormPassword').value = '';
++        } catch (error) {
++          window.EcoToast?.show(error.message, 'error');
++          return;
++        } finally { saveNodeBtn.disabled = false; }
+         if (brand) {
+           try {
+             await NodeService.saveRemoteProfile(node_id, {
+@@ -2945,15 +2766,15 @@
+           status: 'Connected',
+           hardware: 'AC Controller Device (WiFi + IR)',
+           firmware: 'v2.4.2-WiFi',
+-          rssi: -65
++          rssi: null
+         };
+ 
+         const isOnline = (node.status || '').toLowerCase() === 'connected' || (node.status || '').toLowerCase() === 'online';
+         const numPart = (node.node_id || '').replace(/\D/g, '') || '1';
+-        const ip = node.ip_address || `192.168.1.10${numPart}`;
+-        const ssid = node.wifi_ssid || 'EcoTrack-IoT';
++        const ip = node.ip_address || 'Not reported';
++        const ssid = node.wifi_ssid || 'Not reported';
+         const hw = node.hardware || 'AC Controller Device (WiFi + IR)';
+-        const fw = node.firmware || 'v2.4.2-WiFi';
++        const fw = node.firmware || 'Not reported';
+ 
+         // Attached aircons
+         const allAircons = AirconProfileManager.getAll();
+@@ -3404,6 +3225,7 @@
+       let currentPingTargetId = null;
+ 
+       function closePingDiagnosticsModal() {
++        pingProbeRevision++;
+         if (pingModal) pingModal.classList.add('hidden');
+       }
+ 
+@@ -3421,152 +3243,45 @@
+         }
+       });
+ 
+-      function openPingDiagnosticsModal(id, isRetest = false) {
+-        const n = NodeService.getNode(id) || {
+-          node_id: id,
+-          name: id,
+-          hardware: 'AC Controller Device (WiFi + IR)',
+-          firmware: 'v2.4.2-WiFi',
+-          status: 'Connected',
+-          rssi: -65
+-        };
+-
++      async function openPingDiagnosticsModal(id, isRetest = false) {
++        const revision = ++pingProbeRevision;
+         currentPingTargetId = id;
+-
+-        const ip = n.ip_address || '';
+-        const ssid = n.wifi_ssid || '—';
+-        const hw = (n.hardware && n.hardware !== 'AC Controller Device (WiFi + IR)') ? n.hardware : 'WiFi + IR Blaster';
+-        const fw = n.firmware || 'v2.4.2-WiFi';
+-
+-        // Populate modal headers & metadata
+-        document.getElementById('pingModalDeviceName').textContent = n.name || id;
+-        document.getElementById('pingModalNodeBadge').textContent = n.node_id || id;
+-        document.getElementById('pingDetailIp').textContent = ip || 'Not configured';
+-        document.getElementById('pingDetailSsid').textContent = ssid;
+-        const hwEl = document.getElementById('pingDetailHw');
+-        if (hwEl) {
+-          hwEl.textContent = hw;
+-          hwEl.title = hw;
+-        }
+-        document.getElementById('pingDetailFw').textContent = fw;
+-        document.getElementById('pingTerminalTitle').textContent = `probe@ecotrack: ping -c 3 ${ip || '—'}`;
+-        document.getElementById('pingProbeTimestamp').textContent = new Date().toLocaleTimeString();
+-
+-        const statusTitle = document.getElementById('pingStatusTitle');
+-        const statusSub = document.getElementById('pingStatusSubtitle');
+-        const latencyPill = document.getElementById('pingLatencyPill');
+-        const termOutput = document.getElementById('pingTerminalOutput');
+-        const rssiVal = n.rssi != null ? n.rssi : '—';
+-
+-        if (!ip) {
+-          statusTitle.textContent = 'No Static IP Configured';
+-          statusSub.textContent = 'Assign an IPv4 address to enable ICMP diagnostic probes.';
+-          latencyPill.textContent = 'NO IP';
+-          latencyPill.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-500/20 text-slate-300 border border-slate-500/30';
+-          document.getElementById('pingMetricLatency').textContent = '—';
+-          document.getElementById('pingMetricLatencySub').textContent = 'No probe sent';
+-          document.getElementById('pingMetricRssi').textContent = typeof rssiVal === 'number' ? `${rssiVal} dBm` : '—';
+-          document.getElementById('pingMetricRssiSub').textContent = 'Link state unknown';
+-          document.getElementById('pingMetricPackets').textContent = '0%';
+-          document.getElementById('pingMetricPacketsSub').textContent = 'No packets sent';
+-          if (termOutput) {
+-            termOutput.innerHTML = '<div style="color: #f87171 !important; font-weight: 700;">Error: AC Controller device has no static IPv4 address configured.</div>';
+-          }
+-          return;
+-        }
+-
+-        // Run real ICMP ping via electron IPC if available
+-        statusTitle.textContent = 'Probing Controller via WiFi...';
+-        statusSub.textContent = `Sending ICMP Echo packets to ${ip}...`;
+-        latencyPill.textContent = 'PROBING';
+-        latencyPill.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30';
+-
+-        (async () => {
+-          let pingRes = null;
+-          if (window.electron && typeof window.electron.invoke === 'function') {
+-            try {
+-              pingRes = await window.electron.invoke('ping-node', ip);
+-            } catch (err) {
+-              console.warn('[Ping] IPC error:', err);
+-            }
+-          }
+-
+-          const nowStr = new Date().toLocaleTimeString();
+-          if (pingRes && pingRes.success && pingRes.reachable) {
+-            const avg = pingRes.avg || '25';
+-            statusTitle.textContent = 'Device Reachable via WiFi (2.4 GHz)';
+-            statusSub.textContent = 'Bidirectional ICMP handshake verified • Ready for IR commands';
+-            latencyPill.textContent = `${avg}ms RTT`;
+-            latencyPill.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
+-
+-            document.getElementById('pingMetricLatency').textContent = `${avg} ms`;
+-            document.getElementById('pingMetricLatencySub').textContent = pingRes.min ? `● Min: ${pingRes.min}ms / Max: ${pingRes.max}ms` : '● Stable Link';
+-            document.getElementById('pingMetricRssi').textContent = typeof rssiVal === 'number' ? `${rssiVal} dBm` : '—';
+-            document.getElementById('pingMetricRssiSub').textContent = '● Link active';
+-            document.getElementById('pingMetricPackets').textContent = `${100 - (pingRes.packetLoss || 0)}%`;
+-            document.getElementById('pingMetricPacketsSub').textContent = `${pingRes.packetLoss || 0}% Loss`;
+-
+-            if (termOutput) {
+-              termOutput.innerHTML = `<pre style="color: #cbd5e1 !important; margin: 0; white-space: pre-wrap; font-family: monospace;">${pingRes.stdout || `Reply from ${ip}: time=${avg}ms`}</pre>`;
+-            }
+-          } else {
+-            statusTitle.textContent = 'Device Unreachable via WiFi';
+-            statusSub.textContent = 'ICMP probe timed out • Check device power and router subnet link.';
+-            latencyPill.textContent = 'OFFLINE';
+-            latencyPill.className = 'text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30';
+-
+-            document.getElementById('pingMetricLatency').textContent = 'Timeout';
+-            document.getElementById('pingMetricLatencySub').textContent = '● Host unreachable';
+-            document.getElementById('pingMetricRssi').textContent = typeof rssiVal === 'number' ? `${rssiVal} dBm` : '—';
+-            document.getElementById('pingMetricRssiSub').textContent = '● No response';
+-            document.getElementById('pingMetricPackets').textContent = '0%';
+-            document.getElementById('pingMetricPacketsSub').textContent = '100% Loss';
+-
+-            if (termOutput) {
+-              termOutput.innerHTML = `<pre style="color: #f87171 !important; margin: 0; white-space: pre-wrap; font-family: monospace;">${pingRes?.stdout || `Request timed out for ${ip}. Destination host unreachable.`}</pre>`;
+-            }
+-          }
+-        })();
+-
+-        // Audit Log
+-        CentralLogService.log({
+-          device_id: 'SYSTEM',
+-          node_id: id,
+-          module: 'CONTROLLER',
+-          event: 'PING_REQUEST',
+-          result: 'SUCCESS',
+-          details: `Ping to AC Controller Device ${id} via WiFi returned round-trip ${avg}ms (WiFi RSSI: ${rssiVal} dBm)`
+-        });
+-
+-        // Display Modal
++        const n = NodeService.getNode(id) || { node_id: id };
++        const set = (name, value) => { const el = document.getElementById(name); if (el) el.textContent = value; };
++        set('pingModalDeviceName', n.name || id); set('pingModalNodeBadge', id);
++        set('pingDetailIp', n.ip_address || 'Not reported'); set('pingDetailSsid', n.wifi_ssid || 'Not reported');
++        set('pingDetailHw', n.hardware || 'Not reported'); set('pingDetailFw', n.firmware || 'Not reported');
++        set('pingTerminalTitle', 'EcoTrack -> Supabase -> ESP32 -> acknowledgement');
++        set('pingProbeTimestamp', new Date().toLocaleTimeString());
++        set('pingStatusTitle', 'Waiting for cloud device reply'); set('pingStatusSubtitle', 'The PC and ESP32 can use different networks.');
++        set('pingLatencyPill', 'WAITING'); set('pingMetricLatency', '--'); set('pingMetricLatencySub', 'Includes cloud delivery and polling');
++        set('pingMetricRssi', '--'); set('pingMetricRssiSub', 'Awaiting measured Wi-Fi signal');
++        set('pingMetricPackets', '--'); set('pingMetricPacketsSub', 'Awaiting acknowledgement');
++        set('pingTerminalOutput', 'Queued a cloud ping. Waiting for the registered ESP32 to respond.');
+         pingModal.classList.remove('hidden');
+-      }
+-
+-      // Re-Test Ping Button
+-      if (retestPingBtn) {
+-        retestPingBtn.addEventListener('click', () => {
+-          if (!currentPingTargetId) return;
+-          const spinner = document.getElementById('retestPingSpinner');
+-          const icon = document.getElementById('retestPingIcon');
+-          const label = document.getElementById('retestPingLabel');
+-
+-          spinner.classList.remove('hidden');
+-          icon.classList.add('hidden');
+-          label.textContent = 'Probing Target...';
+-          retestPingBtn.disabled = true;
+-
+-          setTimeout(() => {
+-            openPingDiagnosticsModal(currentPingTargetId, true);
+-            spinner.classList.add('hidden');
+-            icon.classList.remove('hidden');
+-            label.textContent = 'Re-Test Connection';
+-            retestPingBtn.disabled = false;
+-            if (window.EcoToast) {
+-              window.EcoToast.show(`Diagnostics refreshed for ${currentPingTargetId}.`, 'success');
+-            }
+-          }, 420);
+-        });
+-      }
++        try {
++          const response = await window.EcoTrackHardwareCloud.ping(id);
++          if (revision !== pingProbeRevision || currentPingTargetId !== id) return;
++          set('pingStatusTitle', 'ESP32 replied through Supabase'); set('pingStatusSubtitle', 'Cloud command and device acknowledgement verified.');
++          set('pingLatencyPill', `${response.round_trip_ms} ms`); set('pingMetricLatency', `${response.round_trip_ms} ms`);
++          set('pingMetricRssi', Number.isFinite(response.rssi) ? `${response.rssi} dBm` : 'Not reported');
++          set('pingMetricRssiSub', 'Measured by ESP32'); set('pingMetricPackets', 'Received'); set('pingMetricPacketsSub', 'Device acknowledgement');
++          set('pingTerminalOutput', JSON.stringify(response, null, 2));
++          CentralLogService.log({ device_id: 'SYSTEM', node_id: id, module: 'CONTROLLER', event: 'CLOUD_PING', result: 'SUCCESS', details: `Device acknowledged in ${response.round_trip_ms} ms through Supabase.` });
++        } catch (error) {
++          if (revision !== pingProbeRevision || currentPingTargetId !== id) return;
++          set('pingStatusTitle', error.code === 'DEVICE_SLEEPING' ? 'Controller is sleeping' : 'No device acknowledgement');
++          set('pingStatusSubtitle', error.message); set('pingLatencyPill', 'NO REPLY'); set('pingMetricPackets', 'Not received');
++          set('pingTerminalOutput', error.message);
++        }
++      }
++
++      if (retestPingBtn) retestPingBtn.addEventListener('click', async () => {
++        if (!currentPingTargetId || retestPingBtn.disabled) return;
++        retestPingBtn.disabled = true;
++        try { await openPingDiagnosticsModal(currentPingTargetId, true); }
++        finally { retestPingBtn.disabled = false; }
++      });
+ 
+       // Copy Diagnostics Button
+       if (copyPingBtn) {
+@@ -3657,6 +3372,8 @@
+       loadBuildingsFloorsRooms().catch(() => {});
+       loadNodesWithSWR();
+ 
++      setInterval(() => { if (!document.hidden) refreshNodes(true); }, 15000);
++
+       // Trigger one-time background Supabase sync on page start
+       if (window.EcoTrackAirconSystem?.syncWithDatabase) {
+         window.EcoTrackAirconSystem.syncWithDatabase().catch(() => {});
+--- before/public\scheduler.html
++++ after/public\scheduler.html
+@@ -152,6 +152,7 @@
+     }
+   </script>
+   <script src="./js/supabase-client.js"></script>
++  <script src="./js/hardware-cloud.js?v=1"></script>
+   <script src="./js/aircon-system.js?v=13"></script>
+   <script src="./js/node-sync.js"></script>
+   <script src="./js/shared.js"></script>
+--- before/public\staff.html
++++ after/public\staff.html
+@@ -17,6 +17,7 @@
+   <script src="./js/skeletons.js?v=1"></script>
+   <script src="./js/supabase.umd.js"></script>
+   <script src="./js/supabase-client.js"></script>
++  <script src="./js/hardware-cloud.js?v=1"></script>
+   <script src="./js/aircon-system.js"></script>
+   <script src="./js/maintenance-modal.js?v=68"></script>
+   <style>
+--- before/public\telemetry.html
++++ after/public\telemetry.html
+@@ -21,6 +21,7 @@
+   <script src="./js/icons.js"></script>
+   <script src="./js/supabase.umd.js"></script>
+   <script src="./js/supabase-client.js"></script>
++  <script src="./js/hardware-cloud.js?v=1"></script>
+   <script src="./js/maintenance-modal.js?v=68"></script>
+ </head>
+ 
+--- before/src/main.js
++++ after/src/main.js
+@@ -17,7 +17,6 @@
+ 
+ // Suppress and handle SSL handshake resets (net_error -101) and clock skew
+ app.commandLine.appendSwitch('log-level', '3');
+-app.commandLine.appendSwitch('ignore-certificate-errors');
+ app.commandLine.appendSwitch('allow-insecure-localhost', 'true');
+ app.commandLine.appendSwitch('enable-web-bluetooth');
+ app.commandLine.appendSwitch('enable-experimental-web-platform-features');
+@@ -214,7 +213,20 @@
+ // ==========================================
+ // BLE Scanner IPC — Hardware Scan + Discovery
+ // ==========================================
+-let selectBluetoothCallback = null;
++const bluetoothSelections = new Map();
++const bluetoothPairings = new Map();
++for (const [channel, pending] of [['bluetooth-select-response', bluetoothSelections], ['bluetooth-pairing-response', bluetoothPairings]]) {
++  ipcMain.handle(channel, async (event, data) => {
++    if (!isTrustedDatabaseCaller(event)) return { success: false, error: 'Untrusted caller' };
++    const request = pending.get(data?.request_id);
++    if (!request || request.sender !== event.sender) return { success: false, error: 'Bluetooth request expired' };
++    if (channel === 'bluetooth-select-response' && data.device_id && !request.devices.some(device => device.deviceId === data.device_id)) return { success: false, error: 'Unknown Bluetooth device' };
++    if (channel === 'bluetooth-pairing-response' && data.confirmed && request.kind === 'providePin' && !/^\d{6}$/.test(data.pin || '')) return { success: false, error: 'Enter the six-digit pairing code' };
++    clearTimeout(request.timer); pending.delete(data.request_id);
++    request.callback(channel === 'bluetooth-select-response' ? data.device_id || '' : { confirmed: data.confirmed === true, ...(data.pin ? { pin: data.pin } : {}) });
++    return { success: true };
++  });
++}
+ 
+ ipcMain.handle('scan-ble', async () => {
+   return new Promise((resolve) => {
+@@ -283,7 +295,7 @@
+         reachable: isReachable,
+         ip: cleanIp,
+         stdout: output,
+-        avg: matchAvg ? matchAvg[1] : (isReachable ? '25' : null),
++        avg: matchAvg ? matchAvg[1] : null,
+         min: matchMin ? matchMin[1] : null,
+         max: matchMax ? matchMax[1] : null,
+         packetLoss: packetLoss
+@@ -847,15 +859,38 @@
+     return { action: 'deny' };
+   });
+ 
+-  // Handle Web Bluetooth device discovery in Electron
++  // The user selects the real device; never silently select the first advertisement.
+   mainWindow.webContents.on('select-bluetooth-device', (event, deviceList, callback) => {
+     event.preventDefault();
+-    selectBluetoothCallback = callback;
+-    if (mainWindow && !mainWindow.isDestroyed()) {
+-      mainWindow.webContents.send('ble-devices-discovered', deviceList);
+-    }
+-    if (deviceList && deviceList.length > 0) {
+-      callback(deviceList[0].deviceId);
++    const devices = (deviceList || []).filter(device => device.deviceName?.startsWith('EcoTrack-'));
++    let entry = [...bluetoothSelections.entries()].find(([, request]) => request.sender === mainWindow.webContents);
++    if (!entry) {
++      const request_id = require('crypto').randomUUID();
++      const request = { sender: mainWindow.webContents, callback, devices, presented: false };
++      request.timer = setTimeout(() => { bluetoothSelections.delete(request_id); callback(''); }, 30000);
++      bluetoothSelections.set(request_id, request);
++      entry = [request_id, request];
++    }
++    const [request_id, request] = entry;
++    request.devices = devices;
++    if (devices.length && !request.presented) {
++      request.presented = true;
++      mainWindow.webContents.send('bluetooth-select-request', { request_id, devices });
++    }
++  });
++  mainWindow.webContents.session.setBluetoothPairingHandler((details, callback) => {
++    if (!mainWindow || mainWindow.isDestroyed() || !['confirm', 'confirmPin', 'providePin'].includes(details.pairingKind)) return callback({ confirmed: false });
++    const request_id = require('crypto').randomUUID();
++    const request = { sender: mainWindow.webContents, callback, kind: details.pairingKind };
++    request.timer = setTimeout(() => { bluetoothPairings.delete(request_id); callback({ confirmed: false }); }, 60000);
++    bluetoothPairings.set(request_id, request);
++    mainWindow.webContents.send('bluetooth-pairing-request', { ...details, request_id });
++  });
++  mainWindow.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => {
++    if (!isMainFrame) return;
++    for (const [pending, cancelled] of [[bluetoothSelections, ''], [bluetoothPairings, { confirmed: false }]]) {
++      for (const request of pending.values()) { clearTimeout(request.timer); request.callback(cancelled); }
++      pending.clear();
+     }
+   });
+ 
+@@ -875,6 +910,10 @@
+   });
+ 
+   mainWindow.on('closed', () => {
++    for (const pending of [bluetoothSelections, bluetoothPairings]) {
++      for (const request of pending.values()) clearTimeout(request.timer);
++      pending.clear();
++    }
+     mainWindow = null;
+   });
+ }
+--- before/src/preload.js
++++ after/src/preload.js
+@@ -12,12 +12,12 @@
+   BACKEND_URL: process.env.BACKEND_URL || 'http://localhost:5000'
+ };
+ 
+-const invokeChannels = new Set(["focus-window", "scan-wifi", "scan-ble", "ping-node", "auth-set-session", "auth-lookup-user", "auth-admin-fallback-login", "auth-register-admin", "staff-restore", "staff-archive", "staff-create", "staff-update", "staff-fetch-all", "locations-fetch-all", "maintenance-delete-reports", "maintenance-save-report", "maintenance-fetch-reports", "scheduler-fetch-data", "node-update-schedule", "notifications-fetch-today", "notification-create", "notifications-fetch-all", "notifications-update", "notifications-delete", "rules-fetch-data", "rule-save", "rule-delete", "rule-toggle"]);
++const invokeChannels = new Set(["focus-window", "scan-wifi", "scan-ble", "ping-node", "bluetooth-select-response", "bluetooth-pairing-response", "auth-set-session", "auth-lookup-user", "auth-admin-fallback-login", "auth-register-admin", "staff-restore", "staff-archive", "staff-create", "staff-update", "staff-fetch-all", "locations-fetch-all", "maintenance-delete-reports", "maintenance-save-report", "maintenance-fetch-reports", "scheduler-fetch-data", "node-update-schedule", "notifications-fetch-today", "notification-create", "notifications-fetch-all", "notifications-update", "notifications-delete", "rules-fetch-data", "rule-save", "rule-delete", "rule-toggle"]);
+ contextBridge.exposeInMainWorld('electron', {
+   invoke: (channel, data) => invokeChannels.has(channel) ? ipcRenderer.invoke(channel, data) : Promise.reject(new Error('Unsupported IPC channel')),
+   send: (channel, data) => { if (channel === 'focus-window') ipcRenderer.send(channel, data); },
+   on: (channel, listener) => {
+-    if (channel !== 'ble-devices-discovered' || typeof listener !== 'function') return;
++    if (!['ble-devices-discovered', 'bluetooth-select-request', 'bluetooth-pairing-request'].includes(channel) || typeof listener !== 'function') return;
+     const wrapped = (_event, ...args) => listener(undefined, ...args);
+     ipcRenderer.on(channel, wrapped);
+     return () => ipcRenderer.removeListener(channel, wrapped);
+--- before/public/js/node-sync.js
++++ after/public/js/node-sync.js
+@@ -219,38 +219,36 @@
+   const _commandReceiptChecks = new Map();
+   async function reconcilePendingCommandReceipt(node, now = Date.now()) {
+     if (typeof window === 'undefined') return;
+-    if (!node.ip_address || !isNodeWithinOperatingWindow(node, now) || ['offline', 'disconnected'].includes(String(node.status).toLowerCase())) return;
+     const system = window.EcoTrackAirconSystem, sb = getSupabase();
+     const matches = (system?.AirconProfileManager?.getAll?.() || []).filter(ac => ac.node_id === node.id || ac.node_id === node.name);
+-    if (matches.length !== 1 || !sb?.rpc) return;
++    if (matches.length !== 1 || !sb?.from) return;
+     const ac = matches[0], snapshot = ac.control_snapshot;
+     if (!ac.aircon_id || !snapshot?.command_id || snapshot.command_status !== 'queued') return;
+     const previous = _commandReceiptChecks.get(ac.aircon_id);
+-    if (previous?.command_id === snapshot.command_id && now - previous.checkedAt < 15000) return;
++    if (previous?.command_id === snapshot.command_id && now - previous.checkedAt < 5000) return;
+     _commandReceiptChecks.set(ac.aircon_id, { command_id: snapshot.command_id, checkedAt: now });
+     try {
+-      const response = await fetch(`http://${node.ip_address}/ir/delivery`, { signal: AbortSignal.timeout(1500), cache: 'no-store' });
+-      if (!response.ok) return;
+-      const receipt = await response.json();
+-      if (receipt.success !== true || receipt.result !== 'SUCCESS' || receipt.command_id !== snapshot.command_id ||
+-          receipt.aircon_id !== ac.aircon_id || ![node.id, node.name].includes(receipt.node_id)) return;
+-      const latest = system.AirconProfileManager.getAll().find(current => current.aircon_id === ac.aircon_id);
+-      if (latest?.control_snapshot?.command_id !== receipt.command_id || latest.control_snapshot.command_status !== 'queued') return;
+-      const result = await sb.rpc('ecotrack_ack_aircon_intent', {
+-        p_aircon_id: ac.aircon_id, p_command_id: receipt.command_id, p_status: 'transmitted'
+-      });
+-      if (!result.error && result.data?.command_id === receipt.command_id && result.data.command_status === 'transmitted') {
+-        const current = system.AirconProfileManager.getAll().find(profile => profile.aircon_id === ac.aircon_id);
+-        if (current?.control_snapshot?.command_id === receipt.command_id && current.control_snapshot.command_status === 'queued') {
+-          system.AirconProfileManager.updateState(ac.device_id, {}, { ...current.control_snapshot, command_status: 'transmitted' });
+-        }
+-      }
+-    } catch (_) { /* Retain pending status until a matching device receipt is available. */ }
++      const { data: command, error } = await sb.from('ecotrack_device_commands').select('id,node_id,kind,payload,status,result')
++        .eq('id', snapshot.command_id).maybeSingle();
++      if (error || command?.id !== snapshot.command_id || command.node_id !== node.id || command.kind !== 'ac_intent' || command.payload?.aircon_id !== ac.aircon_id) return;
++      const current = system.AirconProfileManager.getAll().find(profile => profile.aircon_id === ac.aircon_id);
++      if (current?.control_snapshot?.command_id !== snapshot.command_id || current.control_snapshot.command_status !== 'queued') return;
++      const receipt = command.result;
++      const status = command.status === 'completed' && receipt?.success === true && receipt.command_id === command.id && receipt.delivery_status === 'transmitted' ? 'transmitted' :
++        ['failed','expired'].includes(command.status) ? 'failed' : null;
++      if (status) system.AirconProfileManager.updateState(ac.device_id, {}, { ...current.control_snapshot, command_status: status });
++    } catch (_) { /* Preserve queued status until an authenticated cloud receipt is available. */ }
+   }
+ 
+   async function stepBackgroundTelemetryCadence() {
+     const assignedNodes = await getAssignedNodesWithSchedule();
+     if (!assignedNodes.length) return;
++
++    // The cloud receiver writes its actual reports. Browser timers must not mint new sensor history from cached node snapshots.
++    if (typeof window !== 'undefined' && window.EcoTrackHardwareCloud) {
++      for (const node of assignedNodes) void reconcilePendingCommandReceipt(node);
++      return;
++    }
+ 
+     const now = Date.now();
+ 

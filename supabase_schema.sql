@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS administrators (
     id TEXT PRIMARY KEY DEFAULT ('admin_' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 15)),
     username TEXT UNIQUE NOT NULL,
     email TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL DEFAULT 'adminpassword123',
+    password TEXT, -- Legacy compatibility only; authentication uses Supabase Auth.
     role TEXT NOT NULL DEFAULT 'admin',
     is_active BOOLEAN NOT NULL DEFAULT true,
     last_login TIMESTAMPTZ,
@@ -156,41 +156,6 @@ ALTER TABLE staff ADD COLUMN IF NOT EXISTS room_id TEXT REFERENCES rooms(id) ON 
 ALTER TABLE staff ADD COLUMN IF NOT EXISTS avatar_url TEXT;
 ALTER TABLE staff ADD COLUMN IF NOT EXISTS photo_url TEXT;
 
--- 10. SYSTEM CONFIGURATION
-CREATE TABLE IF NOT EXISTS system_config (
-    id TEXT PRIMARY KEY DEFAULT 'cfg_default',
-    optimal_temp NUMERIC DEFAULT 24,
-    ac_eco NUMERIC DEFAULT 22,
-    ac_cool NUMERIC DEFAULT 25,
-    ac_cold NUMERIC DEFAULT 28,
-    diag_temp_critical NUMERIC DEFAULT 28,
-    diag_temp_warning NUMERIC DEFAULT 26,
-    diag_voltage_critical NUMERIC DEFAULT 3.3,
-    diag_voltage_warning NUMERIC DEFAULT 3.5,
-    diag_rssi_poor NUMERIC DEFAULT -80,
-    power_sleep_hours NUMERIC DEFAULT 8,
-    power_active_draw_ma NUMERIC DEFAULT 50,
-    power_sleep_draw_ma NUMERIC DEFAULT 5,
-    created TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- 11. ANALYTICS SNAPSHOTS (Daily Aggregate Summaries)
-CREATE TABLE IF NOT EXISTS analytics_snapshots (
-    id TEXT PRIMARY KEY DEFAULT ('snp_' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 15)),
-    date TEXT NOT NULL,
-    room_id TEXT REFERENCES rooms(id) ON DELETE CASCADE,
-    avg_temp NUMERIC DEFAULT 0,
-    avg_pressure NUMERIC DEFAULT 0,
-    avg_battery NUMERIC DEFAULT 0,
-    alerts_count INTEGER DEFAULT 0,
-    health_score NUMERIC DEFAULT 100,
-    compliance_rate NUMERIC DEFAULT 100,
-    created TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(date, room_id)
-);
-
 -- 12. MAINTENANCE REPORTS (Preventive, Sensor Calibration, Cleaning, Repairs)
 CREATE TABLE IF NOT EXISTS maintenance_reports (
     id TEXT PRIMARY KEY DEFAULT ('mr_' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 15)),
@@ -235,7 +200,7 @@ BEGIN
         SELECT table_name 
         FROM information_schema.tables 
         WHERE table_schema = 'public' 
-          AND table_name IN ('administrators', 'buildings', 'floors', 'rooms', 'nodes', 'rules', 'rule_nodes', 'notifications', 'staff', 'system_config', 'analytics_snapshots', 'maintenance_reports')
+          AND table_name IN ('administrators', 'buildings', 'floors', 'rooms', 'nodes', 'rules', 'rule_nodes', 'notifications', 'staff', 'maintenance_reports')
     LOOP
         EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY;', t);
         EXECUTE format('DROP POLICY IF EXISTS %I_all ON %I;', t, t);
@@ -243,54 +208,7 @@ BEGIN
     END LOOP;
 END $$;
 
--- ===================================================================
--- INITIAL DEFAULT SEED DATA
--- ===================================================================
-
--- Default Administrator
-INSERT INTO administrators (id, username, email, password, role, is_active)
-VALUES ('admin_default_01', 'admin', 'admin@ecotrack.local', 'adminpassword123', 'admin', true)
-ON CONFLICT (id) DO NOTHING;
-
--- Default Building & Floor
-INSERT INTO buildings (id, name)
-VALUES ('bld_main', 'Main Campus Building')
-ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO floors (id, name, building_id)
-VALUES ('flr_2nd_it', '2nd Floor - IT Wing', 'bld_main')
-ON CONFLICT (id) DO NOTHING;
-
--- Default Rooms
-INSERT INTO rooms (id, name, node_limit, floor_id)
-VALUES 
-    ('rm_svr_01', 'Server Room A', 5, 'flr_2nd_it'),
-    ('rm_ofc_01', 'Main Office Area', 5, 'flr_2nd_it'),
-    ('rm_lab_01', 'Laboratory A', 5, 'flr_2nd_it')
-ON CONFLICT (id) DO NOTHING;
-
--- Default Nodes
-INSERT INTO nodes (id, name, status, temp, pressure, battery, rssi, room_id, aircon_type)
-VALUES 
-    ('node_001', 'node-1', 'online', 23.5, 0.48, 4.15, -65, 'rm_svr_01', 'Split Type (Inverter)'),
-    ('node_002', 'node-2', 'online', 24.1, 0.51, 4.08, -70, 'rm_svr_01', 'Split Type (Inverter)'),
-    ('node_003', 'node-3', 'online', 22.8, 0.50, 4.20, -60, 'rm_ofc_01', 'Floor Standing'),
-    ('node_004', 'node-4', 'online', 23.2, 0.49, 4.12, -68, 'rm_ofc_01', 'Floor Standing'),
-    ('node_005', 'node-5', 'online', 25.4, 0.53, 3.95, -75, 'rm_ofc_01', 'Split Type (Inverter)'),
-    ('node_006', 'node-6', 'online', 21.9, 0.47, 4.18, -62, 'rm_lab_01', 'Window Type')
-ON CONFLICT (id) DO NOTHING;
-
--- Default Rules
-INSERT INTO rules (id, type, condition, value, unit, enabled, message, room_id)
-VALUES
-    ('rule_svr_temp', 'temperature', 'above', 26.0, '°C', true, 'Server Room temperature exceeded safe operating threshold.', 'rm_svr_01'),
-    ('rule_node_bat', 'battery', 'below', 20.0, '%', true, 'Sensor battery charge is critically low. Battery replacement advised.', NULL)
-ON CONFLICT (id) DO NOTHING;
-
--- Default Config
-INSERT INTO system_config (id, optimal_temp, ac_eco, ac_cool, ac_cold)
-VALUES ('cfg_default', 24.0, 22.0, 25.0, 28.0)
-ON CONFLICT (id) DO NOTHING;
+-- Demo inserts are excluded from schema setup; see scripts/demo-seeds/.
 
 -- ===================================================================
 -- 13. SENSOR TELEMETRY LOGS (Replaces PocketBase sensor logs)

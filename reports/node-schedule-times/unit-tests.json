@@ -1,0 +1,17 @@
+{
+  "passed": 10,
+  "checks": [
+    "Unset and malformed times are visible instead of a false 05:00 AM default",
+    "Minute times and stored zero-second timestamps display and normalize correctly across midnight and noon",
+    "Invalid clocks and unsupported sub-minute precision are rejected without silently rounding",
+    "Missing wake time gets a specific error and no database request",
+    "Missing sleep time is identified independently of a valid interval",
+    "The shown 5-second interval queues valid normalized times and never claims Applied without a device receipt",
+    "Equal explicit times remain valid and explain that sleeping is disabled",
+    "All interval units and the minimum/maximum hardware bounds remain supported",
+    "Invalid interval values report the interval problem and produce no writes",
+    "A rejected write cannot claim a queued or applied schedule"
+  ],
+  "live_hardware_tested": false,
+  "live_database_tested": false
+}

@@ -1,0 +1,14 @@
+{
+  "passed": 8,
+  "checks": [
+    "Control heading and selector use the controller display name while retaining the persisted AC manufacturer.",
+    "Plain action feedback keeps backend errors visible and does not apply a failed setting.",
+    "Production Control panel preserves custom manufacturer/name, shows normal control labels and sends actual half-degree increments.",
+    "Detected exact Fujitsu model changes the existing panel to quarter-degree steps and model-specific functions without reloading.",
+    "Fan mode disables temperature adjustments; Cool presets use their own minimum and display their actual setpoints.",
+    "A different unknown AC on the same controller does not inherit the previous profile or fabricate controls.",
+    "Production dashboard quick adjustment uses the exact model and quarter-degree step, without rounding the existing setpoint.",
+    "Initial dashboard cards and in-place name edits use the saved controller display name, hide manufacturer/raw IDs, escape custom text, and retain stable command targets."
+  ],
+  "physical_hardware_tested": false
+}

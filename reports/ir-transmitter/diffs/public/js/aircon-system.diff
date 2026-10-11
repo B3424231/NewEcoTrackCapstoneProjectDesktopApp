@@ -1,0 +1,12 @@
+--- before/public/js/aircon-system.js
++++ public/js/aircon-system.js
+@@ -1883,6 +1883,9 @@
+       if (stateUpdates.swing !== undefined || (device.state && device.state.swing !== undefined)) {
+         intentPayload.state.swing = (stateUpdates.swing !== undefined ? stateUpdates.swing : device.state.swing) ? 'on' : 'off';
+       }
++      if (stateUpdates.sleep !== undefined || (device.state && device.state.sleep !== undefined)) {
++        intentPayload.state.sleep = (stateUpdates.sleep !== undefined ? stateUpdates.sleep : device.state.sleep) ? 'on' : 'off';
++      }
+       if (stateUpdates.turbo !== undefined || (device.state && device.state.turbo !== undefined)) {
+         intentPayload.state.turbo = (stateUpdates.turbo !== undefined ? stateUpdates.turbo : device.state.turbo) ? 'on' : 'off';
+       }

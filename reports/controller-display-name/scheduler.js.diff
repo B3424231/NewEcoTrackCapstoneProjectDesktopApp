@@ -1,0 +1,28 @@
+--- before/public/js/scheduler.js
++++ public/js/scheduler.js
+@@ -1037,7 +1037,10 @@
+   const stateRaw = (node.status || 'offline').toLowerCase();
+   const isOnline = stateRaw === 'online' || stateRaw === 'connected';
+   const acType = node.ac_type || node.aircon_type || 'Split Type (Inverter)';
+-  const acName = node.ac_name || node.name;
++  const savedName = typeof node.name === 'string' ? node.name.trim() : '';
++  const controllerName = savedName && !/^(?:EcoTrack[-_])?esp32s3[-_:][0-9a-f]{12}$/i.test(savedName)
++    ? savedName : 'AC Controller';
++  const escapedControllerName = controllerName.replace(/[&<>"']/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
+   const acTag = node.ac_tag || 'No AC assigned';
+   
+   return `
+@@ -1054,11 +1057,11 @@
+             </svg>
+           </div>
+           <div>
+-            <div class="font-bold text-[#18392B] dark:text-cyan-400 text-sm">${acName}</div>
++            <div class="sched-controller-name font-bold text-[#18392B] dark:text-cyan-400 text-sm">${escapedControllerName}</div>
+             <div class="flex items-center gap-1.5 mt-0.5 text-xs text-gray-500 dark:text-gray-400 font-medium">
+               <span class="px-1.5 py-0.5 rounded font-mono text-[10px] font-bold bg-cyan-500/10 text-cyan-600 dark:text-cyan-300 border border-cyan-500/20">${acTag}</span>
+               <span>•</span>
+-              <span>Node: ${node.name}</span>
++              <span>Controller: ${escapedControllerName}</span>
+             </div>
+           </div>
+         </div>

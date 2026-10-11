@@ -1,0 +1,539 @@
+--- before/public/js/profile.js
++++ after/public/js/profile.js
+@@ -1,4 +1,22 @@
+ let currentUser = null;
++
++// Role spelling is presentation only; access comes from the authenticated RPC.
++function isAdministratorProfile(user) {
++  if (typeof user.adminAccess === 'boolean') return user.adminAccess;
++  const role = String(user.role || '').trim().toLowerCase().replace(/[_-]+/g, ' ');
++  return ['admin', 'administrator', 'system administrator', 'super admin'].includes(role) ||
++    String(user.userType || '').toLowerCase() === 'admin';
++}
++
++async function verifyAdministratorAccess(sb) {
++  if (!sb?.rpc) return null;
++  try {
++    const { data, error } = await sb.rpc('ecotrack_is_admin');
++    return !error && typeof data === 'boolean' ? data : null;
++  } catch (_) {
++    return null;
++  }
++}
+ 
+ async function loadProfileWithSWR(forceRefresh = false) {
+   const sb = window.supabaseClient || window.sb;
+@@ -55,7 +73,11 @@
+     loadedProfile = await fetchProfileData();
+   }
+ 
++  // Verify on each load, even when the profile itself came from the cache.
++  const adminAccess = await verifyAdministratorAccess(sb);
+   currentUser = {
++    adminAccess,
++    userType: loadedProfile?.userType || localUser.userType,
+     id: loadedProfile?.id || localUser.id || 'admin_default_01',
+     username: loadedProfile?.username || localUser.username || 'admin',
+     email: loadedProfile?.email || localUser.email || 'admin@ecotrack.local',
+@@ -84,8 +106,8 @@
+ };
+ 
+ function populateProfileUI(user) {
+-  const roleDisplay = user.role === 'admin' ? 'Administrator' : (user.role || 'User');
+-  const roleTitle = user.role === 'admin' ? 'System Administrator' : 'System User';
++  const roleDisplay = isAdministratorProfile(user) ? 'Administrator' : (user.role || 'User');
++  const roleTitle = isAdministratorProfile(user) ? 'System Administrator' : 'System User';
+   const name = user.username || 'Administrator';
+   
+   const profileNameEl = document.getElementById('profile-name');
+@@ -116,7 +138,7 @@
+   if (profileRoleTextEl) profileRoleTextEl.textContent = roleDisplay;
+   
+   const profilePermissionsEl = document.getElementById('profile-permissions');
+-  if (profilePermissionsEl) profilePermissionsEl.textContent = user.role === 'admin' ? 'Full Access' : 'Limited Access';
++  if (profilePermissionsEl) profilePermissionsEl.textContent = user.adminAccess === true ? 'Full Access' : user.adminAccess === false ? 'Limited Access' : 'Access unverified';
+   
+   const profileLastLoginEl = document.getElementById('profile-last-login');
+   if (profileLastLoginEl) profileLastLoginEl.textContent = formatDateTime(user.last_login || user.created);
+@@ -142,7 +164,7 @@
+   const sb = window.supabaseClient || window.sb;
+   const user = currentUser || JSON.parse(localStorage.getItem('ecoTrack_profile_user') || '{}');
+   const name = user.username || 'Administrator';
+-  const roleTitle = user.role === 'admin' ? 'System Administrator' : 'System User';
++  const roleTitle = isAdministratorProfile(user) ? 'System Administrator' : 'System User';
+ 
+   // Initialize and bind Dark Mode Toggle
+   const darkModeToggle = document.getElementById('dark-mode-toggle-ui');
+--- before/public/profile.html
++++ after/public/profile.html
+@@ -185,7 +185,7 @@
+                 </div>
+                 <div>
+                   <p class="text-xs font-bold text-gray-800 dark:text-gray-200">Permissions</p>
+-                  <p id="profile-permissions" class="text-sm font-medium text-gray-500 dark:text-gray-400">Full Access
++                  <p id="profile-permissions" class="text-sm font-medium text-gray-500 dark:text-gray-400" role="status" aria-live="polite">Checking access...
+                   </p>
+                 </div>
+               </div>
+@@ -443,7 +443,7 @@
+           </div>
+ 
+           <script src="./js/global-notifications.js"></script>
+-          <script src="./js/profile.js?v=68"></script>
++          <script src="./js/profile.js?v=69"></script>
+ </body>
+ 
+ </html>--- before/public/nodes.html
++++ after/public/nodes.html
+@@ -22,7 +22,7 @@
+       }
+     }
+   </script>
+-  <link rel="stylesheet" href="./styles.css?v=54">
++  <link rel="stylesheet" href="./styles.css?v=55">
+   <style>
+     /* High-contrast status pill guarantees for AC Controller Devices */
+     .node-status-online {
+@@ -92,7 +92,7 @@
+   </style>
+   <script src="./js/supabase.umd.js"></script>
+   <script src="./js/supabase-client.js"></script>
+-  <script src="./js/hardware-cloud.js?v=1"></script>
++  <script src="./js/hardware-cloud.js?v=2"></script>
+   <script src="./js/sidebar.js"></script>
+   <script src="./js/sidebar-loader.js?v=7"></script>
+   <script src="./js/icons.js"></script>
+@@ -354,19 +354,20 @@
+             </div>
+           </div>
+ 
+-          <!-- Static IP Address (Auto-Assigned) -->
++          <!-- Current IP reported by the connected ESP32 -->
+           <div>
+             <div class="flex items-center justify-between mb-1">
+               <label class="block text-[11px] font-bold text-slate-600 dark:text-gray-400 uppercase tracking-wider">
+                 Device IP (informational)
+               </label>
+-              <button type="button" id="autoAssignIpBtn" class="text-[9px] font-bold text-teal-600 dark:text-teal-400 hover:underline border-0 bg-transparent cursor-pointer flex items-center gap-0.5">
+-                <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+-                <span>Read Device IP</span>
++              <button type="button" id="autoAssignIpBtn" aria-describedby="deviceIpFeedback" aria-busy="false">
++                <svg id="autoAssignIpIcon" aria-hidden="true" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
++                <span id="autoAssignIpLabel">Read Device IP</span>
+               </button>
+             </div>
+-            <input type="text" id="nodeFormIp" placeholder="Reported by ESP32 after Wi-Fi connects" readonly
++            <input type="text" id="nodeFormIp" aria-describedby="deviceIpFeedback" placeholder="Reported by ESP32 after Wi-Fi connects" readonly
+               class="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/15 text-xs text-slate-900 dark:text-white font-mono focus:outline-none focus:border-teal-500">
++            <p id="deviceIpFeedback" class="device-ip-feedback" data-state="idle" role="status" aria-live="polite" aria-atomic="true">Read the current IP from the connected ESP32.</p>
+           </div>
+           <input type="hidden" id="nodeFormStatus" value="Offline">
+ 
+@@ -1435,6 +1436,7 @@
+       }
+ 
+       function selectBleDevice(device) {
++        resetDeviceIpFeedback();
+         resetRemoteDetection('register');
+         selectedBleDevice = device;
+         const nodeIdInput = document.getElementById('nodeFormId');
+@@ -1744,12 +1746,76 @@
+       }
+ 
+       const autoAssignIpBtn = document.getElementById('autoAssignIpBtn');
++      let deviceIpReadVersion = 0;
++      function setDeviceIpFeedback(state, message) {
++        const feedback = document.getElementById('deviceIpFeedback');
++        if (!feedback) return;
++        feedback.dataset.state = state;
++        feedback.textContent = message;
++      }
++      function setDeviceIpBusy(busy) {
++        if (autoAssignIpBtn) {
++          autoAssignIpBtn.disabled = busy;
++          autoAssignIpBtn.setAttribute('aria-busy', String(busy));
++        }
++        document.getElementById('autoAssignIpIcon')?.classList.toggle('is-reading', busy);
++        const label = document.getElementById('autoAssignIpLabel');
++        if (label) label.textContent = busy ? 'Reading...' : 'Read Device IP';
++      }
++      function resetDeviceIpFeedback() {
++        deviceIpReadVersion++;
++        setDeviceIpBusy(false);
++        setDeviceIpFeedback('idle', 'Read the current IP from the connected ESP32.');
++      }
++      function updateDeviceIpResult(ip, message) {
++        document.getElementById('nodeFormIp').value = ip;
++        document.getElementById('chkIpText').textContent = message;
++        document.getElementById('chkIp').textContent = ip ? 'OK' : 'Pending';
++        const badge = document.getElementById('step3IpBadge');
++        if (badge) badge.textContent = ip || '--';
++        updateConfigSummary();
++      }
+       autoAssignIpBtn?.addEventListener('click', async () => {
++        if (autoAssignIpBtn.disabled) return;
++        const version = ++deviceIpReadVersion;
++        const nodeId = selectedBleDevice?.nodeId;
++        let timeout;
++        setDeviceIpBusy(true);
++        setDeviceIpFeedback('reading', 'Reading IP from ESP32 over Bluetooth...');
+         try {
+-          const info = await window.EcoTrackHardwareCloud.readInfo();
+-          document.getElementById('nodeFormIp').value = info.ip_address || '';
+-          document.getElementById('chkIpText').textContent = info.ip_address ? `ESP32 reported IP: ${info.ip_address}` : 'Wi-Fi is not connected yet.';
+-        } catch (error) { window.EcoToast?.show(error.message, 'error'); }
++          if (!nodeId) throw new Error('Connect the nearby ESP32 through Bluetooth first.');
++          const info = await Promise.race([
++            window.EcoTrackHardwareCloud.readInfo(),
++            new Promise((_, reject) => {
++              timeout = setTimeout(() => reject(new Error('ESP32 did not reply. Check power and reconnect Bluetooth.')), 12000);
++            })
++          ]);
++          if (version !== deviceIpReadVersion || nodeId !== selectedBleDevice?.nodeId) return;
++          if (info.device_id !== nodeId) throw new Error('Wrong Bluetooth device replied. Reconnect the selected ESP32.');
++          const ip = typeof info.ip_address === 'string' ? info.ip_address.trim() : '';
++          const validIp = /^(\d{1,3}\.){3}\d{1,3}$/.test(ip) && ip.split('.').every(part => Number(part) <= 255) && ip !== '0.0.0.0';
++          if (info.wifi_status !== 'connected' || !validIp) {
++            const message = 'ESP32 replied, but no connected Wi-Fi IP is available. Use Test Connection first.';
++            updateDeviceIpResult('', message);
++            setDeviceIpFeedback('warning', message);
++            window.EcoToast?.show(message, 'warning');
++            return;
++          }
++          selectedBleDevice.ip = ip;
++          const message = `ESP32 replied. Device IP: ${ip}`;
++          updateDeviceIpResult(ip, message);
++          setDeviceIpFeedback('success', message);
++          window.EcoToast?.show(message, 'success');
++        } catch (error) {
++          if (version !== deviceIpReadVersion || nodeId !== selectedBleDevice?.nodeId) return;
++          const message = 'Could not read device IP: ' + (error.message || 'Reconnect the ESP32 and try again.');
++          updateDeviceIpResult('', message);
++          setDeviceIpFeedback('error', message);
++          window.EcoToast?.show(message, 'error');
++        } finally {
++          clearTimeout(timeout);
++          if (version === deviceIpReadVersion) setDeviceIpBusy(false);
++        }
+       });
+ 
+       const togglePassBtn = document.getElementById('toggleWifiPassBtn');
+@@ -2383,6 +2449,7 @@
+         resetRemoteDetection('register');
+         setRegistrationCloudStatus('pending');
+         form.reset();
++        resetDeviceIpFeedback();
+         await loadBuildingsFloorsRooms();
+         await loadRegistrationAirconChoices();
+         renderBrandChips('');
+@@ -2459,7 +2526,7 @@
+         modal.classList.remove('hidden');
+       });
+ 
+-      function closeModal() { if (registrationSaving) return; resetRemoteDetection('register'); modal.classList.add('hidden'); }
++      function closeModal() { if (registrationSaving) return; resetDeviceIpFeedback(); resetRemoteDetection('register'); modal.classList.add('hidden'); }
+       closeBtn.addEventListener('click', closeModal);
+       cancelBtn.addEventListener('click', closeModal);
+       modal.addEventListener('click', (e) => {
+--- before/public/js/hardware-cloud.js
++++ after/public/js/hardware-cloud.js
+@@ -171,29 +171,72 @@
+     const queued = await request(nodeId, 'ac_intent', payload, { wait: false });
+     return { ...queued, command_id: queued.id, command_status: 'queued', commanded_at: queued.created_at };
+   }
++  let dialogSequence = 0;
+   function inputDialog(title, message, choices, passkey = false) {
+     return new Promise(resolve => {
+-      const dialog = root.document.createElement('dialog');
+-      dialog.style.cssText = 'padding:24px;border:1px solid #10b981;border-radius:16px;max-width:440px;width:90%;background:#0f172a;color:#f8fafc';
+-      const heading = root.document.createElement('h2'); heading.textContent = title;
+-      const text = root.document.createElement('p'); text.textContent = message;
+-      dialog.append(heading, text);
+-      let field;
++      const make = (tag, className, text) => {
++        const element = root.document.createElement(tag);
++        element.className = className;
++        if (text !== undefined) element.textContent = text;
++        return element;
++      };
++      const dialog = make('dialog', 'ecotrack-bluetooth-dialog');
++      const id = 'ecotrack-bluetooth-' + ++dialogSequence;
++      dialog.setAttribute('aria-labelledby', id + '-title');
++      dialog.setAttribute('aria-describedby', id + '-description');
++      const header = make('div', 'ecotrack-bluetooth-dialog__header');
++      const heading = make('h2', 'ecotrack-bluetooth-dialog__title', title);
++      heading.id = id + '-title';
++      const dismiss = make('button', 'ecotrack-bluetooth-dialog__close', '\u00d7');
++      dismiss.type = 'button';
++      dismiss.setAttribute('aria-label', 'Close Bluetooth dialog');
++      header.append(heading, dismiss);
++      const text = make('p', 'ecotrack-bluetooth-dialog__description', message);
++      text.id = id + '-description';
++      const options = make('div', 'ecotrack-bluetooth-dialog__options');
++      const footer = make('div', 'ecotrack-bluetooth-dialog__footer');
++      dialog.append(header, text, options, footer);
++      let field, firstChoice;
++      const validation = make('p', 'ecotrack-bluetooth-dialog__validation', 'Enter a six-digit Bluetooth code.');
++      validation.id = id + '-validation';
++      validation.hidden = true;
++      validation.setAttribute('role', 'alert');
+       if (passkey) {
+-        field = root.document.createElement('input'); field.inputMode = 'numeric'; field.maxLength = 6; field.autocomplete = 'off'; field.setAttribute('aria-label', 'Six-digit Bluetooth code');
+-        field.style.cssText = 'padding:10px;color:#0f172a;width:100%;margin-bottom:16px'; dialog.append(field);
++        field = make('input', 'ecotrack-bluetooth-dialog__input');
++        field.inputMode = 'numeric'; field.maxLength = 6; field.autocomplete = 'off';
++        field.setAttribute('aria-label', 'Six-digit Bluetooth code');
++        field.setAttribute('aria-describedby', validation.id);
++        options.append(field, validation);
+       }
+-      const close = value => { dialog.close(); dialog.remove(); resolve(value); };
++      let settled = false;
++      const close = value => {
++        if (settled) return;
++        settled = true;
++        dialog.close(); dialog.remove(); resolve(value);
++      };
++      dismiss.addEventListener('click', () => close(null));
+       for (const choice of choices) {
+-        const button = root.document.createElement('button'); button.textContent = choice.label; button.type = 'button';
+-        button.style.cssText = 'padding:10px;margin:4px;border:1px solid #10b981;border-radius:8px;background:#065f46;color:white';
++        const cancel = choice.value === null || choice.value === false;
++        const button = make('button', cancel ? 'ecotrack-bluetooth-dialog__cancel' : 'ecotrack-bluetooth-dialog__choice', choice.label);
++        button.type = 'button';
+         button.addEventListener('click', () => {
+-          if (passkey && choice.value && !/^\d{6}$/.test(field.value)) { field.focus(); return; }
++          if (passkey && choice.value && !/^\d{6}$/.test(field.value)) {
++            validation.hidden = false;
++            field.setAttribute('aria-invalid', 'true');
++            field.focus(); return;
++          }
+           close(passkey && choice.value ? field.value : choice.value);
+-        }); dialog.append(button);
++        });
++        (cancel ? footer : options).append(button);
++        if (!cancel && !firstChoice) firstChoice = button;
+       }
+       dialog.addEventListener('cancel', event => { event.preventDefault(); close(null); });
+-      root.document.body.append(dialog); dialog.showModal(); field?.focus();
++      dialog.addEventListener('close', () => close(null));
++      // Escape dismisses this picker without closing the registration wizard below it.
++      dialog.addEventListener('keydown', event => { if (event.key === 'Escape') event.stopPropagation(); });
++      root.document.body.append(dialog);
++      dialog.showModal();
++      (field || firstChoice || dismiss).focus();
+     });
+   }
+   if (root.electron?.on && root.document) {
+--- before/public/styles.css
++++ after/public/styles.css
+@@ -9084,3 +9084,185 @@
+   margin: 0 !important;
+   padding: 0 !important;
+ }
++
++/* Nearby Bluetooth selection is a native modal above the registration wizard. */
++.ecotrack-bluetooth-dialog {
++  --ble-bg: #ffffff;
++  --ble-text: #0f172a;
++  --ble-muted: #475569;
++  --ble-border: #cbd5e1;
++  --ble-choice: #f0fdfa;
++  --ble-choice-text: #115e59;
++  --ble-hover: #ccfbf1;
++  position: fixed;
++  inset: 0;
++  box-sizing: border-box;
++  width: min(480px, calc(100vw - 32px));
++  max-width: none;
++  max-height: calc(100dvh - 32px);
++  margin: auto !important;
++  padding: 0;
++  overflow: auto;
++  border: 1px solid var(--ble-border);
++  border-radius: 20px;
++  background: var(--ble-bg);
++  color: var(--ble-text);
++  font-family: inherit;
++  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.3);
++}
++.dark .ecotrack-bluetooth-dialog {
++  --ble-bg: #0f172a;
++  --ble-text: #f8fafc;
++  --ble-muted: #cbd5e1;
++  --ble-border: #334155;
++  --ble-choice: #134e4a;
++  --ble-choice-text: #ccfbf1;
++  --ble-hover: #115e59;
++  color-scheme: dark;
++}
++.ecotrack-bluetooth-dialog::backdrop {
++  background: rgba(2, 6, 23, 0.56);
++}
++.ecotrack-bluetooth-dialog .ecotrack-bluetooth-dialog__header {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 16px;
++  padding: 24px 24px 10px;
++}
++.ecotrack-bluetooth-dialog .ecotrack-bluetooth-dialog__title {
++  margin: 0;
++  font-size: 20px;
++  line-height: 1.35;
++  font-weight: 700 !important;
++  color: var(--ble-text) !important;
++}
++.ecotrack-bluetooth-dialog .ecotrack-bluetooth-dialog__description {
++  margin: 0;
++  padding: 0 24px;
++  color: var(--ble-muted) !important;
++  font-size: 14px;
++  line-height: 1.6;
++}
++.ecotrack-bluetooth-dialog__options {
++  display: grid;
++  gap: 10px;
++  padding: 22px 24px 24px;
++}
++.ecotrack-bluetooth-dialog__footer {
++  display: flex;
++  justify-content: flex-end;
++  padding: 16px 24px;
++  border-top: 1px solid var(--ble-border);
++}
++.ecotrack-bluetooth-dialog button {
++  font: inherit;
++  cursor: pointer;
++  transition: background 150ms ease;
++}
++.ecotrack-bluetooth-dialog .ecotrack-bluetooth-dialog__choice {
++  width: 100%;
++  padding: 14px 16px;
++  border: 1px solid #14b8a6;
++  border-radius: 12px;
++  background: var(--ble-choice);
++  color: var(--ble-choice-text) !important;
++  font-size: 14px;
++  font-weight: 600;
++  line-height: 1.5;
++  text-align: left;
++  overflow-wrap: anywhere;
++}
++.ecotrack-bluetooth-dialog__choice:hover {
++  background: var(--ble-hover) !important;
++}
++.ecotrack-bluetooth-dialog .ecotrack-bluetooth-dialog__cancel {
++  padding: 10px 18px;
++  border: 1px solid var(--ble-border);
++  border-radius: 10px;
++  background: var(--ble-bg);
++  color: var(--ble-text) !important;
++  font-size: 14px;
++}
++.ecotrack-bluetooth-dialog .ecotrack-bluetooth-dialog__close {
++  flex-shrink: 0;
++  width: 32px;
++  height: 32px;
++  padding: 0;
++  border: 0;
++  border-radius: 8px;
++  background: transparent;
++  color: var(--ble-muted) !important;
++  font-size: 24px;
++  line-height: 1;
++}
++.ecotrack-bluetooth-dialog__cancel:hover,
++.ecotrack-bluetooth-dialog__close:hover {
++  background: var(--ble-choice) !important;
++}
++.ecotrack-bluetooth-dialog .ecotrack-bluetooth-dialog__input {
++  box-sizing: border-box;
++  width: 100%;
++  padding: 12px;
++  border: 1px solid var(--ble-border);
++  border-radius: 10px;
++  background: var(--ble-bg);
++  color: var(--ble-text);
++  font: inherit;
++}
++.ecotrack-bluetooth-dialog .ecotrack-bluetooth-dialog__validation {
++  margin: 0;
++  color: #f43f5e !important;
++  font-size: 13px;
++}
++.ecotrack-bluetooth-dialog button:focus-visible,
++.ecotrack-bluetooth-dialog input:focus-visible,
++#autoAssignIpBtn:focus-visible {
++  outline: 3px solid #14b8a6;
++  outline-offset: 3px;
++}
++#autoAssignIpBtn {
++  display: inline-flex;
++  align-items: center;
++  gap: 5px;
++  padding: 5px 8px;
++  border: 1px solid #99f6e4;
++  border-radius: 8px;
++  background: #f0fdfa;
++  color: #0f766e;
++  font-size: 11px;
++  font-weight: 600;
++  cursor: pointer;
++}
++.dark #autoAssignIpBtn {
++  border-color: #115e59;
++  background: #134e4a;
++  color: #5eead4;
++}
++#autoAssignIpBtn:disabled {
++  opacity: 0.7;
++  cursor: wait;
++}
++#autoAssignIpIcon.is-reading {
++  animation: device-ip-spin 1s linear infinite;
++}
++@keyframes device-ip-spin { to { transform: rotate(360deg); } }
++.device-ip-feedback {
++  margin: 6px 0 0;
++  color: #64748b;
++  font-size: 12px;
++  line-height: 1.5;
++  overflow-wrap: anywhere;
++}
++.device-ip-feedback[data-state="reading"],
++.device-ip-feedback[data-state="success"] { color: #0f766e !important; }
++.device-ip-feedback[data-state="warning"] { color: #92400e !important; }
++.device-ip-feedback[data-state="error"] { color: #be123c !important; }
++.dark .device-ip-feedback { color: #94a3b8; }
++.dark .device-ip-feedback[data-state="reading"],
++.dark .device-ip-feedback[data-state="success"] { color: #5eead4 !important; }
++.dark .device-ip-feedback[data-state="warning"] { color: #fcd34d !important; }
++.dark .device-ip-feedback[data-state="error"] { color: #fda4af !important; }
++@media (prefers-reduced-motion: reduce) {
++  #autoAssignIpIcon.is-reading { animation: none; }
++}
+--- before/scripts/test_cloud_hardware_ui.js
++++ after/scripts/test_cloud_hardware_ui.js
+@@ -41,8 +41,9 @@
+  maps.bluetoothPairings.set('pair-no-pin',{sender,kind:'confirm',callback:value=>callbacks.push(value),timer:1});
+  const confirming=pairingListeners.get('bluetooth-pairing-request')({}, {request_id:'pair-no-pin',pairingKind:'confirm',deviceId:'real-device'});
+  assert(!createdTags.includes('input'),'Just Works confirmation must not create a PIN field');
+- assert.equal(dialogButtons[0].textContent,'Pair');
+- dialogButtons[0].click();
++ const pairButton=dialogButtons.find(button=>button.textContent==='Pair');
++ assert(pairButton);
++ pairButton.click();
+  await confirming;
+  assert.equal(callbacks.at(-1).confirmed,true);
+  assert.equal(callbacks.at(-1).pin,undefined);
+--- before/scripts/test_registration_progress.js
++++ after/scripts/test_registration_progress.js
+@@ -48,7 +48,7 @@
+   const context = vm.createContext({
+     window, console, document: { getElementById: get }, NodeService: { saveNode: async node => { saved.push(node); return persisted.promise; }, saveRemoteProfile: async () => {} },
+     ProtocolAdapter: { detectRemoteBrand: async id => ({ success: true, brand: 'Daikin', protocol: 'DAIKIN2' }) },
+-    renderBrandChips() {}, renderNodes() {}, setNodeModalStep() {}, setTimeout: () => 1,
++    renderBrandChips() {}, renderNodes() {}, setNodeModalStep() {}, resetDeviceIpFeedback() {}, setTimeout: () => 1,
+     _cachedBuildings: [], _cachedFloors: [], _cachedRooms: [], nodeCurrentPage: 1,
+     AirconProfileManager: { getById: () => null },
+     modal: get('nodeModal'), saveNodeBtn: get('saveNodeBtn'),

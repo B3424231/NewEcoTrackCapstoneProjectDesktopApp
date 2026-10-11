@@ -42,7 +42,7 @@ body {
     linear-gradient(160deg, var(--bg-deep), var(--bg-mid));
   color: var(--text-primary);
   scrollbar-width: thin;
-  scrollbar-color: #18392B #ffffff !important;
+  scrollbar-color: rgba(20, 184, 166, 0.4) transparent !important;
 }
 
 body::before {
@@ -101,26 +101,32 @@ main {
 
 html {
   scrollbar-width: thin;
-  scrollbar-color: #18392B #ffffff !important;
+  scrollbar-color: rgba(20, 184, 166, 0.4) transparent !important;
 }
 
 ::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 
 ::-webkit-scrollbar-track {
-  background-color: #ffffff !important;
+  background-color: transparent !important;
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: #18392B !important;
+  background-color: rgba(20, 184, 166, 0.4) !important;
   border-radius: 999px;
-  border: 1px solid rgba(9, 16, 31, 0.45);
+  border: none !important;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background-color: #0f241b !important;
+  background-color: rgba(20, 184, 166, 0.75) !important;
 }
 
 #root {
@@ -131,7 +137,7 @@ html {
 /* Sidebar Styles */
 aside {
   scrollbar-width: thin;
-  scrollbar-color: #18392B #ffffff !important;
+  scrollbar-color: rgba(20, 184, 166, 0.4) transparent !important;
 }
 
 aside::-webkit-scrollbar {
@@ -143,10 +149,19 @@ aside::-webkit-scrollbar-track {
   background-color: #ffffff !important;
 }
 
-aside::-webkit-scrollbar-thumb {
-  background-color: #18392B !important;
-  border-radius: 999px;
-  border: 1px solid rgba(9, 16, 31, 0.45);
+aside::-webkit-scrollbar,
+#sidebar::-webkit-scrollbar,
+#sidebarNav::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+aside,
+#sidebar,
+#sidebarNav {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
 }
 
 .nav-link {
@@ -154,18 +169,20 @@ aside::-webkit-scrollbar-thumb {
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.6rem;
   text-decoration: none;
   pointer-events: auto;
   user-select: none;
   -webkit-user-select: none;
-  border-radius: 0.5rem;
-  padding: 0.75rem 1rem;
-  margin: 0.25rem 0;
+  border-radius: 0.375rem;
+  padding: 0.35rem 0.6rem;
+  margin: 0.05rem 0;
   border: 1px solid transparent;
   color: var(--text-muted);
   position: relative;
   background: transparent;
+  font-size: 0.865rem;
+  line-height: 1.25;
 }
 
 /* Default state - plain, no highlight */
@@ -253,11 +270,11 @@ aside::-webkit-scrollbar-thumb {
   height: 24px;
 }
 
-.brand-logo {
-  width: 32px;
-  height: 32px;
+.brand-logo,
+.logo-img,
+img.brand-logo {
   object-fit: contain;
-  border-radius: 4px;
+  border-radius: 8px;
 }
 
 /* Icon in buttons */
@@ -804,7 +821,8 @@ input:focus {
 }
 
 #sidebar {
-  transition: width 0.3s ease;
+  transition: width 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: width;
 }
 
 #sidebar.sidebar-no-anim {
@@ -850,14 +868,36 @@ input:focus {
   opacity: 0;
 }
 
+#sidebar.collapsed .sidebar-section-header {
+  display: none;
+  opacity: 0;
+}
+
+.sidebar-section-header {
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #34d399;
+  padding: 0.38rem 0.6rem 0.12rem 0.6rem;
+  margin-top: 0.18rem;
+  user-select: none;
+  display: block;
+  opacity: 0.9;
+}
+
+html:not(.dark) .sidebar-section-header {
+  color: #34d399;
+}
+
 /* Badge in EXPANDED mode: inline pill next to text, pushed to right */
 .notif-badge {
   margin-left: auto;
-  min-width: 20px;
-  height: 20px;
-  font-size: 0.7rem;
+  min-width: 18px;
+  height: 18px;
+  font-size: 0.65rem;
   line-height: 1;
-  padding: 0 5px;
+  padding: 0 4px;
   box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.25);
   animation: badgePulse 2s ease-in-out infinite;
 }
@@ -879,27 +919,26 @@ input:focus {
   display: flex !important;
   opacity: 1;
   position: absolute;
-  right: 4px;
-  top: 4px;
-  width: 18px;
-  height: 18px;
-  min-width: 18px;
-  font-size: 0.6rem;
+  right: 2px;
+  top: 2px;
+  width: 15px;
+  height: 15px;
+  min-width: 15px;
+  font-size: 0.55rem;
   padding: 0;
   margin-left: 0;
 }
 
 #sidebar.collapsed .nav-link {
   justify-content: center !important;
-  padding: 0.75rem !important;
-  width: 3.5rem !important;
-  height: 3.5rem !important;
-  margin-left: auto !important;
-  margin-right: auto !important;
+  padding: 0.35rem !important;
+  width: 2.25rem !important;
+  height: 2.25rem !important;
+  margin: 0.15rem auto !important;
 }
 
 #sidebar.collapsed .user-container {
-  padding: 1rem 0 !important;
+  padding: 0.5rem 0 !important;
 }
 
 #sidebar.collapsed .user-info {
@@ -917,6 +956,40 @@ input:focus {
   height: 3.5rem !important;
   padding: 0.75rem !important;
   justify-content: center !important;
+}
+
+/* Dedicated Logout button rose theme styling */
+#logoutButton,
+#sidebar #logoutButton,
+.glass-sidebar #logoutButton {
+  color: #fb7185 !important;
+}
+
+#logoutButton span,
+#sidebar #logoutButton span,
+.glass-sidebar #logoutButton span {
+  color: #fb7185 !important;
+}
+
+#logoutButton svg,
+#sidebar #logoutButton svg,
+.glass-sidebar #logoutButton svg {
+  color: #fb7185 !important;
+  stroke: #fb7185 !important;
+}
+
+#logoutButton:hover,
+#sidebar #logoutButton:hover,
+.glass-sidebar #logoutButton:hover {
+  background-color: rgba(244, 63, 94, 0.15) !important;
+  border-color: rgba(244, 63, 94, 0.3) !important;
+  color: #fda4af !important;
+}
+
+#logoutButton:hover span,
+#logoutButton:hover svg {
+  color: #fda4af !important;
+  stroke: #fda4af !important;
 }
 
 /* ========================================================
@@ -1435,11 +1508,9 @@ html.dark .tooltip-content[data-placement="top"]::before {
 }
 
 .glass-sidebar {
-  background: linear-gradient(180deg, rgba(11, 22, 44, 0.92), rgba(9, 18, 35, 0.84));
-  border-right: 1px solid rgba(120, 162, 221, 0.25);
+  background: #18392B !important;
+  border-right: 1px solid rgba(120, 162, 221, 0.15);
   box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.04);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
 }
 
 .glass-panel {
@@ -2312,55 +2383,55 @@ html.dark .tooltip-content[data-placement="top"]::before {
 
 #notificationsList {
   scrollbar-width: thin;
-  scrollbar-color: #18392B #ffffff !important;
+  scrollbar-color: rgba(20, 184, 166, 0.4) transparent !important;
 }
 
 #notificationsList::-webkit-scrollbar {
-  width: 3px;
-  height: 3px;
+  width: 4px;
+  height: 4px;
 }
 
 #notificationsList::-webkit-scrollbar-track {
-  background-color: #ffffff !important;
+  background-color: transparent !important;
 }
 
 #notificationsList::-webkit-scrollbar-thumb {
-  background-color: #18392B !important;
+  background-color: rgba(20, 184, 166, 0.4) !important;
   border-radius: 999px;
-  border: 1px solid rgba(9, 16, 31, 0.45);
+  border: none !important;
 }
 
 #notificationsList::-webkit-scrollbar-thumb:hover {
-  background-color: #0f241b !important;
+  background-color: rgba(20, 184, 166, 0.75) !important;
 }
 
 #messagesTableContainer>div {
   scrollbar-width: thin;
-  scrollbar-color: #18392B #ffffff !important;
+  scrollbar-color: rgba(20, 184, 166, 0.4) transparent !important;
 }
 
 #messagesTableContainer>div::-webkit-scrollbar {
-  width: 3px;
-  height: 3px;
+  width: 4px;
+  height: 4px;
 }
 
 #messagesTableContainer>div::-webkit-scrollbar-track {
-  background-color: #ffffff !important;
+  background-color: transparent !important;
 }
 
 #messagesTableContainer>div::-webkit-scrollbar-thumb {
-  background-color: #18392B !important;
+  background-color: rgba(20, 184, 166, 0.4) !important;
   border-radius: 999px;
-  border: 1px solid rgba(9, 16, 31, 0.45);
+  border: none !important;
 }
 
 #messagesTableContainer>div::-webkit-scrollbar-thumb:hover {
-  background-color: #0f241b !important;
+  background-color: rgba(20, 184, 166, 0.75) !important;
 }
 
 .eco-slim-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: #18392B #ffffff !important;
+  scrollbar-color: rgba(20, 184, 166, 0.4) transparent !important;
 }
 
 .eco-slim-scrollbar {
@@ -2406,7 +2477,7 @@ html.dark .tooltip-content[data-placement="top"]::before {
 
 #roomsList {
   scrollbar-width: thin;
-  scrollbar-color: #18392B #ffffff !important;
+  scrollbar-color: rgba(20, 184, 166, 0.4) transparent !important;
 }
 
 #roomsList::-webkit-scrollbar {
@@ -2415,41 +2486,41 @@ html.dark .tooltip-content[data-placement="top"]::before {
 }
 
 #roomsList::-webkit-scrollbar-track {
-  background-color: #ffffff !important;
+  background-color: transparent !important;
 }
 
 #roomsList::-webkit-scrollbar-thumb {
-  background-color: #18392B !important;
+  background-color: rgba(20, 184, 166, 0.4) !important;
   border-radius: 999px;
-  border: 1px solid rgba(9, 16, 31, 0.45);
+  border: none !important;
 }
 
 #roomsList::-webkit-scrollbar-thumb:hover {
-  background-color: #0f241b !important;
+  background-color: rgba(20, 184, 166, 0.75) !important;
 }
 
 .scheduler-table-scroll {
   scrollbar-width: thin;
-  scrollbar-color: #18392B #ffffff !important;
+  scrollbar-color: rgba(20, 184, 166, 0.4) transparent !important;
 }
 
 .scheduler-table-scroll::-webkit-scrollbar {
-  width: 3px;
-  height: 3px;
+  width: 4px;
+  height: 4px;
 }
 
 .scheduler-table-scroll::-webkit-scrollbar-track {
-  background-color: #ffffff !important;
+  background-color: transparent !important;
 }
 
 .scheduler-table-scroll::-webkit-scrollbar-thumb {
-  background-color: #18392B !important;
+  background-color: rgba(20, 184, 166, 0.4) !important;
   border-radius: 999px;
-  border: 1px solid rgba(9, 16, 31, 0.45);
+  border: none !important;
 }
 
 .scheduler-table-scroll::-webkit-scrollbar-thumb:hover {
-  background-color: #0f241b !important;
+  background-color: rgba(20, 184, 166, 0.75) !important;
 }
 
 .schedule-time-trigger {
@@ -2928,6 +2999,8 @@ html.dark .tooltip-content[data-placement="top"]::before {
 }
 
 .notification-filter-btn {
+  white-space: nowrap !important;
+  height: 40px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3480,16 +3553,36 @@ textarea.glass-input:focus {
 }
 
 /* Sidebar navigation icons and EcoTrack brand title - always match dark theme cyan */
-#sidebar .nav-link svg,
-#sidebar .nav-link svg.text-cyan-400,
-.glass-sidebar .nav-link svg,
-.glass-sidebar .nav-link svg.text-cyan-400,
-html:not(.dark) #sidebar .nav-link svg,
-html:not(.dark) .glass-sidebar .nav-link svg,
-html:not(.dark) #sidebar svg.text-cyan-400,
-html:not(.dark) .glass-sidebar svg.text-cyan-400 {
+#sidebar .nav-link:not(#logoutButton) svg,
+#sidebar .nav-link:not(#logoutButton) svg.text-cyan-400,
+.glass-sidebar .nav-link:not(#logoutButton) svg,
+.glass-sidebar .nav-link:not(#logoutButton) svg.text-cyan-400,
+html:not(.dark) #sidebar .nav-link:not(#logoutButton) svg,
+html:not(.dark) .glass-sidebar .nav-link:not(#logoutButton) svg,
+html:not(.dark) #sidebar .nav-link:not(#logoutButton) svg.text-cyan-400,
+html:not(.dark) .glass-sidebar .nav-link:not(#logoutButton) svg.text-cyan-400 {
   color: #22d3ee !important;
   stroke: #22d3ee !important;
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  min-height: 16px !important;
+}
+
+#sidebar .nav-link,
+.glass-sidebar .nav-link {
+  padding: 0.35rem 0.6rem !important;
+  margin: 0.06rem 0 !important;
+  gap: 0.6rem !important;
+  font-size: 0.865rem !important;
+  border-radius: 0.375rem !important;
+}
+
+#sidebar .nav-link span:not(.notif-badge),
+.glass-sidebar .nav-link span:not(.notif-badge) {
+  font-size: 0.865rem !important;
+  font-weight: 500 !important;
+  line-height: 1.25 !important;
 }
 
 #sidebar .sidebar-title,
@@ -3508,10 +3601,44 @@ html:not(.dark) .glass-sidebar .sidebar-title span {
   border-right: none;
 }
 
-.glass-sidebar .nav-link:hover,
-.glass-sidebar .nav-link.active {
-  background: rgba(154, 205, 50, 0.2) !important;
-  border-left: 3px solid rgba(154, 205, 50, 0.5) !important;
+.glass-sidebar .nav-link:not(#logoutButton) {
+  color: rgba(255, 255, 255, 0.85) !important;
+  border: 1px solid transparent !important;
+  transition: all 0.2s ease !important;
+}
+
+.glass-sidebar .nav-link:not(#logoutButton) span {
+  color: inherit !important;
+}
+
+.glass-sidebar .nav-link:hover:not(.active):not(#logoutButton) {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+}
+
+.glass-sidebar .nav-link:hover:not(.active):not(#logoutButton) span {
+  color: #ffffff !important;
+}
+
+.glass-sidebar .nav-link.active:not(#logoutButton) {
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.28) 0%, rgba(6, 182, 212, 0.15) 100%) !important;
+  border: 1px solid rgba(52, 211, 153, 0.45) !important;
+  border-left: 3.5px solid #10b981 !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
+}
+
+.glass-sidebar .nav-link.active:not(#logoutButton) span {
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35) !important;
+}
+
+.glass-sidebar .nav-link.active:not(#logoutButton) svg {
+  color: #22d3ee !important;
+  stroke: #22d3ee !important;
+  filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.55)) !important;
 }
 
 /* === GLOBAL LIGHT THEME COMPLEMENT OVERRIDES === */
@@ -3584,11 +3711,32 @@ textarea.glass-input:focus {
   color: #ffffff !important;
 }
 
-.bg-cyan-500,
-.bg-cyan-600,
-.hover\:bg-cyan-700:hover {
+.bg-cyan-500:not(#btnChecklistViewRepair),
+.bg-cyan-600:not(#btnChecklistViewRepair),
+.hover\:bg-cyan-700:hover:not(#btnChecklistViewRepair) {
   background-color: #ffffff !important;
   color: #18392B !important;
+}
+
+#btnChecklistViewRepair,
+#ecoChecklistItemModalFooter #btnChecklistViewRepair,
+button#btnChecklistViewRepair {
+  background-color: #0891b2 !important;
+  color: #ffffff !important;
+  border: none !important;
+  box-shadow: 0 4px 12px rgba(8, 145, 178, 0.35) !important;
+}
+
+#btnChecklistViewRepair:hover,
+#ecoChecklistItemModalFooter #btnChecklistViewRepair:hover {
+  background-color: #06b6d4 !important;
+  color: #ffffff !important;
+}
+
+#btnChecklistViewRepair svg,
+#btnChecklistViewRepair span {
+  color: #ffffff !important;
+  stroke: #ffffff !important;
 }
 
 .bg-cyan-500\/20 {
@@ -3622,7 +3770,7 @@ svg.text-cyan-400,
   color: #ffffff !important;
 }
 
-#activeSensorsBadge {
+#activeControlsBadge {
   background-color: #ffffff !important;
   color: #18392B !important;
 }
@@ -3767,15 +3915,15 @@ input {
   border: 1px solid rgba(16, 185, 129, 0.5) !important;
 }
 
-/* 3. Active Sensors Button */
-a[aria-label="Active Sensors"] {
+/* 3. Active Controls Button */
+a[aria-label="Active Controls"] {
   background: #ffffff !important;
   border: 2px solid rgba(16, 185, 129, 0.8) !important;
   color: #000000 !important;
 }
 
-a[aria-label="Active Sensors"] span,
-a[aria-label="Active Sensors"] svg {
+a[aria-label="Active Controls"] span,
+a[aria-label="Active Controls"] svg {
   color: #000000 !important;
   stroke: #000000 !important;
 }
@@ -3796,22 +3944,40 @@ a[aria-label="Alerts"] svg {
 /* 5. Export PDF and Export Excel Buttons */
 #exportBtn,
 #exportPdfBtn,
-#exportExcelBtn {
-  background: #18392B !important;
+html:not(.dark) #exportBtn,
+html:not(.dark) #exportPdfBtn {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+  background-color: #10b981 !important;
   color: #ffffff !important;
-  border: 2px solid rgba(16, 185, 129, 0.8) !important;
+  border: 2px solid #10b981 !important;
   border-radius: 0.75rem !important;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.25) !important;
   white-space: nowrap !important;
 }
 
-#exportBtn svg,
-#exportPdfBtn svg,
-#exportExcelBtn svg {
+#exportExcelBtn,
+html:not(.dark) #exportExcelBtn {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%) !important;
+  background-color: #059669 !important;
+  color: #ffffff !important;
+  border: 2px solid #059669 !important;
+  border-radius: 0.75rem !important;
+  box-shadow: 0 4px 14px rgba(5, 150, 105, 0.25) !important;
+  white-space: nowrap !important;
+}
+
+#exportBtn *,
+#exportPdfBtn *,
+#exportExcelBtn *,
+html:not(.dark) #exportBtn *,
+html:not(.dark) #exportPdfBtn *,
+html:not(.dark) #exportExcelBtn * {
+  color: #ffffff !important;
   stroke: #ffffff !important;
 }
 
-/* Active Sensors Badge inside button */
-#activeSensorsBadge {
+/* Active Controls Badge inside button */
+#activeControlsBadge {
   background-color: #18392B !important;
   color: #ffffff !important;
   border-color: #ffffff !important;
@@ -3841,27 +4007,64 @@ html:not(.dark) p#nodeCurrentRssi {
 
 /* === SCROLLBAR CUSTOMIZATION === */
 ::-webkit-scrollbar {
-  width: 14px;
-  height: 14px;
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 
 ::-webkit-scrollbar-track {
-  background: #ffffff;
+  background: transparent !important;
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: #18392B;
-  border-radius: 8px;
-  border: 3px solid #ffffff;
+  background-color: rgba(20, 184, 166, 0.4) !important;
+  border-radius: 9999px !important;
+  border: none !important;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background-color: #0f241b;
+  background-color: rgba(20, 184, 166, 0.75) !important;
 }
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: #18392B #ffffff;
+  scrollbar-color: rgba(20, 184, 166, 0.4) transparent !important;
+}
+
+/* Custom sleek scrollbar utility class */
+.custom-scrollbar {
+  scrollbar-width: thin !important;
+  scrollbar-color: rgba(20, 184, 166, 0.4) transparent !important;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px !important;
+  height: 5px !important;
+}
+
+.custom-scrollbar::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(20, 184, 166, 0.4) !important;
+  border-radius: 9999px !important;
+  border: none !important;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(20, 184, 166, 0.75) !important;
 }
 
 /* === TARGET TEMP INPUT === */
@@ -3892,13 +4095,13 @@ html:not(.dark) p#nodeCurrentRssi {
   border: 2px solid #10b981 !important;
 }
 
-/* 2. Light mode only: Force all faded gray labels to be solid dark green / black and bold */
-html:not(.dark) .text-gray-400,
-html:not(.dark) .text-gray-500,
-html:not(.dark) .text-slate-400,
-html:not(.dark) .text-slate-500,
-html:not(.dark) .text-slate-300,
-html:not(.dark) .text-gray-300 {
+/* 2. Light mode only: Force all faded gray labels to be solid dark green / black and bold (exclude sidebar) */
+html:not(.dark) .text-gray-400:not(#sidebar *):not(.glass-sidebar *),
+html:not(.dark) .text-gray-500:not(#sidebar *):not(.glass-sidebar *),
+html:not(.dark) .text-slate-400:not(#sidebar *):not(.glass-sidebar *),
+html:not(.dark) .text-slate-500:not(#sidebar *):not(.glass-sidebar *),
+html:not(.dark) .text-slate-300:not(#sidebar *):not(.glass-sidebar *),
+html:not(.dark) .text-gray-300:not(#sidebar *):not(.glass-sidebar *) {
   color: #18392B !important;
   font-weight: 700 !important;
 }
@@ -4152,9 +4355,10 @@ body.login-page {
 }
 
 /* Clear All / Remove Buttons */
-.bg-rose-500\/10,
-.bg-rose-500\/20,
-.bg-red-500\/20 {
+.btn-remove,
+.btn-remove-all,
+.btn-clear-all,
+button.btn-danger {
   background-color: #ef4444 !important;
   /* Solid bright red */
   color: #ffffff !important;
@@ -4162,10 +4366,62 @@ body.login-page {
   font-weight: 700 !important;
 }
 
-.text-rose-300,
-.text-rose-400,
-.text-red-400,
-.text-rose-100 {
+/* Origin Parent Dispatch Badge (Corrective Repair Header) */
+.btn-goto-parent {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.375rem !important;
+  padding: 0.25rem 0.65rem !important;
+  font-size: 0.75rem !important;
+  line-height: 1rem !important;
+  border-radius: 9999px !important;
+  background-color: rgba(244, 63, 94, 0.12) !important;
+  color: #fda4af !important;
+  border: 1px solid rgba(244, 63, 94, 0.35) !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  text-decoration: none !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1) !important;
+}
+
+.btn-goto-parent:hover {
+  background-color: rgba(244, 63, 94, 0.22) !important;
+  border-color: rgba(244, 63, 94, 0.55) !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(244, 63, 94, 0.25) !important;
+  transform: translateY(-0.5px) !important;
+}
+
+.btn-goto-parent:active {
+  transform: translateY(0) !important;
+}
+
+html:not(.dark) .btn-goto-parent {
+  background-color: #fff1f2 !important;
+  color: #be123c !important;
+  border: 1px solid #fecdd3 !important;
+}
+
+html:not(.dark) .btn-goto-parent:hover {
+  background-color: #ffe4e6 !important;
+  color: #9f1239 !important;
+  border-color: #fda4af !important;
+}
+
+/* Fallback base styles for legacy remove buttons */
+.btn-remove-legacy {
+  background-color: #ef4444 !important;
+  /* Solid bright red */
+  color: #ffffff !important;
+  border: 1px solid #dc2626 !important;
+  font-weight: 700 !important;
+}
+
+button .text-rose-300,
+button .text-rose-400,
+button .text-red-400,
+button .text-rose-100 {
   color: #ffffff !important;
   /* White text on the red buttons */
 }
@@ -4249,8 +4505,8 @@ button.text-gray-400.hover\:text-white.border-dashed:hover {
   box-shadow: 0 4px 12px rgba(24, 57, 43, 0.15) !important;
 }
 
-/* Available AC Sensors panel */
-.available-sensors-panel,
+/* Available AC Controls panel */
+.available-controls-panel,
 .serial-panel {
   background: #ffffff !important;
   border: 2px solid #10b981 !important;
@@ -4463,12 +4719,12 @@ button.text-gray-400.hover\:text-white.border-dashed:hover {
   border-color: rgba(16, 185, 129, 0.4) !important;
 }
 
-#roomSensorCountDisplay {
+#roomControlCountDisplay {
   background: #f8fafc;
   border: 1.5px solid #e2e8f0;
 }
 
-.dark #roomSensorCountDisplay {
+.dark #roomControlCountDisplay {
   background: rgba(2, 6, 23, 0.6);
   border: 1.5px solid rgba(255, 255, 255, 0.08);
 }
@@ -4511,16 +4767,22 @@ button.text-gray-400.hover\:text-white.border-dashed:hover {
 }
 
 
-/* === SENSOR SCHEDULER REDESIGN === */
+/* === CONTROL SCHEDULER REDESIGN === */
 
 .sched-table-header {
   background-color: #18392B !important;
+  background: #18392B !important;
   border-bottom: none !important;
 }
 
 .sched-table-header th {
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
   padding-top: 1rem !important;
   padding-bottom: 1rem !important;
+  border-bottom: none !important;
 }
 
 .sched-table-row {
@@ -4529,11 +4791,15 @@ button.text-gray-400.hover\:text-white.border-dashed:hover {
   transition: all 0.2s ease;
 }
 
+.sched-table-row > td.sched-time-cell {
+  vertical-align: top !important;
+}
+
 .sched-table-row:hover {
   background: rgba(16, 185, 129, 0.03) !important;
 }
 
-/* Icon box for Sensor Name */
+/* Icon box for Control Name */
 .sched-icon-box {
   width: 40px;
   height: 40px;
@@ -4701,12 +4967,34 @@ button.text-gray-400.hover\:text-white.border-dashed:hover {
   font-weight: 800 !important;
 }
 
-/* === FORCE DARK GREEN ON SCHEDULER TABLE HEADER === */
+/* === FORCE DARK GREEN & WHITE TEXT ON SCHEDULER TABLE HEADER === */
 .sched-table-header,
 .sched-table-header tr,
-.sched-table-header th {
+.sched-table-header th,
+html:not(.dark) .sched-table-header,
+html:not(.dark) .sched-table-header tr,
+html:not(.dark) .sched-table-header th,
+html.dark .sched-table-header,
+html.dark .sched-table-header tr,
+html.dark .sched-table-header th,
+table thead.sched-table-header,
+table thead.sched-table-header tr,
+table thead.sched-table-header th {
   background-color: #18392B !important;
   background: #18392B !important;
+  color: #ffffff !important;
+  border-bottom: none !important;
+}
+
+.sched-table-header th,
+.sched-table-header tr th,
+html:not(.dark) .sched-table-header th,
+html.dark .sched-table-header th {
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  font-size: 0.75rem !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
 }
 
 /* === FIX SCHEDULE TILE OVERFLOW === */
@@ -5540,7 +5828,7 @@ button.text-gray-400.hover\:text-white.border-dashed:hover {
   font-size: 0.85rem !important;
 }
 
-/* Sidebar Available AC Sensors specific overrides to prevent text cut-off */
+/* Sidebar Available AC Controls specific overrides to prevent text cut-off */
 #availableNodesList .telem-metric-label {
   font-size: 0.48rem !important;
 }
@@ -5678,8 +5966,9 @@ button.text-gray-400.hover\:text-white.border-dashed:hover {
 
 .dark html,
 .dark body,
-.dark aside {
-  scrollbar-color: #10b981 #0b1224 !important;
+.dark aside,
+html.dark {
+  scrollbar-color: rgba(20, 184, 166, 0.4) transparent !important;
 }
 
 /* Dark mode context menu border fixes */
@@ -5695,10 +5984,10 @@ button.text-gray-400.hover\:text-white.border-dashed:hover {
    ========================================== */
 
 /* 1. Global backgrounds and shell color overrides */
-.dark body,
+.dark body:not(.login-page),
 .dark .app-shell,
-.dark html,
-.dark main {
+.dark html:not(.login-html),
+.dark main:not(.login-main):not(#login-main-grid) {
   background-color: #070b19 !important;
   background-image: none !important;
   color: #e2e8f0 !important;
@@ -5870,15 +6159,15 @@ button.text-gray-400.hover\:text-white.border-dashed:hover {
   color: #f8fafc !important;
 }
 
-/* 7. Active sensor button and headers logic */
-.dark a[aria-label="Active Sensors"] {
+/* 7. Active control button and headers logic */
+.dark a[aria-label="Active Controls"] {
   background: rgba(16, 185, 129, 0.1) !important;
   border-color: rgba(16, 185, 129, 0.4) !important;
   color: #34d399 !important;
 }
 
-.dark a[aria-label="Active Sensors"] span,
-.dark a[aria-label="Active Sensors"] svg {
+.dark a[aria-label="Active Controls"] span,
+.dark a[aria-label="Active Controls"] svg {
   color: #34d399 !important;
   stroke: #34d399 !important;
 }
@@ -5932,23 +6221,27 @@ button.text-gray-400.hover\:text-white.border-dashed:hover {
 }
 
 /* Dark theme overrides */
-.dark ::-webkit-scrollbar-track {
-  background-color: #0b1224 !important;
+.dark ::-webkit-scrollbar-track,
+html.dark ::-webkit-scrollbar-track {
+  background-color: transparent !important;
 }
 
-.dark ::-webkit-scrollbar-thumb {
-  background-color: #10b981 !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+.dark ::-webkit-scrollbar-thumb,
+html.dark ::-webkit-scrollbar-thumb {
+  background-color: rgba(20, 184, 166, 0.4) !important;
+  border: none !important;
+  border-radius: 9999px !important;
 }
 
-.dark ::-webkit-scrollbar-thumb:hover {
-  background-color: #34d399 !important;
+.dark ::-webkit-scrollbar-thumb:hover,
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(20, 184, 166, 0.75) !important;
 }
 
 .dark html,
 .dark body,
 .dark aside {
-  scrollbar-color: #10b981 #0b1224 !important;
+  scrollbar-color: rgba(20, 184, 166, 0.4) transparent !important;
 }
 
 /* Dark mode context menu border fixes */
@@ -5964,13 +6257,22 @@ button.text-gray-400.hover\:text-white.border-dashed:hover {
    ========================================== */
 
 /* 1. Global backgrounds and shell color overrides */
-.dark body,
+.dark body:not(.login-page),
 .dark .app-shell,
-.dark html,
-.dark main {
+.dark html:not(.login-html),
+.dark main:not(.login-main):not(#login-main-grid) {
   background-color: #070b19 !important;
   background-image: none !important;
   color: #e2e8f0 !important;
+}
+
+/* Explicit transparent background for login page elements */
+.login-main,
+#login-main-grid,
+.login-page,
+.login-page main {
+  background-color: transparent !important;
+  background: transparent !important;
 }
 
 /* 2. Title/Heading text color overrides (light colors in dark mode) */
@@ -6139,15 +6441,15 @@ button.text-gray-400.hover\:text-white.border-dashed:hover {
   color: #f8fafc !important;
 }
 
-/* 7. Active sensor button and headers logic */
-.dark a[aria-label="Active Sensors"] {
+/* 7. Active control button and headers logic */
+.dark a[aria-label="Active Controls"] {
   background: rgba(16, 185, 129, 0.1) !important;
   border-color: rgba(16, 185, 129, 0.4) !important;
   color: #34d399 !important;
 }
 
-.dark a[aria-label="Active Sensors"] span,
-.dark a[aria-label="Active Sensors"] svg {
+.dark a[aria-label="Active Controls"] span,
+.dark a[aria-label="Active Controls"] svg {
   color: #34d399 !important;
   stroke: #34d399 !important;
 }
@@ -6743,6 +7045,21 @@ html:not(.dark) .eco-skeleton::after {
   }
 }
 
+.eco-content-fade-in {
+  animation: ecoContentFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes ecoContentFadeIn {
+  from {
+    opacity: 0.2;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Sticky Table Header Opaque Stacking */
 thead.sticky {
   position: sticky !important;
@@ -7088,20 +7405,56 @@ html.dark .theme-toggle-track {
 /* ==========================================================================
    SIDEBAR ICONS & BRAND COLOR (MATCH DARK THEME CYAN #22d3ee ACROSS ALL MODES)
    ========================================================================== */
-#sidebar .nav-link svg,
-#sidebar .nav-link svg.text-cyan-400,
-.glass-sidebar .nav-link svg,
-.glass-sidebar .nav-link svg.text-cyan-400,
-html:not(.dark) #sidebar .nav-link svg,
-html:not(.dark) .glass-sidebar .nav-link svg,
-html:not(.dark) #sidebar svg.text-cyan-400,
-html:not(.dark) .glass-sidebar svg.text-cyan-400,
-html #sidebar .nav-link svg,
-html .glass-sidebar .nav-link svg,
-html:not(.dark) #sidebar .nav-link.active svg,
-html:not(.dark) .glass-sidebar .nav-link.active svg {
+#sidebar .nav-link:not(#logoutButton) svg,
+#sidebar .nav-link:not(#logoutButton) svg.text-cyan-400,
+.glass-sidebar .nav-link:not(#logoutButton) svg,
+.glass-sidebar .nav-link:not(#logoutButton) svg.text-cyan-400,
+html:not(.dark) #sidebar .nav-link:not(#logoutButton) svg,
+html:not(.dark) .glass-sidebar .nav-link:not(#logoutButton) svg,
+html:not(.dark) #sidebar .nav-link:not(#logoutButton) svg.text-cyan-400,
+html:not(.dark) .glass-sidebar .nav-link:not(#logoutButton) svg.text-cyan-400,
+html #sidebar .nav-link:not(#logoutButton) svg,
+html .glass-sidebar .nav-link:not(#logoutButton) svg,
+html:not(.dark) #sidebar .nav-link:not(#logoutButton).active svg,
+html:not(.dark) .glass-sidebar .nav-link:not(#logoutButton).active svg {
   color: #22d3ee !important;
   stroke: #22d3ee !important;
+}
+
+/* Logout button always maintains rose text and rose icon */
+#sidebar #logoutButton,
+.glass-sidebar #logoutButton,
+html:not(.dark) #sidebar #logoutButton,
+html:not(.dark) .glass-sidebar #logoutButton {
+  color: #fb7185 !important;
+}
+
+#sidebar #logoutButton span,
+.glass-sidebar #logoutButton span,
+html:not(.dark) #sidebar #logoutButton span,
+html:not(.dark) .glass-sidebar #logoutButton span {
+  color: #fb7185 !important;
+}
+
+#sidebar #logoutButton svg,
+.glass-sidebar #logoutButton svg,
+html:not(.dark) #sidebar #logoutButton svg,
+html:not(.dark) .glass-sidebar #logoutButton svg {
+  color: #fb7185 !important;
+  stroke: #fb7185 !important;
+}
+
+#sidebar #logoutButton:hover,
+.glass-sidebar #logoutButton:hover {
+  background-color: rgba(244, 63, 94, 0.15) !important;
+  border-color: rgba(244, 63, 94, 0.3) !important;
+  color: #fda4af !important;
+}
+
+#sidebar #logoutButton:hover span,
+#sidebar #logoutButton:hover svg {
+  color: #fda4af !important;
+  stroke: #fda4af !important;
 }
 
 #sidebar .sidebar-title,
@@ -7170,4 +7523,1760 @@ html:not(.dark) .glass-sidebar .sidebar-subtitle,
 
 .dark .rework-task-row:hover {
   box-shadow: 0 4px 14px -2px rgba(245, 158, 11, 0.22);
+}
+
+/* ==========================================================================
+   UNIVERSAL LIGHT MODE & VISUAL TYPOGRAPHY ENGINE
+   High-contrast, crisp, beautiful light theme across all pages & modals
+   ========================================================================== */
+
+/* 1. Global Buttons Gradient in Both Light & Dark */
+.btn-gradient-submit,
+a.btn-gradient-submit,
+button.btn-gradient-submit,
+[class*="btn-gradient"] {
+  background: linear-gradient(135deg, #059669 0%, #0891b2 100%) !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 14px -2px rgba(5, 150, 105, 0.4) !important;
+  border: none !important;
+  font-weight: 800 !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+.btn-gradient-submit *,
+a.btn-gradient-submit *,
+button.btn-gradient-submit *,
+[class*="btn-gradient"] * {
+  color: #ffffff !important;
+}
+.btn-gradient-submit svg,
+a.btn-gradient-submit svg,
+button.btn-gradient-submit svg,
+[class*="btn-gradient"] svg {
+  color: #ffffff !important;
+  stroke: #ffffff !important;
+}
+.btn-gradient-submit:hover,
+a.btn-gradient-submit:hover,
+button.btn-gradient-submit:hover,
+[class*="btn-gradient"]:hover {
+  background: linear-gradient(135deg, #10b981 0%, #06b6d4 100%) !important;
+  color: #ffffff !important;
+  box-shadow: 0 6px 20px -2px rgba(16, 185, 129, 0.5) !important;
+  transform: translateY(-1px) !important;
+}
+
+/* 2. Base Light Mode Canvas & Root Variables */
+html:not(.dark) {
+  color-scheme: light;
+}
+
+html:not(.dark) body,
+html:not(.dark) body.app-shell {
+  background: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+html:not(.dark) body::before {
+  display: none !important;
+}
+
+/* 3. Header & Navigation Bars in Light Mode */
+html:not(.dark) header {
+  background-color: #ffffff !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05) !important;
+}
+
+html:not(.dark) header h1,
+html:not(.dark) header h2 {
+  color: #0f172a !important;
+  font-weight: 900 !important;
+}
+
+html:not(.dark) header p {
+  color: #475569 !important;
+  font-weight: 500 !important;
+}
+
+/* 4. Glass Surfaces, Panels & Cards in Light Mode */
+html:not(.dark) .glass-panel,
+html:not(.dark) .glass-card,
+html:not(.dark) .glass-surface {
+  background-color: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.05), 0 2px 6px -1px rgba(15, 23, 42, 0.03) !important;
+  color: #0f172a !important;
+}
+
+html:not(.dark) .glass-surface-soft {
+  background-color: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  color: #0f172a !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04) !important;
+}
+
+/* Eliminate dirty gray sludge backgrounds from dark-mode Tailwind opacities */
+html:not(.dark) .bg-black\/20,
+html:not(.dark) .bg-black\/25,
+html:not(.dark) .bg-black\/30,
+html:not(.dark) .bg-black\/40,
+html:not(.dark) .bg-black\/60 {
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+html:not(.dark) .bg-white\/5,
+html:not(.dark) .bg-white\/10 {
+  background-color: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+html:not(.dark) .border-white\/5,
+html:not(.dark) .border-white\/10,
+html:not(.dark) .border-white\/15,
+html:not(.dark) .border-white\/20 {
+  border-color: #e2e8f0 !important;
+}
+
+/* 5. High-Contrast Typography & Fonts (exclude buttons, sidebar, and dark-background elements) */
+html:not(.dark) .text-white:not(button):not(button *):not([role="button"]):not([role="button"] *):not(.btn-gradient-submit):not(.btn-gradient-submit *):not([class*="btn-gradient"]):not([class*="btn-gradient"] *):not(a.btn-gradient-submit):not(a.btn-gradient-submit *):not(a.text-white):not(a.text-white *):not(a[class*="btn-"]):not(a[class*="btn-"] *):not(th):not(th *):not(thead *):not(.badge-filled):not(.badge-filled *):not(#sidebar *):not(.glass-sidebar *):not([class*=" bg-[#"]):not([class*=" bg-[#"] *):not([class^="bg-[#"]):not([class^="bg-[#"] *):not([class*="bg-emerald"]):not([class*="bg-emerald"] *):not([class*="bg-teal"]):not([class*="bg-teal"] *):not([class*="bg-cyan"]):not([class*="bg-cyan"] *):not([class*="bg-green"]):not([class*="bg-green"] *):not([class*="bg-rose"]):not([class*="bg-rose"] *):not([class*="bg-red"]):not([class*="bg-red"] *):not([class*="bg-blue"]):not([class*="bg-blue"] *) {
+  color: #0f172a !important;
+}
+
+/* Ensure all buttons, active tabs, and badges with dark backgrounds retain pure white text & icons */
+button.text-white,
+button.text-white *,
+a.text-white,
+a.text-white *,
+.btn-gradient-submit,
+.btn-gradient-submit *,
+.btn-gradient-submit span,
+a.btn-gradient-submit,
+a.btn-gradient-submit *,
+a.btn-gradient-submit span,
+button.btn-gradient-submit,
+button.btn-gradient-submit *,
+button.btn-gradient-submit span,
+[class*="btn-gradient"],
+[class*="btn-gradient"] *,
+[class*="btn-gradient"] span,
+#viewActiveRulesBtn,
+#viewActiveRulesBtn *,
+#headerAddRuleBtn,
+#headerAddRuleBtn *,
+#addRuleBtn,
+#addRuleBtn *,
+.log-tab.active,
+.log-tab.active *,
+#exportBtn,
+#exportBtn *,
+#exportPdfBtn,
+#exportPdfBtn *,
+#exportExcelBtn,
+#exportExcelBtn *,
+html:not(.dark) button.text-white,
+html:not(.dark) button.text-white *,
+html:not(.dark) a.text-white,
+html:not(.dark) a.text-white *,
+html:not(.dark) .btn-gradient-submit,
+html:not(.dark) .btn-gradient-submit *,
+html:not(.dark) .btn-gradient-submit span,
+html:not(.dark) a.btn-gradient-submit,
+html:not(.dark) a.btn-gradient-submit *,
+html:not(.dark) a.btn-gradient-submit span,
+html:not(.dark) button.btn-gradient-submit,
+html:not(.dark) button.btn-gradient-submit *,
+html:not(.dark) button.btn-gradient-submit span,
+html:not(.dark) [class*="btn-gradient"],
+html:not(.dark) [class*="btn-gradient"] *,
+html:not(.dark) [class*="btn-gradient"] span,
+html:not(.dark) #viewActiveRulesBtn,
+html:not(.dark) #viewActiveRulesBtn *,
+html:not(.dark) #headerAddRuleBtn,
+html:not(.dark) #headerAddRuleBtn *,
+html:not(.dark) #addRuleBtn,
+html:not(.dark) #addRuleBtn *,
+html:not(.dark) .log-tab.active,
+html:not(.dark) .log-tab.active *,
+html:not(.dark) #exportBtn,
+html:not(.dark) #exportBtn *,
+html:not(.dark) #exportPdfBtn,
+html:not(.dark) #exportPdfBtn *,
+html:not(.dark) #exportExcelBtn,
+html:not(.dark) #exportExcelBtn * {
+  color: #ffffff !important;
+}
+
+.btn-gradient-submit svg,
+.btn-gradient-submit svg *,
+a.btn-gradient-submit svg,
+a.btn-gradient-submit svg *,
+button.btn-gradient-submit svg,
+button.btn-gradient-submit svg *,
+[class*="btn-gradient"] svg,
+[class*="btn-gradient"] svg *,
+html:not(.dark) .btn-gradient-submit svg,
+html:not(.dark) .btn-gradient-submit svg *,
+html:not(.dark) a.btn-gradient-submit svg,
+html:not(.dark) a.btn-gradient-submit svg *,
+html:not(.dark) button.btn-gradient-submit svg,
+html:not(.dark) button.btn-gradient-submit svg *,
+html:not(.dark) [class*="btn-gradient"] svg,
+html:not(.dark) [class*="btn-gradient"] svg *,
+#viewActiveRulesBtn svg,
+html:not(.dark) #viewActiveRulesBtn svg,
+#headerAddRuleBtn svg,
+html:not(.dark) #headerAddRuleBtn svg,
+#addRuleBtn svg,
+html:not(.dark) #addRuleBtn svg,
+.log-tab.active svg,
+html:not(.dark) .log-tab.active svg,
+#exportBtn svg,
+html:not(.dark) #exportBtn svg,
+#exportPdfBtn svg,
+html:not(.dark) #exportPdfBtn svg,
+#exportExcelBtn svg,
+html:not(.dark) #exportExcelBtn svg {
+  stroke: #ffffff !important;
+}
+
+html:not(.dark) .text-gray-200:not(#sidebar *):not(.glass-sidebar *),
+html:not(.dark) .text-gray-300:not(#sidebar *):not(.glass-sidebar *),
+html:not(.dark) .text-slate-200:not(#sidebar *):not(.glass-sidebar *),
+html:not(.dark) .text-slate-300:not(#sidebar *):not(.glass-sidebar *) {
+  color: #1e293b !important;
+}
+
+html:not(.dark) .text-gray-400:not(#sidebar *):not(.glass-sidebar *),
+html:not(.dark) .text-slate-400:not(#sidebar *):not(.glass-sidebar *) {
+  color: #475569 !important;
+}
+
+html:not(.dark) .text-gray-500:not(#sidebar *):not(.glass-sidebar *),
+html:not(.dark) .text-slate-500:not(#sidebar *):not(.glass-sidebar *) {
+  color: #475569 !important;
+}
+
+/* Neon colors re-mapped to deep accessible tones in Light Mode */
+html:not(.dark) .text-cyan-400,
+html:not(.dark) .text-cyan-300 {
+  color: #0e7490 !important; /* cyan-700 */
+}
+
+html:not(.dark) .text-teal-400,
+html:not(.dark) .text-teal-300 {
+  color: #0f766e !important; /* teal-700 */
+}
+
+html:not(.dark) .text-emerald-400,
+html:not(.dark) .text-emerald-300 {
+  color: #047857 !important; /* emerald-700 */
+}
+
+html:not(.dark) .text-purple-400,
+html:not(.dark) .text-purple-300 {
+  color: #6d28d9 !important; /* purple-700 */
+}
+
+html:not(.dark) .text-rose-400,
+html:not(.dark) .text-rose-300 {
+  color: #be123c !important; /* rose-700 */
+}
+
+/* 6. Thermostat Setpoint Box (Aircon Cards & Control Panel) */
+html:not(.dark) [id^="tempDisplay-"],
+html:not(.dark) #dispTemp {
+  color: #0f172a !important;
+  font-weight: 900 !important;
+}
+
+html:not(.dark) button[id^="tempDown-"],
+html:not(.dark) button[id^="tempUp-"],
+html:not(.dark) #btnTempDown,
+html:not(.dark) #btnTempUp {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border: 1.5px solid #cbd5e1 !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08) !important;
+  font-weight: 900 !important;
+  font-size: 1.15rem !important;
+}
+
+html:not(.dark) button[id^="tempDown-"]:hover,
+html:not(.dark) button[id^="tempUp-"]:hover,
+html:not(.dark) #btnTempDown:hover,
+html:not(.dark) #btnTempUp:hover {
+  background-color: #f1f5f9 !important;
+  border-color: #94a3b8 !important;
+  color: #0f172a !important;
+}
+
+/* 7. KPI Summary Row in Light Mode */
+html:not(.dark) #kpiTotalUnits {
+  color: #0284c7 !important;
+}
+html:not(.dark) #kpiOnlineUnits {
+  color: #047857 !important;
+}
+html:not(.dark) #kpiActivePower {
+  color: #0f766e !important;
+}
+html:not(.dark) #kpiStandby {
+  color: #334155 !important;
+}
+html:not(.dark) #kpiNodesOnline {
+  color: #6d28d9 !important;
+}
+html:not(.dark) #kpiCommandsSent {
+  color: #0284c7 !important;
+}
+html:not(.dark) #kpiCommandsSuccess {
+  color: #047857 !important;
+}
+html:not(.dark) #kpiCommandsFailed {
+  color: #be123c !important;
+}
+
+html:not(.dark) .text-emerald-400\/80,
+html:not(.dark) .text-teal-400\/80,
+html:not(.dark) .text-cyan-400\/80,
+html:not(.dark) .text-rose-400\/80 {
+  color: #475569 !important;
+  font-weight: 600 !important;
+}
+
+/* 8. Filter Pills & Function Buttons */
+html:not(.dark) .filter-pill:not(.active),
+html:not(.dark) .func-pill:not(.active) {
+  background-color: #ffffff !important;
+  color: #334155 !important;
+  border: 1.5px solid #cbd5e1 !important;
+  font-weight: 700 !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03) !important;
+}
+
+html:not(.dark) .filter-pill:not(.active):hover,
+html:not(.dark) .func-pill:not(.active):hover {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+  border-color: #94a3b8 !important;
+}
+
+html:not(.dark) .filter-pill.active,
+html:not(.dark) .func-pill.active {
+  background-color: rgba(13, 148, 136, 0.14) !important;
+  color: #0f766e !important;
+  border: 2px solid #0d9488 !important;
+  font-weight: 800 !important;
+  box-shadow: 0 2px 8px rgba(13, 148, 136, 0.18) !important;
+}
+
+/* Mode and Fan Buttons on Control Page */
+html:not(.dark) .mode-btn:not(.active),
+html:not(.dark) .fan-btn:not(.active),
+html:not(.dark) .func-btn:not(.active) {
+  background-color: #ffffff !important;
+  color: #334155 !important;
+  border: 1.5px solid #cbd5e1 !important;
+  font-weight: 700 !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+}
+
+html:not(.dark) .mode-btn.active,
+html:not(.dark) .fan-btn.active,
+html:not(.dark) .func-btn.active {
+  background-color: rgba(13, 148, 136, 0.14) !important;
+  color: #0f766e !important;
+  border: 2px solid #0d9488 !important;
+  font-weight: 800 !important;
+  box-shadow: 0 2px 8px rgba(13, 148, 136, 0.2) !important;
+}
+
+/* Unit Selection Pills on Control Page */
+html:not(.dark) #unitPillsContainer {
+  background-color: #f1f5f9 !important;
+  border: 1px solid #cbd5e1 !important;
+}
+html:not(.dark) .unit-pill:not(.active) {
+  background-color: #ffffff !important;
+  color: #475569 !important;
+  border: 1px solid #cbd5e1 !important;
+  font-weight: 600 !important;
+}
+html:not(.dark) .unit-pill.active {
+  background-color: rgba(13, 148, 136, 0.14) !important;
+  color: #0f766e !important;
+  border: 1.5px solid #0d9488 !important;
+  font-weight: 800 !important;
+}
+
+/* 9. Form Inputs, Selects & Modals */
+html:not(.dark) input[type="text"],
+html:not(.dark) input[type="number"],
+html:not(.dark) input[type="password"],
+html:not(.dark) input[type="time"]:not(.header-time-input),
+html:not(.dark) input[type="date"],
+html:not(.dark) select:not(.header-filter-pill-select),
+html:not(.dark) textarea {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border: 1.5px solid #cbd5e1 !important;
+  border-radius: 0.75rem !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+  font-weight: 600 !important;
+}
+
+html:not(.dark) input:not(.header-time-input):focus,
+html:not(.dark) select:not(.header-filter-pill-select):focus,
+html:not(.dark) textarea:focus {
+  border-color: #0d9488 !important;
+  outline: none !important;
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15) !important;
+}
+
+html:not(.dark) input::placeholder,
+html:not(.dark) textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+html:not(.dark) #airconModal .glass-card,
+html:not(.dark) #nodeModal .glass-card,
+html:not(.dark) .modal-card {
+  background-color: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25) !important;
+  color: #0f172a !important;
+}
+
+html:not(.dark) #modalTitle,
+html:not(.dark) .modal-title {
+  color: #0f172a !important;
+  font-weight: 900 !important;
+}
+
+html:not(.dark) label {
+  color: #334155 !important;
+  font-weight: 700 !important;
+}
+
+/* Aircon Modal & Physical Deployment Location Light Theme Enhancements */
+html:not(.dark) #airconModal .modal-section-card {
+  background-color: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04) !important;
+}
+
+html:not(.dark) #airconModal .modal-section-title {
+  color: #0f172a !important;
+  font-weight: 800 !important;
+}
+
+html:not(.dark) #airconModal .modal-section-subtitle {
+  color: #64748b !important;
+}
+
+html:not(.dark) #airconModal .deployment-location-card {
+  background: linear-gradient(180deg, rgba(240, 253, 250, 0.85) 0%, rgba(248, 250, 252, 0.95) 100%) !important;
+  border: 1.5px solid rgba(20, 184, 166, 0.35) !important;
+  box-shadow: 0 2px 8px -2px rgba(15, 23, 42, 0.06), 0 0 0 1px rgba(20, 184, 166, 0.1) !important;
+}
+
+html:not(.dark) #airconModal .deployment-location-card .loc-header {
+  border-bottom-color: rgba(20, 184, 166, 0.2) !important;
+}
+
+html:not(.dark) #airconModal .deployment-location-card .loc-title {
+  color: #0f766e !important;
+  font-weight: 900 !important;
+}
+
+html:not(.dark) #airconModal .deployment-location-card .loc-subtitle {
+  color: #64748b !important;
+}
+
+html:not(.dark) #airconModal .deployment-location-card .loc-req-badge {
+  background-color: rgba(13, 148, 136, 0.12) !important;
+  color: #0f766e !important;
+  border: 1px solid rgba(13, 148, 136, 0.3) !important;
+  font-weight: 800 !important;
+}
+
+html:not(.dark) #airconModal .deployment-location-card .loc-guide-text {
+  color: #475569 !important;
+  font-weight: 600 !important;
+}
+
+html:not(.dark) #airconModal .deployment-location-card input {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border: 1.5px solid #cbd5e1 !important;
+  font-weight: 600 !important;
+}
+
+html:not(.dark) #airconModal .deployment-location-card input:focus {
+  border-color: #0d9488 !important;
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.18) !important;
+}
+
+html:not(.dark) #airconModal .deployment-location-card #locationPreviewBadge {
+  background-color: #ffffff !important;
+  color: #0f766e !important;
+  border: 1px solid rgba(20, 184, 166, 0.45) !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06) !important;
+  font-weight: 800 !important;
+}
+
+/* Dark Mode Enhancements for Deployment Location Card */
+.dark #airconModal .deployment-location-card,
+html.dark #airconModal .deployment-location-card {
+  background: linear-gradient(180deg, rgba(13, 148, 136, 0.12) 0%, rgba(12, 20, 39, 0.6) 100%) !important;
+  border: 1.5px solid rgba(45, 212, 191, 0.25) !important;
+}
+
+/* 10. Tables & Status Badges */
+html:not(.dark) table thead:not(.sched-table-header):not(.notifications-table thead):not([class*="bg-[#0b291d]"]):not([class*="bg-[#18392b]"]) {
+  background-color: #f1f5f9 !important;
+}
+
+html:not(.dark) table thead:not(.sched-table-header):not(.notifications-table thead):not([class*="bg-[#0b291d]"]):not([class*="bg-[#18392b]"]) th:not([class*="bg-[#0b291d]"]):not([class*="bg-[#18392b]"]) {
+  color: #1e293b !important;
+  border-bottom: 2px solid #cbd5e1 !important;
+  font-weight: 800 !important;
+}
+
+/* Explicit high-contrast white text for dark green and dark table headers in all modes */
+.sched-table-header th,
+.sched-table-header tr th,
+.notifications-table thead th,
+table thead.sched-table-header th,
+table thead.sched-table-header tr th,
+html:not(.dark) .sched-table-header th,
+html:not(.dark) .sched-table-header tr th,
+html:not(.dark) table thead.sched-table-header th,
+html:not(.dark) table thead.sched-table-header tr th,
+html:not(.dark) .notifications-table thead th,
+html:not(.dark) th[class*="bg-[#0b291d]"],
+html:not(.dark) thead[class*="bg-[#0b291d]"] th {
+  color: #ffffff !important;
+  border-bottom: none !important;
+}
+
+html:not(.dark) table tbody tr {
+  background-color: #ffffff !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+}
+
+html:not(.dark) table tbody tr:hover {
+  background-color: #f8fafc !important;
+}
+
+html:not(.dark) table tbody td {
+  color: #1e293b !important;
+}
+
+html:not(.dark) .bg-emerald-500\/20,
+html:not(.dark) .bg-emerald-500\/10 {
+  background-color: rgba(16, 185, 129, 0.14) !important;
+  color: #047857 !important;
+  border-color: rgba(5, 150, 105, 0.35) !important;
+  font-weight: 800 !important;
+}
+
+html:not(.dark) .bg-rose-500\/20,
+html:not(.dark) .bg-rose-500\/10,
+html:not(.dark) .bg-red-500\/20,
+html:not(.dark) .bg-red-500\/10 {
+  background-color: rgba(244, 63, 94, 0.12) !important;
+  color: #be123c !important;
+  border-color: rgba(244, 63, 94, 0.35) !important;
+  font-weight: 800 !important;
+}
+
+html:not(.dark) .bg-teal-500\/20,
+html:not(.dark) .bg-teal-500\/10 {
+  background-color: rgba(13, 148, 136, 0.14) !important;
+  color: #0f766e !important;
+  border-color: rgba(13, 148, 136, 0.35) !important;
+  font-weight: 800 !important;
+}
+
+html:not(.dark) .bg-cyan-500\/20,
+html:not(.dark) .bg-cyan-500\/10 {
+  background-color: rgba(6, 182, 212, 0.14) !important;
+  color: #0e7490 !important;
+  border-color: rgba(6, 182, 212, 0.35) !important;
+  font-weight: 800 !important;
+}
+
+html:not(.dark) .bg-slate-500\/20 {
+  background-color: #f1f5f9 !important;
+  color: #475569 !important;
+  border-color: #cbd5e1 !important;
+  font-weight: 700 !important;
+}
+
+/* Dedicated High-Contrast Node Status Badges */
+.node-status-online {
+  background-color: #ecfdf5 !important;
+  color: #065f46 !important; /* emerald-800 */
+  border: 1px solid #a7f3d0 !important; /* emerald-200 */
+}
+
+.node-status-offline {
+  background-color: #fef2f2 !important;
+  color: #991b1b !important; /* rose-800 */
+  border: 1px solid #fecaca !important; /* rose-200 */
+}
+
+.dark .node-status-online {
+  background-color: rgba(16, 185, 129, 0.18) !important;
+  color: #6ee7b7 !important; /* emerald-300 */
+  border: 1px solid rgba(16, 185, 129, 0.4) !important;
+}
+
+.dark .node-status-offline {
+  background-color: rgba(244, 63, 94, 0.18) !important;
+  color: #fda4af !important; /* rose-300 */
+  border: 1px solid rgba(244, 63, 94, 0.4) !important;
+}
+
+
+/* 11. IR Learning Studio Canvas in Light Mode */
+html:not(.dark) #captureCanvas {
+  background-color: #f8fafc !important;
+  border: 2px dashed #cbd5e1 !important;
+}
+
+#pulseAnimation {
+  width: 72px !important;
+  height: 72px !important;
+  border-radius: 50% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin: 0 auto !important;
+  background: radial-gradient(circle, rgba(6, 182, 212, 0.22) 0%, rgba(6, 182, 212, 0.05) 70%) !important;
+  border: 2px solid rgba(34, 211, 238, 0.6) !important;
+  color: #22d3ee !important;
+  box-shadow: 0 0 24px rgba(6, 182, 212, 0.4), inset 0 0 12px rgba(6, 182, 212, 0.2) !important;
+  transition: all 0.3s ease !important;
+}
+
+#pulseAnimation svg {
+  width: 36px !important;
+  height: 36px !important;
+  display: block !important;
+  margin: auto !important;
+  color: #22d3ee !important;
+}
+
+html:not(.dark) #pulseAnimation {
+  background: radial-gradient(circle, rgba(13, 148, 136, 0.18) 0%, rgba(13, 148, 136, 0.05) 70%) !important;
+  color: #0d9488 !important;
+  border: 2px solid #0d9488 !important;
+  box-shadow: 0 0 20px rgba(13, 148, 136, 0.3), inset 0 0 10px rgba(13, 148, 136, 0.15) !important;
+}
+
+html:not(.dark) #pulseAnimation svg {
+  color: #0d9488 !important;
+}
+
+html:not(.dark) #signalStatusTitle {
+  color: #0f172a !important;
+  font-weight: 900 !important;
+}
+
+html:not(.dark) #signalStatusInstruction {
+  color: #475569 !important;
+  font-weight: 500 !important;
+}
+
+html:not(.dark) #listenSignalBtn {
+  background-color: #0d9488 !important;
+  color: #ffffff !important;
+  border: none !important;
+  box-shadow: 0 4px 14px rgba(13, 148, 136, 0.3) !important;
+  font-weight: 800 !important;
+}
+
+html:not(.dark) #listenSignalBtn:hover {
+  background-color: #0f766e !important;
+}
+
+/* ==========================================================================
+   SIDEBAR NAV CONTRAST & ACTIVE STATE INTEGRITY (DARK & LIGHT THEMES)
+   Guarantees that active nav links always render with pure white legible text,
+   vibrant emerald/cyan glassmorphic active background, and luminous cyan icons.
+   ========================================================================== */
+#sidebar .nav-link,
+.glass-sidebar .nav-link,
+html:not(.dark) #sidebar .nav-link,
+html:not(.dark) .glass-sidebar .nav-link {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+#sidebar .nav-link span:not(.notif-badge),
+.glass-sidebar .nav-link span:not(.notif-badge),
+html:not(.dark) #sidebar .nav-link span:not(.notif-badge),
+html:not(.dark) .glass-sidebar .nav-link span:not(.notif-badge) {
+  color: inherit !important;
+}
+
+#sidebar .nav-link:hover:not(.active):not(#logoutButton),
+.glass-sidebar .nav-link:hover:not(.active):not(#logoutButton),
+html:not(.dark) #sidebar .nav-link:hover:not(.active):not(#logoutButton),
+html:not(.dark) .glass-sidebar .nav-link:hover:not(.active):not(#logoutButton) {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+}
+
+#sidebar .nav-link:hover:not(.active):not(#logoutButton) span,
+.glass-sidebar .nav-link:hover:not(.active):not(#logoutButton) span,
+html:not(.dark) #sidebar .nav-link:hover:not(.active):not(#logoutButton) span,
+html:not(.dark) .glass-sidebar .nav-link:hover:not(.active):not(#logoutButton) span {
+  color: #ffffff !important;
+}
+
+#sidebar .nav-link.active:not(#logoutButton),
+.glass-sidebar .nav-link.active:not(#logoutButton),
+html:not(.dark) #sidebar .nav-link.active:not(#logoutButton),
+html:not(.dark) .glass-sidebar .nav-link.active:not(#logoutButton) {
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.28) 0%, rgba(6, 182, 212, 0.15) 100%) !important;
+  border: 1px solid rgba(52, 211, 153, 0.45) !important;
+  border-left: 3.5px solid #10b981 !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
+}
+
+#sidebar .nav-link.active:not(#logoutButton) span,
+.glass-sidebar .nav-link.active:not(#logoutButton) span,
+html:not(.dark) #sidebar .nav-link.active:not(#logoutButton) span,
+html:not(.dark) .glass-sidebar .nav-link.active:not(#logoutButton) span {
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35) !important;
+}
+
+#sidebar .nav-link.active:not(#logoutButton) svg,
+.glass-sidebar .nav-link.active:not(#logoutButton) svg,
+html:not(.dark) #sidebar .nav-link.active:not(#logoutButton) svg,
+html:not(.dark) .glass-sidebar .nav-link.active:not(#logoutButton) svg {
+  color: #22d3ee !important;
+  stroke: #22d3ee !important;
+  filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.55)) !important;
+}
+
+#sidebar.collapsed .nav-link.active,
+.glass-sidebar.collapsed .nav-link.active {
+  border-left: 1px solid rgba(52, 211, 153, 0.45) !important;
+}
+
+/* ==========================================================================
+   SMART CLIMATE REMOTE CONTROLLER & COMPANION DECK (LIGHT & DARK THEMES)
+   Ultra-premium tactile hardware aesthetic, luminous OLED digital display,
+   and interactive infrared transmission feedback.
+   ========================================================================== */
+.smart-remote-chassis {
+  background: linear-gradient(170deg, #1e2638 0%, #0e1628 55%, #070c18 100%) !important;
+  border: 1.5px solid rgba(56, 189, 248, 0.28) !important;
+  border-radius: 28px !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 25px rgba(6, 182, 212, 0.14), inset 0 1px 1px rgba(255, 255, 255, 0.2) !important;
+  position: relative;
+}
+
+.remote-oled-screen {
+  background: linear-gradient(180deg, #050b14 0%, #091322 100%) !important;
+  border: 1px solid rgba(34, 211, 238, 0.3) !important;
+  border-radius: 18px !important;
+  box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+}
+
+#remoteLcdTemp,
+html:not(.dark) #remoteLcdTemp,
+html:not(.dark) .smart-remote-chassis #remoteLcdTemp {
+  color: #38bdf8 !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  font-weight: 900 !important;
+  text-shadow: 0 0 16px rgba(56, 189, 248, 0.7), 0 0 32px rgba(6, 182, 212, 0.35) !important;
+  letter-spacing: -0.02em !important;
+}
+
+/* Remote Tactile Keys */
+.smart-remote-chassis .remote-tactile-btn,
+html:not(.dark) .smart-remote-chassis .remote-tactile-btn,
+#remTempPlus,
+#remMode,
+#remTempMinus,
+#remFan,
+#remSwing,
+#remEco {
+  background: linear-gradient(145deg, #222e44, #121c2e) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.15) !important;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  cursor: pointer !important;
+}
+
+.smart-remote-chassis .remote-tactile-btn:hover,
+#remTempPlus:hover,
+#remMode:hover,
+#remTempMinus:hover,
+#remFan:hover,
+#remSwing:hover,
+#remEco:hover {
+  background: linear-gradient(145deg, #2a3a55, #162238) !important;
+  border-color: rgba(56, 189, 248, 0.45) !important;
+  box-shadow: 0 4px 12px rgba(6, 182, 212, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.25) !important;
+  transform: translateY(-1px) !important;
+}
+
+.smart-remote-chassis .remote-tactile-btn:active,
+#remTempPlus:active,
+#remMode:active,
+#remTempMinus:active,
+#remFan:active,
+#remSwing:active,
+#remEco:active {
+  transform: translateY(1px) scale(0.97) !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), inset 0 2px 4px rgba(0, 0, 0, 0.4) !important;
+}
+
+.smart-remote-chassis .remote-tactile-btn span,
+html:not(.dark) .smart-remote-chassis .remote-tactile-btn span,
+.smart-remote-chassis .remote-tactile-btn svg,
+#remTempPlus span, #remTempPlus svg,
+#remTempMinus span, #remTempMinus svg,
+#remFan span, #remFan svg,
+#remSwing span, #remSwing svg,
+#remEco span, #remEco svg {
+  color: #ffffff !important;
+  stroke: currentColor !important;
+}
+
+#remMode span,
+html:not(.dark) #remMode span {
+  color: #67e8f9 !important;
+}
+
+/* Active status on remote function keys */
+.smart-remote-chassis .remote-tactile-btn.active-feature,
+#remSwing.active-feature,
+#remEco.active-feature,
+#remTurbo.active-feature,
+#remSleep.active-feature {
+  background: linear-gradient(145deg, rgba(16, 185, 129, 0.35), rgba(6, 182, 212, 0.25)) !important;
+  border-color: #10b981 !important;
+  color: #34d399 !important;
+  box-shadow: 0 0 14px rgba(16, 185, 129, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+}
+
+.smart-remote-chassis .remote-tactile-btn.active-feature span,
+.smart-remote-chassis .remote-tactile-btn.active-feature svg {
+  color: #34d399 !important;
+  stroke: #34d399 !important;
+}
+
+/* Master Power Button on Remote */
+#remPowerBtn.power-on,
+html:not(.dark) #remPowerBtn.power-on {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+  border: 1px solid rgba(52, 211, 153, 0.5) !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
+}
+
+#remPowerBtn.power-off,
+html:not(.dark) #remPowerBtn.power-off {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
+  border: 1px solid rgba(248, 113, 113, 0.5) !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 14px rgba(239, 68, 68, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
+}
+
+#remPowerBtn:hover {
+  filter: brightness(1.1) !important;
+  transform: translateY(-1px) !important;
+}
+
+#remPowerBtn:active {
+  transform: translateY(1px) scale(0.98) !important;
+}
+
+#remPowerBtn span, #remPowerBtn svg {
+  color: #ffffff !important;
+  stroke: #ffffff !important;
+}
+
+/* IR Blaster Emitter Pulse Animation */
+@keyframes irBeamPulse {
+  0% {
+    opacity: 0.3;
+    transform: scale(1);
+    box-shadow: 0 0 0 rgba(34, 211, 238, 0);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.4);
+    box-shadow: 0 0 16px #22d3ee, 0 0 28px #06b6d4;
+    background-color: #22d3ee;
+  }
+  100% {
+    opacity: 0.3;
+    transform: scale(1);
+    box-shadow: 0 0 0 rgba(34, 211, 238, 0);
+  }
+}
+
+.ir-pulsing {
+  animation: irBeamPulse 0.45s ease-out !important;
+}
+
+/* Direct Preset mini pills */
+.rem-preset-btn,
+html:not(.dark) .rem-preset-btn {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #cbd5e1 !important;
+  transition: all 0.15s ease !important;
+  cursor: pointer !important;
+}
+
+.rem-preset-btn:hover,
+html:not(.dark) .rem-preset-btn:hover {
+  background: rgba(6, 182, 212, 0.2) !important;
+  border-color: rgba(6, 182, 212, 0.4) !important;
+  color: #38bdf8 !important;
+  transform: translateY(-1px) !important;
+}
+
+/* ==========================================================================
+   MAINTENANCE MANAGEMENT TAB CONTROLS (LIGHT & DARK THEMES)
+   Guarantees vivid, high-contrast, perfectly legible buttons with white text
+   ========================================================================== */
+#tabReportsBtn.active-tab,
+#tabStaffBtn.active-tab,
+html:not(.dark) #tabReportsBtn.active-tab,
+html:not(.dark) #tabStaffBtn.active-tab {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+  background-color: #10b981 !important;
+  color: #ffffff !important;
+  border: 2px solid #10b981 !important;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35) !important;
+}
+
+#tabReportsBtn.active-tab .tab-btn-text,
+#tabStaffBtn.active-tab .tab-btn-text,
+#tabReportsBtn.active-tab svg,
+#tabStaffBtn.active-tab svg,
+html:not(.dark) #tabReportsBtn.active-tab .tab-btn-text,
+html:not(.dark) #tabStaffBtn.active-tab .tab-btn-text,
+html:not(.dark) #tabReportsBtn.active-tab svg,
+html:not(.dark) #tabStaffBtn.active-tab svg {
+  color: #ffffff !important;
+  stroke: #ffffff !important;
+}
+
+#tabArchivedBtn.active-tab,
+html:not(.dark) #tabArchivedBtn.active-tab {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%) !important;
+  background-color: #f59e0b !important;
+  color: #ffffff !important;
+  border: 2px solid #f59e0b !important;
+  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.35) !important;
+}
+
+#tabArchivedBtn.active-tab .tab-btn-text,
+#tabArchivedBtn.active-tab svg,
+html:not(.dark) #tabArchivedBtn.active-tab .tab-btn-text,
+html:not(.dark) #tabArchivedBtn.active-tab svg {
+  color: #ffffff !important;
+  stroke: #ffffff !important;
+}
+
+/* Unselected tabs and the archive count keep their own contrast. */
+#tabReportsBtn:not(.active-tab),
+#tabStaffBtn:not(.active-tab),
+#tabArchivedBtn:not(.active-tab) {
+  color: #334155 !important;
+}
+
+.dark #tabReportsBtn:not(.active-tab),
+.dark #tabStaffBtn:not(.active-tab),
+.dark #tabArchivedBtn:not(.active-tab) {
+  color: #cbd5e1 !important;
+}
+
+#archivedBadgeCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+  color: #92400e !important;
+  background-color: #fef3c7 !important;
+}
+
+.dark #archivedBadgeCount {
+  color: #fde68a !important;
+  background-color: #451a03 !important;
+}
+
+#tabArchivedBtn.active-tab #archivedBadgeCount {
+  color: #92400e !important;
+  background-color: #ffffff !important;
+}
+
+#archivedStaffCard.is-empty {
+  flex: 0 0 auto;
+}
+
+#archivedStaffCard.is-empty #archivedStaffScroll {
+  flex: 0 0 auto;
+}
+
+#archivedStaffCard .archived-empty-state {
+  max-width: 34rem;
+  margin-inline: auto;
+}
+
+/* Control Telemetry Logs Tabs */
+.log-tab.active,
+html:not(.dark) .log-tab.active {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+  background-color: #10b981 !important;
+  color: #ffffff !important;
+  border: 2px solid #10b981 !important;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35) !important;
+}
+
+.log-tab.active .tab-label,
+.log-tab.active svg,
+html:not(.dark) .log-tab.active .tab-label,
+html:not(.dark) .log-tab.active svg {
+  color: #ffffff !important;
+  stroke: #ffffff !important;
+}
+
+/* ==========================================================================
+   NOTIFICATIONS PAGE - BUTTONS, TABLE HEADERS, & ROOM BADGES
+   Guarantees vivid emerald active buttons, pure white header text, and clean badges
+   ========================================================================== */
+.notification-filter-btn.active,
+html:not(.dark) .notification-filter-btn.active,
+button#notificationFilterAllBtn.active,
+html:not(.dark) button#notificationFilterAllBtn.active {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+  background-color: #10b981 !important;
+  color: #ffffff !important;
+  border: 2px solid #10b981 !important;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35) !important;
+}
+
+.notification-filter-btn.active *,
+.notification-filter-btn.active .filter-btn-text,
+html:not(.dark) .notification-filter-btn.active *,
+html:not(.dark) .notification-filter-btn.active .filter-btn-text {
+  color: #ffffff !important;
+}
+
+.notifications-table thead,
+.notifications-table thead tr,
+.notifications-table thead th,
+table.notifications-table thead th,
+html:not(.dark) .notifications-table thead,
+html:not(.dark) .notifications-table thead tr,
+html:not(.dark) .notifications-table thead th,
+html:not(.dark) table.notifications-table thead th {
+  background-color: #0b291d !important;
+  color: #ffffff !important;
+  border-bottom: 1px solid rgba(16, 185, 129, 0.2) !important;
+}
+
+.notifications-table thead th,
+.notifications-table thead th *,
+html:not(.dark) .notifications-table thead th,
+html:not(.dark) .notifications-table thead th * {
+  color: #ffffff !important;
+}
+
+/* Room Notification Badges */
+span[id^="roomBadge-"],
+html:not(.dark) span[id^="roomBadge-"] {
+  background-color: #ef4444 !important;
+  color: #ffffff !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
+}
+
+
+/* ==========================================================================
+   AIRCON DEVICE REGISTRY - SLEEK ACTION BUTTONS & CONFIRMATION MODAL
+   ========================================================================== */
+.ac-actions-wrapper {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 0.45rem !important;
+  white-space: nowrap !important;
+}
+
+.ac-action-btn {
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  min-height: 32px !important;
+  border-radius: 0.5rem !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  cursor: pointer !important;
+  text-decoration: none !important;
+  flex-shrink: 0 !important;
+  padding: 0 !important;
+  border: 1px solid transparent !important;
+}
+
+.ac-action-btn svg {
+  width: 15px !important;
+  height: 15px !important;
+  stroke-width: 2 !important;
+  transition: transform 0.2s ease, stroke 0.2s ease !important;
+}
+
+.ac-action-btn:hover {
+  transform: translateY(-1.5px) !important;
+}
+
+.ac-action-btn:active {
+  transform: translateY(0.5px) scale(0.96) !important;
+}
+
+/* Control Panel Button */
+.ac-action-control {
+  background: rgba(16, 185, 129, 0.12) !important;
+  border: 1px solid rgba(16, 185, 129, 0.3) !important;
+  color: #10b981 !important;
+}
+.ac-action-control svg {
+  stroke: #10b981 !important;
+}
+.ac-action-control:hover {
+  background: #10b981 !important;
+  border-color: #059669 !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.35) !important;
+}
+.ac-action-control:hover svg {
+  stroke: #ffffff !important;
+}
+
+/* Edit Device Button */
+.ac-action-edit {
+  background: rgba(59, 130, 246, 0.12) !important;
+  border: 1px solid rgba(59, 130, 246, 0.3) !important;
+  color: #3b82f6 !important;
+}
+.ac-action-edit svg {
+  stroke: #3b82f6 !important;
+}
+.ac-action-edit:hover {
+  background: #2563eb !important;
+  border-color: #1d4ed8 !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35) !important;
+}
+.ac-action-edit:hover svg {
+  stroke: #ffffff !important;
+}
+
+/* IR Command Learning Button */
+.ac-action-ir {
+  background: rgba(6, 182, 212, 0.12) !important;
+  border: 1px solid rgba(6, 182, 212, 0.3) !important;
+  color: #06b6d4 !important;
+}
+.ac-action-ir svg {
+  stroke: #06b6d4 !important;
+}
+.ac-action-ir:hover {
+  background: #0891b2 !important;
+  border-color: #0e7490 !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(8, 145, 178, 0.35) !important;
+}
+.ac-action-ir:hover svg {
+  stroke: #ffffff !important;
+}
+
+/* Delete Aircon Button */
+.ac-action-delete {
+  background: rgba(244, 63, 94, 0.12) !important;
+  border: 1px solid rgba(244, 63, 94, 0.3) !important;
+  color: #fb7185 !important;
+}
+.ac-action-delete svg {
+  stroke: #fb7185 !important;
+}
+.ac-action-delete:hover {
+  background: linear-gradient(135deg, #f43f5e 0%, #dc2626 100%) !important;
+  border-color: #dc2626 !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 14px rgba(225, 29, 72, 0.45) !important;
+}
+.ac-action-delete:hover svg {
+  stroke: #ffffff !important;
+}
+
+/* Light Theme Crisp Contrast Overrides */
+html:not(.dark) .ac-action-control {
+  background: #ecfdf5 !important;
+  border: 1px solid #a7f3d0 !important;
+  color: #047857 !important;
+}
+html:not(.dark) .ac-action-control svg {
+  stroke: #047857 !important;
+}
+
+html:not(.dark) .ac-action-edit {
+  background: #eff6ff !important;
+  border: 1px solid #bfdbfe !important;
+  color: #1d4ed8 !important;
+}
+html:not(.dark) .ac-action-edit svg {
+  stroke: #1d4ed8 !important;
+}
+
+html:not(.dark) .ac-action-ir {
+  background: #ecfeff !important;
+  border: 1px solid #a5f3fc !important;
+  color: #0e7490 !important;
+}
+html:not(.dark) .ac-action-ir svg {
+  stroke: #0e7490 !important;
+}
+
+html:not(.dark) .ac-action-delete {
+  background: #fff1f2 !important;
+  border: 1px solid #fecdd3 !important;
+  color: #e11d48 !important;
+}
+html:not(.dark) .ac-action-delete svg {
+  stroke: #e11d48 !important;
+}
+
+/* EcoModal High-Contrast Global Safeguards */
+.dark .eco-modal-card .eco-modal-title,
+html.dark .eco-modal-card .eco-modal-title {
+  color: #ffffff !important;
+}
+.dark .eco-modal-card .eco-modal-msg,
+html.dark .eco-modal-card .eco-modal-msg {
+  color: #cbd5e1 !important;
+}
+html:not(.dark) .eco-modal-card .eco-modal-title {
+  color: #0f172a !important;
+}
+html:not(.dark) .eco-modal-card .eco-modal-msg {
+  color: #334155 !important;
+}
+
+/* ==========================================================================
+   ICMP PING CONSOLE & PROBE TRACE HIGH-CONTRAST SAFEGUARDS (LIGHT & DARK)
+   Prevents light-mode overrides from breaking dark CLI terminal contrast
+   ========================================================================== */
+#diagPingConsole,
+html:not(.dark) #diagPingConsole {
+  background: #080d1a !important;
+  border-color: rgba(20, 184, 166, 0.35) !important;
+}
+
+#diagPingConsole .terminal-top-bar,
+html:not(.dark) #diagPingConsole .terminal-top-bar {
+  background: #0d1527 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+#diagPingConsole .terminal-title,
+html:not(.dark) #diagPingConsole .terminal-title {
+  color: #f1f5f9 !important;
+}
+
+#diagPingConsole #diagPingText,
+html:not(.dark) #diagPingConsole #diagPingText {
+  background: #060913 !important;
+  color: #e2e8f0 !important;
+}
+
+#diagPingConsole .ping-reply-row {
+  color: #cbd5e1 !important;
+}
+
+#diagPingConsole .ping-stat-card,
+html:not(.dark) #diagPingConsole .ping-stat-card {
+  background: #111a30 !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+}
+
+#diagPingConsole .ping-stat-label,
+html:not(.dark) #diagPingConsole .ping-stat-label {
+  color: #94a3b8 !important;
+}
+
+#diagPingConsole .ping-stat-val-packets,
+html:not(.dark) #diagPingConsole .ping-stat-val-packets {
+  color: #ffffff !important;
+}
+
+/* Nodes Ping Modal Terminal Trace */
+#pingTerminalOutput,
+html:not(.dark) #pingTerminalOutput {
+  background: #060c18 !important;
+  color: #e2e8f0 !important;
+  scrollbar-width: thin !important;
+  scrollbar-color: rgba(255, 255, 255, 0.25) transparent !important;
+}
+
+#pingTerminalOutput::-webkit-scrollbar,
+#diagPingConsole::-webkit-scrollbar,
+#diagPingText::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+#pingTerminalOutput::-webkit-scrollbar-track,
+#diagPingConsole::-webkit-scrollbar-track,
+#diagPingText::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+#pingTerminalOutput::-webkit-scrollbar-thumb,
+#diagPingConsole::-webkit-scrollbar-thumb,
+#diagPingText::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.25) !important;
+  border-radius: 4px;
+}
+
+/* ==========================================================================
+   ADMIN PROFILE HEADER - THEME TOGGLE & NOTIFICATION
+   ========================================================================== */
+.admin-theme-switch {
+  position: relative;
+  display: inline-block;
+  width: 48px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.admin-theme-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.admin-theme-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #cbd5e1;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 24px;
+}
+
+.admin-theme-slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: #ffffff;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.admin-theme-switch input:checked + .admin-theme-slider {
+  background-color: #10b981;
+  box-shadow: 0 0 14px rgba(16, 185, 129, 0.6);
+}
+
+.admin-theme-switch input:checked + .admin-theme-slider:before {
+  transform: translateX(24px);
+}
+
+#dark-mode-status-text.theme-dark {
+  background-color: rgba(6, 78, 59, 0.85) !important;
+  color: #34d399 !important;
+  border: 1px solid rgba(16, 185, 129, 0.5) !important;
+}
+
+#dark-mode-status-text.theme-light {
+  background-color: #f1f5f9 !important;
+  color: #334155 !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+#headerNotifStatusText.notif-on {
+  background-color: rgba(6, 78, 59, 0.85) !important;
+  color: #34d399 !important;
+  border: 1px solid rgba(16, 185, 129, 0.5) !important;
+}
+
+#headerNotifStatusText.notif-off {
+  background-color: rgba(30, 41, 59, 0.75) !important;
+  color: #94a3b8 !important;
+  border: 1px solid rgba(148, 163, 184, 0.25) !important;
+}
+
+html:not(.dark) #headerNotifStatusText.notif-on {
+  background-color: #ecfdf5 !important;
+  color: #059669 !important;
+  border: 1px solid #a7f3d0 !important;
+}
+
+html:not(.dark) #headerNotifStatusText.notif-off {
+  background-color: #f1f5f9 !important;
+  color: #64748b !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+/* Permanently erase Active Scope badge and Reset button from AC Energy Analytics */
+#activeFilterBadge,
+#resetAllFiltersBtn,
+#activeFilterText,
+[id="activeFilterBadge"],
+[id="resetAllFiltersBtn"] {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* Control Page: Erase Unit Power header when in Remote Layout, keep in Desktop Layout */
+body.remote-layout-active #unitPowerHeaderContainer,
+.layout-remote #unitPowerHeaderContainer,
+[data-control-layout="remote"] #unitPowerHeaderContainer {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* ==========================================================================
+   AC Energy Analytics Header Time Range Pill & Inputs
+   Completely removes nested white boxes and borders for seamless capsule UI
+   ========================================================================== */
+.header-time-pill,
+html:not(.dark) .header-time-pill,
+.dark .header-time-pill {
+  height: 38px !important;
+  border: 1.5px solid #10b981 !important;
+  border-radius: 12px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.35rem !important;
+  padding: 0 0.65rem !important;
+  background-color: #ffffff !important;
+  box-sizing: border-box !important;
+}
+
+.dark .header-time-pill {
+  background-color: #0c1328 !important;
+}
+
+.header-time-pill input[type="time"],
+.header-time-pill input.header-time-input,
+html:not(.dark) .header-time-pill input[type="time"],
+html:not(.dark) .header-time-pill input.header-time-input,
+html:not(.dark) input[type="time"].header-time-input,
+.dark .header-time-pill input[type="time"],
+.dark .header-time-pill input.header-time-input,
+#startTimeFilter,
+#endTimeFilter {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  border-width: 0 !important;
+  border-style: none !important;
+  border-color: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  width: auto !important;
+  font-size: 0.78rem !important;
+  font-weight: 700 !important;
+  line-height: normal !important;
+  cursor: pointer !important;
+  -webkit-appearance: none !important;
+  -moz-appearance: none !important;
+  appearance: none !important;
+}
+
+html:not(.dark) #startTimeFilter,
+html:not(.dark) #endTimeFilter,
+html:not(.dark) .header-time-pill input[type="time"] {
+  color: #0f172a !important;
+  color-scheme: light;
+}
+
+.dark #startTimeFilter,
+.dark #endTimeFilter,
+.dark .header-time-pill input[type="time"] {
+  color: #f8fafc !important;
+  color-scheme: dark;
+}
+
+.header-time-pill input[type="time"]::-webkit-datetime-edit,
+.header-time-pill input[type="time"]::-webkit-datetime-edit-fields-wrapper,
+.header-time-pill input[type="time"]::-webkit-datetime-edit-text,
+.header-time-pill input[type="time"]::-webkit-datetime-edit-hour-field,
+.header-time-pill input[type="time"]::-webkit-datetime-edit-minute-field,
+.header-time-pill input[type="time"]::-webkit-datetime-edit-ampm-field,
+#startTimeFilter::-webkit-datetime-edit,
+#endTimeFilter::-webkit-datetime-edit {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  outline: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.header-time-pill input[type="time"]::-webkit-calendar-picker-indicator,
+#startTimeFilter::-webkit-calendar-picker-indicator,
+#endTimeFilter::-webkit-calendar-picker-indicator {
+  cursor: pointer !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  margin-left: 2px !important;
+  filter: invert(56%) sepia(85%) saturate(415%) hue-rotate(114deg) brightness(92%) contrast(92%) !important;
+}
+
+/* Erase My Aircons Navigation Link from Sidebar */
+a[href="aircons.html"],
+a[href*="aircons.html"],
+.nav-link[href="aircons.html"],
+.nav-link[href*="aircons.html"] {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+
+/* Registration checks reflect actual replies rather than initial success marks. */
+.connection-check { flex-shrink: 0; background: #e2e8f0; color: #64748b; }
+.connection-check[data-state="checking"] { background: #fef3c7; color: #92400e; }
+.connection-check[data-state="success"] { background: #10b981; color: #fff; }
+.connection-check[data-state="error"] { background: #ffe4e6; color: #be123c; }
+.dark .connection-check[data-state="pending"] { background: #334155; color: #cbd5e1; }
+.dark .connection-check[data-state="checking"] { background: #78350f; color: #fef3c7; }
+.dark .connection-check[data-state="error"] { background: #881337; color: #ffe4e6; }
+
+/* Nearby Bluetooth selection is a native modal above the registration wizard. */
+.ecotrack-bluetooth-dialog {
+  --ble-bg: #ffffff;
+  --ble-text: #0f172a;
+  --ble-muted: #475569;
+  --ble-border: #cbd5e1;
+  --ble-choice: #f0fdfa;
+  --ble-choice-text: #115e59;
+  --ble-hover: #ccfbf1;
+  position: fixed;
+  inset: 0;
+  box-sizing: border-box;
+  width: min(480px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  margin: auto !important;
+  padding: 0;
+  overflow: auto;
+  border: 1px solid var(--ble-border);
+  border-radius: 20px;
+  background: var(--ble-bg);
+  color: var(--ble-text);
+  font-family: inherit;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.3);
+}
+.dark .ecotrack-bluetooth-dialog {
+  --ble-bg: #0f172a;
+  --ble-text: #f8fafc;
+  --ble-muted: #cbd5e1;
+  --ble-border: #334155;
+  --ble-choice: #134e4a;
+  --ble-choice-text: #ccfbf1;
+  --ble-hover: #115e59;
+  color-scheme: dark;
+}
+.ecotrack-bluetooth-dialog::backdrop {
+  background: rgba(2, 6, 23, 0.56);
+}
+.ecotrack-bluetooth-dialog .ecotrack-bluetooth-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 24px 24px 10px;
+}
+.ecotrack-bluetooth-dialog .ecotrack-bluetooth-dialog__title {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.35;
+  font-weight: 700 !important;
+  color: var(--ble-text) !important;
+}
+.ecotrack-bluetooth-dialog .ecotrack-bluetooth-dialog__description {
+  margin: 0;
+  padding: 0 24px;
+  color: var(--ble-muted) !important;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.ecotrack-bluetooth-dialog__options {
+  display: grid;
+  gap: 10px;
+  padding: 22px 24px 24px;
+}
+.ecotrack-bluetooth-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 16px 24px;
+  border-top: 1px solid var(--ble-border);
+}
+.ecotrack-bluetooth-dialog button {
+  font: inherit;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+.ecotrack-bluetooth-dialog .ecotrack-bluetooth-dialog__choice {
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid #14b8a6;
+  border-radius: 12px;
+  background: var(--ble-choice);
+  color: var(--ble-choice-text) !important;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.ecotrack-bluetooth-dialog__choice:hover {
+  background: var(--ble-hover) !important;
+}
+.ecotrack-bluetooth-dialog .ecotrack-bluetooth-dialog__cancel {
+  padding: 10px 18px;
+  border: 1px solid var(--ble-border);
+  border-radius: 10px;
+  background: var(--ble-bg);
+  color: var(--ble-text) !important;
+  font-size: 14px;
+}
+.ecotrack-bluetooth-dialog .ecotrack-bluetooth-dialog__close {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ble-muted) !important;
+  font-size: 24px;
+  line-height: 1;
+}
+.ecotrack-bluetooth-dialog__cancel:hover,
+.ecotrack-bluetooth-dialog__close:hover {
+  background: var(--ble-choice) !important;
+}
+.ecotrack-bluetooth-dialog .ecotrack-bluetooth-dialog__input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--ble-border);
+  border-radius: 10px;
+  background: var(--ble-bg);
+  color: var(--ble-text);
+  font: inherit;
+}
+.ecotrack-bluetooth-dialog .ecotrack-bluetooth-dialog__validation {
+  margin: 0;
+  color: #f43f5e !important;
+  font-size: 13px;
+}
+.ecotrack-bluetooth-dialog button:focus-visible,
+.ecotrack-bluetooth-dialog input:focus-visible,
+#autoAssignIpBtn:focus-visible {
+  outline: 3px solid #14b8a6;
+  outline-offset: 3px;
+}
+#autoAssignIpBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border: 1px solid #99f6e4;
+  border-radius: 8px;
+  background: #f0fdfa;
+  color: #0f766e;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.dark #autoAssignIpBtn {
+  border-color: #115e59;
+  background: #134e4a;
+  color: #5eead4;
+}
+#autoAssignIpBtn:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+#autoAssignIpIcon.is-reading {
+  animation: device-ip-spin 1s linear infinite;
+}
+@keyframes device-ip-spin { to { transform: rotate(360deg); } }
+.device-ip-feedback {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.device-ip-feedback[data-state="reading"],
+.device-ip-feedback[data-state="success"] { color: #0f766e !important; }
+.device-ip-feedback[data-state="warning"] { color: #92400e !important; }
+.device-ip-feedback[data-state="error"] { color: #be123c !important; }
+.dark .device-ip-feedback { color: #94a3b8; }
+.dark .device-ip-feedback[data-state="reading"],
+.dark .device-ip-feedback[data-state="success"] { color: #5eead4 !important; }
+.dark .device-ip-feedback[data-state="warning"] { color: #fcd34d !important; }
+.dark .device-ip-feedback[data-state="error"] { color: #fda4af !important; }
+@media (prefers-reduced-motion: reduce) {
+  #autoAssignIpIcon.is-reading { animation: none; }
 }

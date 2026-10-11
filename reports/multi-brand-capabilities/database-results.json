@@ -1,0 +1,15 @@
+{
+  "checks": [
+    "The complete five-section delivery executes twice on PostgreSQL without resetting records or relationships.",
+    "Only fresh successful admin verification records the timestamp; failed registration and heartbeats do not invent or change it.",
+    "Custom AC name is saved on the existing profile; controller display-name edits preserve it and do not duplicate records.",
+    "OFF, Turbo, partial-field retention and duplicate/out-of-order protection use the real observation RPC.",
+    "Admin physical results persist on the same AC, retain manufacturer, reject stale edits, credentials and invalid temperature overrides.",
+    "Actual command RPC uses protocol/model/physical constraints, rejects stale profiles and preserves honest queued delivery.",
+    "Frontend and PostgreSQL resolve identical temperature, fan, feature and model constraints for every audited profile/model.",
+    "Matrix is a narrowly scoped database correction; IDs, asset tags and protocol remain stable, and another admin custom name/manufacturer is preserved.",
+    "Non-admin and anonymous callers cannot save verification results."
+  ],
+  "passed": 9,
+  "live_database_modified": false
+}

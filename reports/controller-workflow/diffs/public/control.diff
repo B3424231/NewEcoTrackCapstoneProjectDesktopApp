@@ -1,0 +1,114 @@
+--- before/public/control.html
++++ public/control.html
+@@ -41,14 +41,14 @@
+   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+   <script src="./js/supabase.umd.js"></script>
+   <script src="./js/supabase-client.js"></script>
+-  <script src="./js/hardware-cloud.js?v=1"></script>
++  <script src="./js/hardware-cloud.js?v=5"></script>
+   <script src="./js/sidebar.js"></script>
+   <script src="./js/sidebar-loader.js?v=7"></script>
+   <script src="./js/icons.js"></script>
+   <script src="./js/eco-network.js"></script>
+   <script src="./js/eco-data-bus.js"></script>
+   <script src="./js/skeletons.js"></script>
+-  <script src="./js/aircon-system.js?v=13"></script>
++  <script src="./js/aircon-system.js?v=14"></script>
+ </head>
+ 
+ <body class="app-shell bg-gray-50 dark:bg-[#0a0f1d] text-slate-800 dark:text-slate-100 transition-colors duration-200">
+@@ -203,6 +203,7 @@
+                     <span id="controlUnitBrandBadge" class="px-2.5 py-0.5 rounded-md text-xs font-bold bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30">EcoTrack</span>
+                   </div>
+                   <p id="controlUnitDetails" class="text-xs text-slate-500 dark:text-gray-400 mt-1">Initializing controller device...</p>
++                  <p id="hardwareRoleMessage" class="text-xs text-teal-700 dark:text-teal-300 mt-2" role="status" aria-live="polite"></p>
+                 </div>
+ 
+                 <!-- MAIN POWER TOGGLE -->
+@@ -1568,9 +1569,9 @@
+         const caps = device.capabilities || {};
+         const state = device.state || {};
+         const description = window.EcoTrackAirconState.describeAirconState(device.control_snapshot);
+-        const hasSettings = description.confirmed || Boolean(device.control_snapshot?.desired_state && description.label !== 'UNCONFIRMED');
++        const hasSettings = description.confirmed || description.remoteObserved || Boolean(device.control_snapshot?.desired_state && description.label !== 'UNCONFIRMED');
+         const isPowerOn = state.power;
+-        const powerLabel = description.confirmed ? (isPowerOn ? 'POWER ON' : 'POWER OFF')
++        const powerLabel = description.remoteObserved ? (isPowerOn === true ? 'REMOTE POWER ON' : isPowerOn === false ? 'REMOTE POWER OFF' : 'REMOTE SETTINGS') : description.confirmed ? (isPowerOn ? 'POWER ON' : 'POWER OFF')
+           : hasSettings ? (isPowerOn ? 'POWER ON REQUESTED' : 'POWER OFF REQUESTED') : 'UNCONFIRMED';
+         const displayMode = hasSettings && state.mode ? state.mode.toUpperCase() : '—';
+         const displayFan = hasSettings && state.fan ? state.fan.toUpperCase() : '—';
+@@ -1922,10 +1923,34 @@
+         if (typeof applyControlLayout === 'function') {
+           applyControlLayout(currentControlLayout);
+         }
++        enforceControllerCapabilities(device);
+       }
+ 
+       // Pending command tracking for retry
+       let pendingFailedCommand = null;
++
++
++      function enforceControllerCapabilities(device) {
++        const controller = NodeService.getNode(device?.controller_node_id) || NodeService.getNode(device?.node_id);
++        const transmit = controller?.capabilities?.ir_transmitter === true;
++        const monitor = controller?.capabilities?.ir_receiver === true;
++        const message = document.getElementById('hardwareRoleMessage');
++        if (message) message.textContent = monitor && !transmit
++          ? 'IR receiver: monitoring physical remote settings. Sending AC commands requires an IR transmitter.'
++          : transmit ? 'IR transmitter: AC command delivery enabled.' : 'Controller IR capabilities have not been reported.';
++        const buttons = [masterPowerBtn, tempMinusBtn, tempPlusBtn,
++          ...modeButtonsGroup.querySelectorAll('button'), ...fanButtonsGroup.querySelectorAll('button'), ...specialButtonsGroup.querySelectorAll('button'),
++          ...document.querySelectorAll('.sim-btn, .test-cmd-btn'),
++          ...['remPowerBtn','remTempPlus','remTempMinus','remMode','remFan','remSwing','remEco','remTurbo','remSleep',
++          'simPowerBtn','simTempUpBtn','simTempDownBtn','simModeBtn','simFanBtn','simSwingBtn','simEcoBtn','simTurboBtn','simSleepBtn'].map(id => document.getElementById(id))];
++        for (const button of buttons.filter(Boolean)) {
++          if (!transmit) button.disabled = true;
++          else if (button === masterPowerBtn || button.dataset?.cmd === 'POWER' || ['remPowerBtn','simPowerBtn'].includes(button.id)) button.disabled = false;
++          button.title = !transmit ? 'IR transmitter required to send AC commands' : '';
++          button.classList.toggle('opacity-40', button.disabled);
++          button.classList.toggle('cursor-not-allowed', button.disabled);
++        }
++      }
+ 
+       async function executeCommand(cmdType, val) {
+         // Flash IR blaster LED on the remote
+@@ -2427,9 +2452,12 @@
+           if (ovNode) ovNode.textContent = device.node_id || '—';
+ 
+           if (ovCmd) {
+-            ovCmd.textContent = state.power 
+-              ? `POWER ON • ${(state.mode || 'cool').toUpperCase()} ${state.temperature || 24}°C • FAN ${(state.fan || 'auto').toUpperCase()}`
+-              : 'POWER OFF • Standby';
++            const settings = window.EcoTrackAirconState?.selectSettings(device.control_snapshot);
++            const source = ({remote:'REMOTE',reported:'REPORTED',requested:'REQUESTED',configured:'CONFIGURED'})[settings?.source] || 'UNKNOWN';
++            const known = Boolean(settings?.state);
++            ovCmd.textContent = known
++              ? `${source} POWER ${state.power === true ? 'ON' : state.power === false ? 'OFF' : 'UNKNOWN'} • ${(state.mode || '—').toUpperCase()} ${Number.isFinite(state.temperature) ? state.temperature + '°C' : '—'} • FAN ${(state.fan || '—').toUpperCase()}`
++              : 'No remote settings or commands reported';
+           }
+ 
+           if (ovOp) {
+@@ -2476,11 +2504,12 @@
+           if (covBrand) covBrand.textContent = `${device.brand} (${device.protocol || 'RAW'})`;
+ 
+           const simMode = document.getElementById('simLcdMode');
+-          if (simMode) simMode.textContent = (state.mode || 'COOL').toUpperCase();
++          const settings = window.EcoTrackAirconState?.selectSettings(device.control_snapshot);
++          if (simMode) simMode.textContent = (settings?.state?.mode || '—').toUpperCase();
+           const simTemp = document.getElementById('simLcdTemp');
+-          if (simTemp) simTemp.textContent = `${state.temperature || 24}°C`;
++          if (simTemp) simTemp.textContent = settings?.state && Number.isFinite(Number(settings.state.temp)) && settings.state.temp !== null && settings.state.temp !== undefined ? `${settings.state.temp}°C` : '—';
+           const simFan = document.getElementById('simLcdFan');
+-          if (simFan) simFan.textContent = (state.fan || 'AUTO').toUpperCase();
++          if (simFan) simFan.textContent = (settings?.state?.fan || '—').toUpperCase();
+ 
+           const isPowerOn = Boolean(state.power);
+           const minTemp = caps.temperature_min || 16;
+@@ -2729,6 +2758,7 @@
+           deviceLogsCurrentPage = 1;
+           renderDeviceLogsTable();
+         }
++        enforceControllerCapabilities(device);
+       }
+ 
+       let deviceLogsCurrentPage = 1;

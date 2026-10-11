@@ -1,0 +1,3 @@
+The IR Remote Protocols card heading now uses the linked controller Display Name from nodes.name, resolving the database controller ID before the hardware ID. Matrix remains the stored AC profile name. The controller name is escaped in the existing card template. Default generated ESP32 names display AC Controller until renamed by the admin.
+
+Observed validation: six-page integration 41 checks passed; multi-brand registry 4 scenario groups passed; production card generation verified custom names, renamed names, safe text and stable asset targeting. Capability rendering, protocol handlers and live-event subscriptions remain unchanged.

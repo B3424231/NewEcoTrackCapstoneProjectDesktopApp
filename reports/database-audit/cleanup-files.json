@@ -1,0 +1,45 @@
+{
+  "backup_directory": "C:\\Users\\reygay\\AppData\\Local\\Temp\\ecotrack-db-cleanup-before-9r028522",
+  "changed_files": [
+    "public/js/supabase-client.js",
+    "public/js/node-sync.js",
+    "public/js/logs.js",
+    "public/js/telemetry-new.js",
+    "public/js/aircon-system.js",
+    "public/js/shared.js",
+    "src/preload.js",
+    ".env.example",
+    "public/js/scheduler.js",
+    "scripts/test_telemetry_cadence.js",
+    "scripts/verify_supabase_integration.js",
+    "backend/app.py",
+    "scripts/transfer_supabase_to_sqlite.py",
+    "public/js/analytics.js",
+    "public/analytics.html",
+    "public/rules.html",
+    "public/telemetry.html",
+    "scripts/demo-seeds/legacy_schema_demo.sql",
+    "supabase_schema.sql",
+    "scripts/demo-seeds/legacy_notifications_demo.sql",
+    "supabase_mobile_notifications_setup.sql",
+    "public/js/maintenance-modal.js",
+    "scripts/test_database_cleanup.js",
+    "public/js/notifications.js",
+    "package.json",
+    "README.md",
+    "scripts/test_database_cleanup.py"
+  ],
+  "retired_files": [
+    "public/js/data-logic.js",
+    "public/js/data-schemas.js",
+    "public/js/data-tests.js",
+    "scripts/check_telemetry_db.js",
+    "backend/ecotrack.db"
+  ],
+  "created_files": [
+    "scripts/test_database_cleanup.js",
+    "scripts/test_database_cleanup.py",
+    "scripts/demo-seeds/legacy_schema_demo.sql",
+    "scripts/demo-seeds/legacy_notifications_demo.sql"
+  ]
+}

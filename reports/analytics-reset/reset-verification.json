@@ -1,0 +1,56 @@
+{
+  "timestamp": "2026-10-08T13:12:53.403104+00:00",
+  "database": "C:\\Users\\reygay\\Desktop\\EcoTrackDesktopDashboardNew-main-control\\backend\\telemetry.db",
+  "backup": "C:\\Users\\reygay\\Desktop\\EcoTrackDesktopDashboardNew-main-control\\backend\\backups\\telemetry-before-analytics-reset-20261008T131251Z.db",
+  "backup_integrity": "ok",
+  "before": {
+    "telemetry": 539,
+    "schedule_dispatches": 3,
+    "cloud_sync_state": 0,
+    "telemetry_local_reset": 1
+  },
+  "after": {
+    "telemetry": 0,
+    "schedule_dispatches": 3,
+    "cloud_sync_state": 1,
+    "telemetry_local_reset": 1
+  },
+  "reset": {
+    "success": true,
+    "deleted_count": 539,
+    "reset_at": "2026-10-08T13:12:52.905322+00:00"
+  },
+  "supabase_telemetry_rows": 0,
+  "live_api": {
+    "/api/health": {
+      "status": 200
+    },
+    "/api/telemetry?perPage=0&sort=-created": {
+      "status": 200,
+      "totalItems": 0,
+      "items_count": 0,
+      "reset_at": "2026-10-08T13:12:52.905322+00:00"
+    },
+    "/api/historical": {
+      "status": 200,
+      "array_lengths": {
+        "temperatures": 0,
+        "pressures": 0,
+        "timestamps": 0
+      }
+    },
+    "/api/telemetry/sync": {
+      "status": 200,
+      "running": true,
+      "error": null,
+      "transferred": 0
+    }
+  },
+  "final_live_check": {
+    "status": 200,
+    "totalItems": 0,
+    "reset_at": "2026-10-08T13:12:52.905322+00:00",
+    "sync_running": true,
+    "sync_error": null
+  }
+}

@@ -11,9 +11,18 @@
       darkMode: 'class'
     }
   </script>
-  <link rel="stylesheet" href="./styles.css?v=48">
+  <link rel="stylesheet" href="./styles.css?v=53">
   <style>
-    .notifications-table thead th {
+    .notifications-table thead,
+    .notifications-table thead tr,
+    .notifications-table thead th,
+    .notifications-table th {
+      color: #ffffff !important;
+      background-color: #0b291d !important;
+    }
+
+    .notification-filter-btn.active,
+    .notification-filter-btn.active .filter-btn-text {
       color: #ffffff !important;
     }
 
@@ -48,9 +57,12 @@
     }
   </style>
   <script src="./js/sidebar.js"></script>
-  <script src="./js/sidebar-loader.js?v=5"></script>
+  <script src="./js/sidebar-loader.js?v=7"></script>
   <script src="./js/icons.js"></script>
-  <script src="./js/maintenance-modal.js?v=60"></script>
+  <script src="./js/eco-network.js"></script>
+  <script src="./js/eco-data-bus.js"></script>
+  <script src="./js/skeletons.js"></script>
+  <script src="./js/maintenance-modal.js?v=68"></script>
 </head>
 
 <body class="app-shell bg-gray-50 dark:bg-[#0a0f1d] transition-colors duration-200">
@@ -100,17 +112,17 @@
                     <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5z" />
                     <path d="M12 12l-8-4.3 8-4.3 8 4.3" />
                   </svg>
-                  <span>Selected AC Sensors</span>
+                  <span>Selected AC Controls</span>
                 </h3>
-                <div id="selectedSensorsSummaryBadge"
+                <div id="selectedControlsSummaryBadge"
                   class="hidden items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-[#10b981] dark:text-emerald-300 border border-emerald-300/40 text-xs font-bold transition-all shadow-xs">
                   <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                  <span id="selectedSensorsSummaryText">0 Sensors</span>
+                  <span id="selectedControlsSummaryText">0 Controls</span>
                 </div>
               </div>
               <button type="button" id="toggleSelectedNodesBtn"
                 class="px-3 py-1.5 rounded-xl bg-gray-50 hover:bg-emerald-50 dark:bg-slate-800/80 dark:hover:bg-slate-700/80 text-gray-600 hover:text-[#10b981] dark:text-gray-300 dark:hover:text-emerald-300 transition-colors border border-gray-200/80 dark:border-white/10 cursor-pointer flex items-center gap-1.5 text-xs font-semibold"
-                title="Toggle selected AC sensors view">
+                title="Toggle selected AC controls view">
                 <span id="toggleSelectedNodesLabel"
                   class="hidden sm:inline text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Collapse</span>
                 <svg id="selectedNodesChevron" class="w-4 h-4 transition-transform duration-200 transform rotate-180"
@@ -122,7 +134,7 @@
             <div id="nodesDisplayWrapper" class="transition-all duration-200 mt-3">
               <div id="nodesDisplay" class="overflow-x-auto eco-slim-scrollbar pb-2">
                 <div class="flex gap-3 pb-2">
-                  <!-- AC Sensor cards will be inserted here - wider and shorter layout -->
+                  <!-- AC Control cards will be inserted here - wider and shorter layout -->
                 </div>
               </div>
             </div>
@@ -139,22 +151,27 @@
                   <path d="M13.73 21a2 2 0 0 1-3.46 0" />
                 </svg>Notifications</h3>
               <div class="notification-header-tools flex flex-col sm:flex-row sm:items-center gap-3">
-                <div class="flex gap-2">
+                <div class="flex gap-2 items-center flex-wrap sm:flex-nowrap">
                   <button id="notificationFilterAllBtn" type="button" data-filter="all"
-                    class="notification-filter-btn px-6 py-2 rounded-lg text-sm font-bold bg-[#0b291d] dark:bg-[#10b981] text-white transition-colors cursor-pointer border-0">
-                    All
+                    class="notification-filter-btn active h-10 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider whitespace-nowrap inline-flex items-center justify-center bg-[#10b981] hover:bg-emerald-600 text-white transition-all cursor-pointer border-[2px] border-[#10b981] shadow-md shadow-emerald-500/25"
+                    style="color: #ffffff !important; background-color: #10b981 !important;">
+                    <span class="filter-btn-text" style="color: #ffffff !important;">All</span>
                   </button>
                   <button id="notificationFilterUnreadBtn" type="button" data-filter="unread"
-                    class="notification-filter-btn px-6 py-2 rounded-lg text-sm font-bold bg-white dark:bg-slate-900 border-[2px] border-[#10b981] dark:border-[#10b981]/40 text-gray-700 dark:text-gray-200 flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors cursor-pointer">
-                    Unread <span id="unreadFilterDot" class="w-1.5 h-1.5 rounded-full bg-red-500 hidden"></span>
+                    class="notification-filter-btn h-10 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider whitespace-nowrap inline-flex items-center justify-center gap-2 bg-white dark:bg-slate-900 border-[2px] border-gray-200 dark:border-white/10 hover:border-[#10b981] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-800 transition-all cursor-pointer shadow-xs">
+                    <span class="filter-btn-text">Unread</span> <span id="unreadFilterDot" class="w-2 h-2 rounded-full bg-red-500 hidden"></span>
                   </button>
                   <button id="notificationFilterReadBtn" type="button" data-filter="read"
-                    class="notification-filter-btn px-6 py-2 rounded-lg text-sm font-bold bg-white dark:bg-slate-900 border-[2px] border-[#10b981] dark:border-[#10b981]/40 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors cursor-pointer">
-                    Read
+                    class="notification-filter-btn h-10 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider whitespace-nowrap inline-flex items-center justify-center bg-white dark:bg-slate-900 border-[2px] border-gray-200 dark:border-white/10 hover:border-[#10b981] text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-800 transition-all cursor-pointer shadow-xs">
+                    <span class="filter-btn-text">Read</span>
+                  </button>
+                  <button id="notificationFilterScheduleBtn" type="button" data-filter="schedule"
+                    class="notification-filter-btn h-10 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider whitespace-nowrap inline-flex items-center justify-center bg-white dark:bg-slate-900 border-[2px] border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-200 cursor-pointer">
+                    <span class="filter-btn-text">Wake / Sleep Schedules</span>
                   </button>
                 </div>
                 <button id="clearAllMessagesBtn"
-                  class="flex items-center gap-2 px-6 py-2 text-sm font-bold transition-colors bg-white dark:bg-slate-900 border border-red-500 dark:border-red-800/40 text-red-500 dark:text-red-400 rounded-lg hover:bg-red-50 dark:hover:bg-slate-800/20 cursor-pointer">
+                  class="h-10 px-4 py-2 text-xs font-bold uppercase tracking-wider whitespace-nowrap inline-flex items-center justify-center gap-2 transition-colors bg-white dark:bg-slate-900 border border-red-500 dark:border-red-800/40 text-red-500 dark:text-red-400 rounded-xl hover:bg-red-50 dark:hover:bg-slate-800/20 cursor-pointer shadow-xs">
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75">
                     <path d="M3 6h18" />
                     <path d="M8 6V4h8v2" />
@@ -170,23 +187,15 @@
               class="flex-1 flex flex-col overflow-hidden mx-6 mb-6 rounded-2xl border-[2px] border-[#10b981] dark:border-[#10b981]/25 bg-white dark:bg-[#0c1328]/80 shadow-sm">
               <div class="overflow-x-auto overflow-y-auto flex-1 eco-slim-scrollbar">
                 <table class="w-full text-left border-collapse notifications-table">
-                  <thead class="sticky top-0 z-10 shadow-sm text-white">
-                    <tr class="text-left text-xs font-bold text-white uppercase tracking-wider">
-                      <th class="px-6 py-4 bg-[#0b291d] dark:bg-[#081a14] whitespace-nowrap text-white !text-white">Time
-                      </th>
-                      <th class="px-6 py-4 bg-[#0b291d] dark:bg-[#081a14] whitespace-nowrap text-white !text-white">Date
-                      </th>
-                      <th class="px-6 py-4 bg-[#0b291d] dark:bg-[#081a14] whitespace-nowrap text-white !text-white">AC
-                        Sensors</th>
-                      <th class="px-6 py-4 bg-[#0b291d] dark:bg-[#081a14] whitespace-nowrap text-white !text-white">
-                        Attached Aircon Type</th>
-                      <th class="px-6 py-4 bg-[#0b291d] dark:bg-[#081a14] min-w-[220px] text-white !text-white">Message
-                      </th>
-                      <th
-                        class="px-6 py-4 bg-[#0b291d] dark:bg-[#081a14] whitespace-nowrap text-center text-white !text-white">
-                        Status</th>
-                      <th class="px-6 py-4 bg-[#0b291d] dark:bg-[#081a14] whitespace-nowrap text-white !text-white">
-                        Actions</th>
+                  <thead class="sticky top-0 z-10 shadow-sm bg-[#0b291d] dark:bg-[#081a14]" style="background-color: #0b291d !important; color: #ffffff !important;">
+                    <tr class="text-left text-xs font-bold uppercase tracking-wider text-white" style="color: #ffffff !important; background-color: #0b291d !important;">
+                      <th class="px-6 py-4 whitespace-nowrap text-white font-bold" style="color: #ffffff !important; background-color: #0b291d !important;">TIME</th>
+                      <th class="px-6 py-4 whitespace-nowrap text-white font-bold" style="color: #ffffff !important; background-color: #0b291d !important;">DATE</th>
+                      <th class="px-6 py-4 whitespace-nowrap text-white font-bold" style="color: #ffffff !important; background-color: #0b291d !important;">AC CONTROLS</th>
+                      <th class="px-6 py-4 whitespace-nowrap text-white font-bold" style="color: #ffffff !important; background-color: #0b291d !important;">ATTACHED AIRCON TYPE</th>
+                      <th class="px-6 py-4 min-w-[220px] text-white font-bold" style="color: #ffffff !important; background-color: #0b291d !important;">MESSAGE</th>
+                      <th class="px-6 py-4 whitespace-nowrap text-center text-white font-bold" style="color: #ffffff !important; background-color: #0b291d !important;">STATUS</th>
+                      <th class="px-6 py-4 whitespace-nowrap text-white font-bold" style="color: #ffffff !important; background-color: #0b291d !important;">ACTIONS</th>
                     </tr>
                   </thead>
                   <tbody id="messagesTableBody"
@@ -197,75 +206,21 @@
                   </tbody>
                 </table>
               </div>
+
+              <!-- Messages Pagination Controls (20 items per page) -->
+              <div class="p-3 border-t-[2px] border-[#10b981]/30 dark:border-white/5 flex flex-col sm:flex-row justify-between items-center gap-3 bg-white dark:bg-[#0c1328]">
+                <span id="messagesPageInfo" class="text-xs font-bold text-gray-600 dark:text-gray-300">Showing 0 of 0 messages</span>
+                <div class="flex items-center gap-2">
+                  <button id="messagesPrevBtn" disabled class="px-3 py-1 bg-white dark:bg-slate-900 border border-[#10b981]/40 rounded-lg text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-emerald-50 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer">Previous</button>
+                  <span id="messagesPaginationPages" class="text-xs font-bold px-1 text-gray-700 dark:text-gray-300">Page 1 of 1</span>
+                  <button id="messagesNextBtn" disabled class="px-3 py-1 bg-[#10b981] border border-[#10b981] rounded-lg text-xs font-bold text-white hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer">Next</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </main>
-  </div>
-
-  <!-- MODAL: Message Composer -->
-  <div id="messageModal"
-    style="display: none; position: fixed; inset: 0; background-color: rgba(7, 13, 26, 0.72); z-index: 50;"
-    class="flex items-center justify-center p-4">
-    <div
-      class="bg-white dark:bg-[#0c1328] rounded-2xl border-2 border-[#10b981] dark:border-[#10b981]/40 shadow-2xl w-full max-w-2xl p-6">
-      <div class="flex justify-between items-center mb-4">
-        <h3 class="text-xl font-bold text-[#18392B] dark:text-cyan-400 flex items-center gap-2"><svg viewBox="0 0 24 24"
-            width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" class="text-[#10b981]">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-          </svg>Add Message</h3>
-        <button id="closeMessageModal"
-          class="text-gray-400 hover:text-black dark:hover:text-white text-xl border-0 bg-transparent cursor-pointer">✕</button>
-      </div>
-
-      <!-- Time & Date Input -->
-      <div class="mb-4 grid grid-cols-2 gap-3">
-        <div>
-          <label class="block text-sm font-semibold text-[#18392B] dark:text-gray-300 mb-2"><svg viewBox="0 0 24 24"
-              width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" class="inline mr-1">
-              <circle cx="12" cy="12" r="10" />
-              <polyline points="12 6 12 12 16 14" />
-            </svg>Send Time</label>
-          <input type="time" id="messageTime"
-            class="w-full px-3 py-2 glass-input rounded text-black dark:text-gray-100 font-semibold bg-white dark:bg-slate-950/40 border border-gray-200 dark:border-white/10">
-        </div>
-        <div>
-          <label class="block text-sm font-semibold text-[#18392B] dark:text-gray-300 mb-2"><svg viewBox="0 0 24 24"
-              width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" class="inline mr-1">
-              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-              <line x1="16" y1="2" x2="16" y2="6" />
-              <line x1="8" y1="2" x2="8" y2="6" />
-              <line x1="3" y1="10" x2="21" y2="10" />
-            </svg>Send Date</label>
-          <input type="date" id="messageDate"
-            class="w-full px-3 py-2 glass-input rounded text-black dark:text-gray-100 font-semibold bg-white dark:bg-slate-950/40 border border-gray-200 dark:border-white/10">
-        </div>
-      </div>
-
-      <!-- Message Input -->
-      <div class="mb-6">
-        <label class="block text-sm font-semibold text-[#18392B] dark:text-gray-300 mb-2"><svg viewBox="0 0 24 24"
-            width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" class="inline mr-1">
-            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-          </svg>Message Content</label>
-        <textarea id="composerMessageInput" placeholder="Type your message here..."
-          class="w-full h-32 p-3 glass-input rounded text-black dark:text-gray-100 placeholder-gray-400 resize-none font-medium bg-white dark:bg-slate-950/40 border border-gray-200 dark:border-white/10"></textarea>
-      </div>
-
-      <!-- Buttons -->
-      <div class="flex gap-3">
-        <button id="autoSendBtn"
-          class="flex-1 px-4 py-2 btn-accent rounded text-sm font-semibold transition-colors border-0 cursor-pointer">
-          ✓ Add Message
-        </button>
-        <button id="closeMessageModalBtn"
-          class="flex-1 px-4 py-2 btn-glass rounded text-sm font-semibold transition-colors dark:bg-slate-900 dark:text-gray-200 dark:border-white/10 cursor-pointer">
-          Cancel
-        </button>
-      </div>
-    </div>
   </div>
 
   <!-- MODAL: View Message Details -->
@@ -386,20 +341,24 @@
 
   <!-- MODAL: Clear All Notifications Confirmation -->
   <div id="clearAllModal"
-    class="hidden fixed inset-0 bg-black/20 backdrop-blur-sm z-[100] flex items-center justify-center p-4 transition-opacity duration-200">
+    style="display: none;"
+    class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 transition-opacity duration-200">
     <div
-      class="bg-white dark:bg-[#0c1328] border-2 border-[#10b981] dark:border-[#10b981]/40 rounded-2xl shadow-2xl p-6 w-full max-w-sm transform transition-all duration-200 scale-100">
-      <div class="flex items-center gap-3 mb-4">
-        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"
-          stroke-linecap="round" stroke-linejoin="round" class="text-amber-600">
-          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
-          <line x1="12" y1="9" x2="12" y2="13"></line>
-          <line x1="12" y1="17" x2="12.01" y2="17"></line>
-        </svg>
-        <h3 class="text-xl font-bold text-amber-600">Clear All Notifications</h3>
+      class="bg-white dark:bg-[#0c1328] border-2 border-[#10b981] dark:border-[#10b981]/40 rounded-2xl shadow-2xl p-6 w-full max-w-sm transform transition-all duration-200 scale-95">
+      <div class="flex justify-center mb-4">
+        <div class="p-3 bg-amber-500/10 rounded-full">
+          <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2"
+            class="text-amber-500">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+            <line x1="12" y1="9" x2="12" y2="13"></line>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+        </div>
       </div>
-      <p class="text-gray-600 dark:text-gray-300 text-sm mb-6">Are you sure you want to clear all notifications for this
-        room? This action cannot be undone.</p>
+      <h3 class="text-xl font-bold text-[#18392B] dark:text-[#a7f3d0] text-center mb-2">Clear All Notifications</h3>
+      <p id="clearAllConfirmMessage" class="text-gray-600 dark:text-gray-300 text-center text-sm mb-6">
+        Are you sure you want to clear all notifications for this room? This action cannot be undone.
+      </p>
       <div class="flex gap-3">
         <button id="confirmClearAllBtn"
           class="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all border-0 cursor-pointer">
@@ -413,13 +372,7 @@
     </div>
   </div>
 
-  <!-- Sensor Logs Engine (PocketBase) -->
-  <script src="./js/pocketbase.umd.js"></script>
-  <script>
-    if (!window.PocketBase) {
-      document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/pocketbase/0.26.2/pocketbase.umd.js"><\/script>');
-    }
-  </script>
+
   <!-- Cloud Database Engine (Supabase) -->
   <script src="./js/supabase.umd.js"></script>
   <script>
@@ -431,7 +384,7 @@
   <script src="./js/shared.js"></script>
   <script src="./js/global-notifications.js"></script>
   <script src="./js/sidebar.js"></script>
-  <script src="./js/notifications.js?v=8"></script>
+  <script src="./js/notifications.js?v=10"></script>
 </body>
 
 </html>

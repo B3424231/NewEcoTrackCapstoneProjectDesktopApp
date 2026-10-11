@@ -1,0 +1,13 @@
+{
+  "checks": [
+    "Initial cloud ON renders in the native dashboard card.",
+    "OFF, setpoint, mode, fan and toggle change automatically with real-time events absent.",
+    "Native fallback renders within one five-second refresh interval plus processing time.",
+    "light fixture uses the production shell theme.",
+    "dark fixture uses the production shell theme."
+  ],
+  "elapsed_ms": 4986,
+  "passed": 5,
+  "live_database_modified": false,
+  "physical_hardware_tested": false
+}

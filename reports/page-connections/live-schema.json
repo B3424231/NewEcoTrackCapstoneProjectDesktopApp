@@ -1,0 +1,132 @@
+{
+  "read_only": true,
+  "tables": {
+    "nodes": {
+      "available": true,
+      "columns": [
+        "id",
+        "name",
+        "status",
+        "temp",
+        "rssi",
+        "battery",
+        "wake_time",
+        "sleep_time",
+        "interval_val",
+        "interval_unit",
+        "room_id",
+        "aircon_type",
+        "install_date",
+        "created",
+        "updated",
+        "photo_url",
+        "image_url",
+        "aircon_id",
+        "maintainer_id",
+        "mac_address",
+        "ip_address",
+        "wifi_ssid",
+        "ble_uuid",
+        "protocol_name",
+        "brand"
+      ]
+    },
+    "aircons": {
+      "available": true,
+      "columns": [
+        "id",
+        "asset_tag",
+        "brand",
+        "model",
+        "cooling_capacity_hp",
+        "aircon_type",
+        "room_id",
+        "node_id",
+        "status",
+        "protocol",
+        "install_date",
+        "created_at",
+        "updated_at",
+        "protocol_name",
+        "controller_node_id",
+        "desired_state",
+        "command_id",
+        "command_status",
+        "command_status_at",
+        "commanded_at",
+        "reported_state",
+        "reported_at"
+      ]
+    },
+    "rooms": {
+      "available": true,
+      "columns": [
+        "id",
+        "name",
+        "node_limit",
+        "floor_id",
+        "admin_id",
+        "created",
+        "updated"
+      ]
+    },
+    "floors": {
+      "available": true,
+      "columns": [
+        "id",
+        "name",
+        "building_id",
+        "created",
+        "updated"
+      ]
+    },
+    "buildings": {
+      "available": true,
+      "columns": [
+        "id",
+        "name",
+        "admin_id",
+        "created",
+        "updated"
+      ]
+    },
+    "ecotrack_device_state": {
+      "available": true,
+      "columns": [
+        "node_id",
+        "device_id",
+        "last_seen",
+        "sleeping_until",
+        "firmware_version",
+        "wifi_ssid",
+        "ip_address",
+        "rssi",
+        "capabilities",
+        "latest_ir",
+        "applied_config"
+      ]
+    },
+    "ecotrack_device_commands": {
+      "available": true,
+      "columns": [
+        "id",
+        "node_id",
+        "kind",
+        "payload",
+        "status",
+        "created_by",
+        "created_at",
+        "expires_at",
+        "claimed_at",
+        "acknowledged_at",
+        "result"
+      ]
+    }
+  },
+  "rpcs": {
+    "ecotrack_register_cloud_device": true,
+    "ecotrack_cloud_request": true,
+    "ecotrack_device_exchange": true,
+    "ecotrack_device_mutation": true
+  }
+}

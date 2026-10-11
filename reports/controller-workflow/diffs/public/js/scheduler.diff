@@ -1,0 +1,155 @@
+--- before/public/js/scheduler.js
++++ public/js/scheduler.js
+@@ -43,13 +43,14 @@
+ 
+ function getSchedulerControlSnapshot(node) {
+   const identities = [node.id, node.name, node.pb_id].filter(Boolean);
++  const observation = window.EcoTrackAirconState?.remoteObservation(node.cloud_state?.latest_ir, node.cloud_state?.last_seen) || {};
+   const records = schedulerAirconRecords?.filter(ac => [ac.node_id, ac.controller_node_id]
+     .some(id => id && identities.includes(id))) || [];
+   if (records.length > 1 || (schedulerAirconRecords !== null && !records.length)) return null;
+   const profiles = window.EcoTrackAirconSystem?.AirconProfileManager?.getAll?.() || [];
+   const matches = profiles.filter(ac => [ac.node_id, ac.controller_node_id].some(id => identities.includes(id)));
+   const local = matches.length === 1 ? matches[0] : null;
+-  if (!records.length) return local?.control_snapshot || null;
++  if (!records.length) return {...local?.control_snapshot,...observation};
+   const ac = records[0];
+   const snapshot = {desired_state: ac.desired_state, reported_state: ac.reported_state,
+     commanded_at: ac.commanded_at, reported_at: ac.reported_at};
+@@ -57,24 +58,33 @@
+   const savedTime = Date.parse(ac.commanded_at || '');
+   const sameController = local && (local.aircon_id === ac.id || local.device_id === ac.asset_tag);
+   if (sameController && Number.isFinite(localTime) &&
+-      (!Number.isFinite(savedTime) || localTime > savedTime)) return local.control_snapshot;
++      (!Number.isFinite(savedTime) || localTime > savedTime)) return {...local.control_snapshot,...observation};
+   // The schedule column shows selected settings even before the first command is sent.
+   // Keep configuration separate from desired commands and measured device feedback.
+   if (sameController && !ac.desired_state && !ac.reported_state) snapshot.configured_state = local.state;
+-  return snapshot;
+-}
+-
++  return {...snapshot,...observation};
++}
++
++function schedulerSelectedSettings(node) {
++  return window.EcoTrackAirconState?.selectSettings(getSchedulerControlSnapshot(node)) || {state:null,source:'unknown'};
++}
++function getSchedulerTargetTemperature(node) {
++  const {state,source} = schedulerSelectedSettings(node);
++  return Number.isFinite(state?.temp) ? state.temp + ' °C' + (source === 'remote' ? ' (remote)' : '') : 'No IR setpoint';
++}
++function getSchedulerPowerMode(node) {
++  const {state,source} = schedulerSelectedSettings(node);
++  const power = state?.power === true || state?.power === 'on' ? 'ON' : state?.power === false || state?.power === 'off' ? 'OFF' : null;
++  if (!power) return 'Unknown';
++  return source === 'remote' ? 'REMOTE ' + power : source === 'requested' ? power + ' REQUESTED' : source === 'configured' ? power + ' SETTING' : power;
++}
+ function getSchedulerControlMode(node) {
+-  const snapshot = getSchedulerControlSnapshot(node);
+-  const description = window.EcoTrackAirconState?.describeAirconState(snapshot);
+-  const state = description?.confirmed ? snapshot.reported_state : snapshot?.desired_state || snapshot?.reported_state || snapshot?.configured_state;
+-  if (state?.power === false || state?.power === 'off') return description?.confirmed ? 'OFF / STANDBY' : 'POWER OFF REQUESTED';
++  const {state,source} = schedulerSelectedSettings(node);
+   const mode = String(state?.mode || '').trim().toLowerCase();
+   const fan = String(state?.fan || '').trim().toLowerCase();
+-  if (!['cool','dry','fan','auto','heat'].includes(mode)) return 'UNCONFIRMED';
+-  const fanLabel = ['low','medium','high','auto','quiet','silent','turbo'].includes(fan)
+-    ? fan.toUpperCase() + ' FAN' : 'FAN UNCONFIRMED';
+-  return mode.toUpperCase() + ' / ' + fanLabel;
++  if (!['cool','dry','fan','auto','heat'].includes(mode)) return 'No IR mode';
++  const fanLabel = ['low','medium','high','auto','quiet','silent','turbo'].includes(fan) ? fan.toUpperCase() + ' FAN' : 'FAN UNKNOWN';
++  return mode.toUpperCase() + ' / ' + fanLabel + (source === 'remote' ? ' (remote)' : '');
+ }
+ 
+ function refreshSchedulerControlModes() {
+@@ -84,6 +94,13 @@
+     const node = nodes.find(item => item.id === id) || currentRoomNodes.find(item => item.id === id);
+     if (node) label.textContent = getSchedulerControlMode(node);
+   });
++  for (const [selector,key,format] of [['[data-scheduler-target-temp]','schedulerTargetTemp',getSchedulerTargetTemperature],['[data-scheduler-power-mode]','schedulerPowerMode',getSchedulerPowerMode]]) {
++    document.querySelectorAll(selector).forEach(label => {
++      const id = decodeURIComponent(label.dataset[key]);
++      const node = nodes.find(item => item.id === id) || currentRoomNodes.find(item => item.id === id);
++      if (node) label.textContent = format(node);
++    });
++  }
+ }
+ 
+ async function refreshSchedulerAirconSettings() {
+@@ -400,10 +417,12 @@
+ 
+     if (loadVersion !== schedulerLoadVersion) return;
+     const { roomRecords = [], floorRecords = [], buildingRecords = [], nodeRecords = [], airconRecords = [], telemetryRecords = [], cloudStates = [] } = data || {};
++    const pendingIds = new Set(window.EcoTrackHardwareCloud?.pendingRegistrations?.() || []);
++    const visibleNodes = nodeRecords.filter(node => !pendingIds.has(String(node.id)) || airconRecords.some(ac => ac.controller_node_id === node.id || ac.node_id === node.id));
+     const hardwareByNode = new Map(cloudStates.map(state => [state.node_id, state]));
+     const knownRooms = new Set(roomRecords.map(room => room.id));
+     const roomViews = [...roomRecords];
+-    if (nodeRecords.some(node => !knownRooms.has(node.room_id))) roomViews.push({ id: '__unassigned_controllers__', name: 'Unassigned controllers', floor_id: null, building_id: null });
++    if (visibleNodes.some(node => !knownRooms.has(node.room_id))) roomViews.push({ id: '__unassigned_controllers__', name: 'Unassigned controllers', floor_id: null, building_id: null });
+ 
+     schedulerAirconRecords = airconRecords;
+     buildings = {};
+@@ -422,7 +441,7 @@
+     roomViews.forEach(record => {
+       // A controller appears once, using its real database room link.
+       const roomNodesMap = new Map();
+-      nodeRecords.forEach(node => {
++      visibleNodes.forEach(node => {
+         const belongs = record.id === '__unassigned_controllers__' ? !knownRooms.has(node.room_id) : node.room_id === record.id;
+         if (belongs) roomNodesMap.set(node.id, node);
+       });
+@@ -722,7 +741,7 @@
+       label.className = node.status === 'online' ? 'text-xs font-bold text-emerald-600 dark:text-emerald-400' : 'text-xs font-bold text-slate-600 dark:text-slate-400';
+     }
+     const temperature = document.getElementById(`temperature-${node.id}`);
+-    if (temperature) temperature.textContent = Number.isFinite(node.temp) ? Math.round(node.temp) + ' °C' : 'No measurement';
++    if (temperature) temperature.textContent = getSchedulerTargetTemperature(node);
+   }
+ }
+ 
+@@ -775,7 +794,7 @@
+   if (!schedulerTableBody) return;
+   schedulerTableBody.innerHTML = `
+     <tr class="text-center bg-white dark:bg-[#0c1328]/40">
+-      <td colspan="9" class="px-4 py-16 text-center">
++      <td colspan="10" class="px-4 py-16 text-center">
+         <div class="flex flex-col items-center justify-center max-w-sm mx-auto">
+           <div class="w-14 h-14 rounded-2xl bg-teal-500/10 dark:bg-teal-500/15 text-teal-600 dark:text-teal-400 border border-teal-500/30 flex items-center justify-center mb-3 shadow-xs">
+             <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8">
+@@ -802,7 +821,7 @@
+   if (!schedulerTableBody) return;
+   schedulerTableBody.innerHTML = `
+     <tr class="text-center bg-white dark:bg-[#0c1328]/40">
+-      <td colspan="9" class="px-4 py-16 text-center">
++      <td colspan="10" class="px-4 py-16 text-center">
+         <div class="flex flex-col items-center justify-center max-w-sm mx-auto">
+           <div class="w-14 h-14 rounded-2xl bg-rose-500/10 dark:bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 flex items-center justify-center mb-3 shadow-xs">
+             <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8">
+@@ -874,7 +893,7 @@
+   if (!nodes || nodes.length === 0) {
+     schedulerTableBody.innerHTML = `
+       <tr class="text-center bg-white dark:bg-[#0c1328]/40">
+-        <td colspan="9" class="px-4 py-16 text-center">
++        <td colspan="10" class="px-4 py-16 text-center">
+           <div class="flex flex-col items-center justify-center max-w-sm mx-auto">
+             <div class="w-14 h-14 rounded-2xl bg-teal-500/10 dark:bg-teal-500/15 text-teal-600 dark:text-teal-400 border border-teal-500/30 flex items-center justify-center mb-3 shadow-xs">
+               <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8">
+@@ -1000,7 +1019,7 @@
+           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+             <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"></path>
+           </svg>
+-          <span id="temperature-${node.id}" class="font-bold text-[#18392B] dark:text-cyan-400 text-sm">${temp === null ? 'No measurement' : Math.round(temp) + ' &deg;C'}</span>
++          <span id="temperature-${node.id}" data-scheduler-target-temp="${encodeURIComponent(node.id)}" class="font-bold text-[#18392B] dark:text-cyan-400 text-sm">${getSchedulerTargetTemperature(node)}</span>
+         </div>
+       </td>
+ 
+@@ -1017,6 +1036,8 @@
+           <span data-scheduler-control-mode="${encodeURIComponent(node.id)}" class="font-bold text-[#18392B] dark:text-teal-300 text-sm">${getSchedulerControlMode(node)}</span>
+         </div>
+       </td>
++
++      <td class="px-6 py-4"><span data-scheduler-power-mode="${encodeURIComponent(node.id)}" class="font-bold text-sm">${getSchedulerPowerMode(node)}</span></td>
+ 
+       <!-- CURRENT STATE -->
+       <td class="px-6 py-4">

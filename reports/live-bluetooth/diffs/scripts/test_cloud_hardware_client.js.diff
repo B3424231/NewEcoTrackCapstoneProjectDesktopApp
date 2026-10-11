@@ -1,0 +1,54 @@
+--- before/scripts/test_cloud_hardware_client.js
++++ scripts/test_cloud_hardware_client.js
+@@ -8,7 +8,7 @@
+ let hardwareStatus={node_id:'node-real',device_id:bluetoothInfo.device_id,last_seen:new Date(now).toISOString(),capabilities:{ir_receiver:true,ir_transmitter:false},latest_ir:null};
+ let rpcError=null, readError=null, responseMode='complete', wireParts=[], provisioned=[], requests=[], disconnected=false, queued=null;
+ const storage={ecoTrack_nodes:JSON.stringify([{node_id:'old',wifi_password:'must-remove',device_token:'must-remove'}])};
+-const checkList=[];
++const checkList=[];const notifications=[];let pickerCalls=0,connectCalls=0,disconnectCalls=0;
+ const infoChar={readValue:async()=>new DataView(new TextEncoder().encode(JSON.stringify(bluetoothInfo)).buffer)};
+ const writeChar={writeValueWithResponse:async bytes=>{
+  const packet=Buffer.from(bytes); const text=packet.toString('utf8'); const header=text.match(/^([^:]+):(\d+):(\d+):/);
+@@ -28,7 +28,7 @@
+  return id.startsWith('beb5483e')?infoChar:id.startsWith('b80301f3')?captureChar:writeChar;
+ }};
+ const disconnectHandlers=[];
+-const device={name:'EcoTrack-'+bluetoothInfo.device_id,addEventListener(name,callback){if(name==='gattserverdisconnected')disconnectHandlers.push(callback);},gatt:{connected:true,connect:async()=>{device.gatt.connected=true;return {getPrimaryService:async()=>service};},disconnect(){disconnected=true;this.connected=false;for(const callback of disconnectHandlers)callback();}}};
++const device={name:'EcoTrack-'+bluetoothInfo.device_id,addEventListener(name,callback){if(name==='gattserverdisconnected')disconnectHandlers.push(callback);},gatt:{connected:true,connect:async()=>{connectCalls++;device.gatt.connected=true;return {getPrimaryService:async()=>service};},disconnect(){disconnectCalls++;disconnected=true;this.connected=false;for(const callback of disconnectHandlers)callback();}}};
+ const sb={
+  rpc:async(name,args)=>{
+   requests.push({name,args:structuredClone(args)}); if(rpcError)return {data:null,error:rpcError};
+@@ -54,7 +54,7 @@
+   }; return query;
+  }
+ };
+-const root={supabaseClient:sb,crypto:crypto.webcrypto,navigator:{bluetooth:{requestDevice:async options=>{assert.equal(options.filters[0].namePrefix,'EcoTrack-');return device;}}},performance:{now:()=>now},ECOTRACK_CONFIG:{supabaseUrl:'https://test.supabase.co',supabaseKey:'sb_publishable_fixture'},localStorage:{getItem:k=>storage[k]||null,setItem:(k,v)=>storage[k]=v}};
++const root={CustomEvent:class{constructor(type,options){this.type=type;this.detail=options.detail;}},dispatchEvent:event=>notifications.push(event),supabaseClient:sb,crypto:crypto.webcrypto,navigator:{bluetooth:{requestDevice:async options=>{pickerCalls++;assert.equal(options.filters[0].namePrefix,'EcoTrack-');return device;}}},performance:{now:()=>now},ECOTRACK_CONFIG:{supabaseUrl:'https://test.supabase.co',supabaseKey:'sb_publishable_fixture'},localStorage:{getItem:k=>storage[k]||null,setItem:(k,v)=>storage[k]=v}};
+ const context=vm.createContext({window:root,Date:TestDate,TextEncoder,TextDecoder,Uint8Array,atob,console,setTimeout:(callback,ms)=>{now+=ms;queueMicrotask(callback);}});
+ vm.runInContext(fs.readFileSync('public/js/hardware-cloud.js','utf8'),context);
+ const cloud=root.EcoTrackHardwareCloud;
+@@ -122,6 +122,24 @@
+  await assert.rejects(()=>cloud.connect(actualId),error=>error.code==='BLE_DISCONNECTED'&&/No ESP32 was selected/.test(error.message));
+  root.navigator.bluetooth.requestDevice=originalChooser;await cloud.connect(actualId);
+  checkList.push('Cancelled device selection leaves an actionable reconnect error');
++ const beforeReusePicker=pickerCalls,beforeReuseConnect=connectCalls,beforeReuseDrop=disconnectCalls,beforeReuseRpcs=requests.length,beforeReuseWrites=provisioned.length;
++ const healthy=await cloud.reconnect(bluetoothInfo.device_id);
++ assert.equal(healthy.device_id,bluetoothInfo.device_id);assert.equal(pickerCalls,beforeReusePicker);assert.equal(connectCalls,beforeReuseConnect);assert.equal(disconnectCalls,beforeReuseDrop);
++ checkList.push('Reconnect on a healthy link reads the selected ESP32 without disconnecting or reopening the chooser');
++ const savedRead=infoChar.readValue;let recoveredReads=0;
++ infoChar.readValue=async()=>{if(++recoveredReads===1)throw new DOMException('Temporary GATT handle failure.','NetworkError');return savedRead();};
++ const recovered=await cloud.reconnect(bluetoothInfo.device_id);infoChar.readValue=savedRead;
++ assert.equal(recovered.device_id,bluetoothInfo.device_id);assert.equal(recoveredReads,2);assert.equal(connectCalls,beforeReuseConnect+1);assert.equal(disconnectCalls,beforeReuseDrop);
++ assert.equal(requests.length,beforeReuseRpcs);assert.equal(provisioned.length,beforeReuseWrites);
++ const fresh=notifications.filter(event=>event.type==='ecotrack:bluetooth-info').at(-1);
++ assert.equal(fresh.detail.info.device_id,bluetoothInfo.device_id);assert.equal(fresh.detail.info.firmware_version,bluetoothInfo.firmware_version);
++ checkList.push('A temporary read failure re-discovers handles once on the existing link and publishes fresh info without any writes');
++ let failedReads=0;
++ infoChar.readValue=async()=>{failedReads++;throw new DOMException('Persistent GATT read error.','NetworkError');};
++ await assert.rejects(()=>cloud.reconnect(bluetoothInfo.device_id),error=>error.code==='BLE_CONNECTION_FAILED'&&error.bluetooth_connected===true&&error.original_code===19&&error.cause instanceof DOMException&&/Persistent GATT read error/.test(error.message)&&error.operation==='reading device information');
++ infoChar.readValue=savedRead;
++ assert.equal(failedReads,2);assert.equal(disconnectCalls,beforeReuseDrop);assert.equal(requests.length,beforeReuseRpcs);assert.equal(provisioned.length,beforeReuseWrites);
++ checkList.push('Persistent read failures are bounded, keep the original diagnostic, and do not claim disconnection or replay provisioning');
+  const beforeInvalid=requests.length;
+  await assert.rejects(()=>cloud.register({}, {ssid:'Campus network',pass:''}),/8..63 bytes/);
+  assert.equal(requests.length,beforeInvalid);

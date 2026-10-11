@@ -1,0 +1,10 @@
+{
+  "passed": 4,
+  "checks": [
+    "The table and counters show ON history only, while energy calculations retain their existing history inputs.",
+    "OFF and connectivity-only rows disappear without reload and cannot be exported as operating readings.",
+    "Earlier valid ON readings remain visible when the controller later turns OFF; history is never rewritten.",
+    "Receiver power timestamps, serialized snapshots and explicit legacy ON readings use the same gate."
+  ],
+  "live_hardware_tested": false
+}

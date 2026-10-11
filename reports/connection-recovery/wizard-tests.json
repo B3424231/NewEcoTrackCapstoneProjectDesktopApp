@@ -1,0 +1,19 @@
+{
+  "passed": 12,
+  "checks": [
+    "Initial checks are pending and a typed ID cannot bypass actual Bluetooth discovery",
+    "A real connected ESP32 skips to Controller Info while cloud access remains unverified",
+    "Legacy cloud repair collects the password in Controller Info without repeating Wi-Fi setup",
+    "Test Connection reads an existing connection without rewriting credentials and replaces Connecting with Wi-Fi Connected",
+    "Fresh setup still waits for the actual provisioning reply before advancing",
+    "GATT errors show failed checks and Retry instead of green success or a stuck connecting label",
+    "An old connection test cannot overwrite the newly selected controller",
+    "A fresh IP read can also recognize completed Wi-Fi and skip to Controller Info",
+    "Resuming a previously authorized device skips both completed setup pages",
+    "A resume reply cannot reopen or repopulate a closed registration wizard",
+    "An unavailable previous device releases the normal Bluetooth picker after a bounded check",
+    "Editing the target network invalidates previous Wi-Fi confirmation"
+  ],
+  "physical_hardware_tested": false,
+  "live_supabase_tested": false
+}

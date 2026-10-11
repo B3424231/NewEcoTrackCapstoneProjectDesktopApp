@@ -1,0 +1,125 @@
+--- before/public/js/scheduler.js
++++ public/js/scheduler.js
+@@ -39,6 +39,7 @@
+     intervalUnit: document.getElementById(`interval-unit-${id}`)?.value,
+     editedAt: Date.now()
+   });
++  updateNodeSleepNote(id);
+ });
+ 
+ function getSchedulerControlSnapshot(node) {
+@@ -114,18 +115,28 @@
+   } catch (_) {}
+ }
+ 
++function normalizeScheduleTime(value) {
++  if (typeof value !== 'string') return null;
++  const match = /^([01]?\d|2[0-3]):([0-5]\d)(?::00(?:\.0+)?)?$/.exec(value.trim());
++  return match ? match[1].padStart(2, '0') + ':' + match[2] : null;
++}
++function nodeSleepNote(wake, sleep) {
++  const wakeTime = normalizeScheduleTime(wake), sleepTime = normalizeScheduleTime(sleep);
++  if (!wakeTime || !sleepTime) return 'Choose wake and sleep times before applying.';
++  return wakeTime === sleepTime ? 'Equal times keep this controller awake.' : '';
++}
++function updateNodeSleepNote(nodeId) {
++  const note = document.getElementById(`sleep-note-${nodeId}`);
++  if (!note) return;
++  note.textContent = nodeSleepNote(document.getElementById(`wake-${nodeId}`)?.value, document.getElementById(`sleep-${nodeId}`)?.value);
++  note.classList.toggle('hidden', !note.textContent);
++}
+ function formatTimeDisplay(value) {
+-  const timeValue = String(value || '05:00');
+-  const match = /^([0-2]?\d):([0-5]\d)$/.exec(timeValue);
+-  if (!match) return '05:00 AM';
+-
+-  let hours = parseInt(match[1], 10);
+-  const minutes = match[2];
+-  const period = hours >= 12 ? 'PM' : 'AM';
+-  hours = hours % 12;
+-  if (hours === 0) hours = 12;
+-
+-  return `${String(hours).padStart(2, '0')}:${minutes} ${period}`;
++  const timeValue = normalizeScheduleTime(value);
++  if (!timeValue) return value == null || String(value).trim() === '' ? 'Not set' : 'Invalid time';
++  const [hour, minutes] = timeValue.split(':');
++  const hours = Number(hour);
++  return `${String(hours % 12 || 12).padStart(2, '0')}:${minutes} ${hours >= 12 ? 'PM' : 'AM'}`;
+ }
+ 
+ function composeTimeValue(hourValue, minuteValue, periodValue) {
+@@ -248,7 +259,7 @@
+ 
+   if (!modal || !hourSelect || !minuteSelect || !periodSelect || !targetInput) return;
+ 
+-  const currentValue = targetInput.value || '05:00';
++  const currentValue = normalizeScheduleTime(targetInput.value) || '05:00';
+   const match = /^([0-2]?\d):([0-5]\d)$/.exec(currentValue) || ['05:00', '05', '00'];
+   const hour24 = parseInt(match[1], 10);
+   const minute = match[2];
+@@ -1066,7 +1077,7 @@
+             <span class="sched-time-trigger-value" id="wake-display-${node.id}">${formatTimeDisplay(node.wakeTime ?? '')}</span>
+           </div>
+         </button>
+-        <input type="hidden" id="wake-${node.id}" value="${node.wakeTime ?? ''}">
++        <input type="hidden" id="wake-${node.id}" value="${normalizeScheduleTime(node.wakeTime) || ''}">
+       </td>
+ 
+       <!-- SLEEP TIME -->
+@@ -1080,7 +1091,8 @@
+             <span class="sched-time-trigger-value" id="sleep-display-${node.id}">${formatTimeDisplay(node.sleepTime ?? '')}</span>
+           </div>
+         </button>
+-        <input type="hidden" id="sleep-${node.id}" value="${node.sleepTime ?? ''}">
++        <input type="hidden" id="sleep-${node.id}" value="${normalizeScheduleTime(node.sleepTime) || ''}">
++        <p id="sleep-note-${node.id}" aria-live="polite" class="${nodeSleepNote(node.wakeTime, node.sleepTime) ? '' : 'hidden '}mt-1 max-w-[180px] text-[10px] leading-tight text-slate-500 dark:text-slate-400">${nodeSleepNote(node.wakeTime, node.sleepTime)}</p>
+       </td>
+ 
+       <!-- SEND INTERVAL -->
+@@ -1094,7 +1106,7 @@
+           <div class="flex flex-col justify-center">
+             <span class="text-[10px] font-bold text-gray-400 tracking-widest uppercase">EVERY</span>
+             <div class="flex items-center gap-2">
+-              <input type="number" id="interval-val-${node.id}" value="${node.intervalVal || 15}" min="1" class="w-8 text-lg font-bold text-[#18392B] dark:text-gray-100 bg-transparent border-b-2 border-gray-200 dark:border-white/10 focus:border-[#10b981] focus:outline-none p-0 text-center transition-colors" data-node-id="${node.id}">
++              <input type="number" id="interval-val-${node.id}" value="${node.intervalVal ?? ''}" min="1" step="1" class="w-8 text-lg font-bold text-[#18392B] dark:text-gray-100 bg-transparent border-b-2 border-gray-200 dark:border-white/10 focus:border-[#10b981] focus:outline-none p-0 text-center transition-colors" data-node-id="${node.id}">
+               <select id="interval-unit-${node.id}" class="appearance-none border-[1.5px] border-[#10b981] dark:border-[#10b981]/40 rounded-lg px-2 py-0.5 text-sm font-bold text-[#18392B] dark:text-cyan-400 bg-white dark:bg-slate-900 cursor-pointer outline-none focus:ring-2 focus:ring-[#10b981]/20 transition-shadow" style="padding-right: 1.5rem; background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%2318392B%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E'); background-repeat: no-repeat; background-position: right 0.25rem center; background-size: 1em;" data-node-id="${node.id}">
+                 <option value="Seconds" ${node.intervalUnit === 'Seconds' ? 'selected' : ''}>SEC</option>
+                 <option value="Minutes" ${!node.intervalUnit || node.intervalUnit === 'Minutes' ? 'selected' : ''}>MIN</option>
+@@ -1131,15 +1143,21 @@
+ }
+ 
+ async function applyNodeSchedule(nodeId, buttonElement) {
+-  const wakeTime = document.getElementById(`wake-${nodeId}`)?.value;
+-  const sleepTime = document.getElementById(`sleep-${nodeId}`)?.value;
++  const wakeTime = normalizeScheduleTime(document.getElementById(`wake-${nodeId}`)?.value);
++  const sleepTime = normalizeScheduleTime(document.getElementById(`sleep-${nodeId}`)?.value);
+   const intervalVal = Number(document.getElementById(`interval-val-${nodeId}`)?.value);
+   const intervalUnit = document.getElementById(`interval-unit-${nodeId}`)?.value;
+   const multiplier = { Seconds: 1, Minutes: 60, Hours: 3600 }[intervalUnit];
+   const seconds = intervalVal * multiplier;
+-  if (!Number.isInteger(intervalVal) || !Number.isInteger(seconds) || seconds < 1 || seconds > 86400 ||
+-      !/^([01]\d|2[0-3]):[0-5]\d$/.test(wakeTime || '') || !/^([01]\d|2[0-3]):[0-5]\d$/.test(sleepTime || '')) {
+-    window.EcoToast?.error('Enter valid wake/sleep times and a whole-number report interval of 1 second to 24 hours.');
++  if (!wakeTime || !sleepTime) {
++    const field = !wakeTime ? 'wake' : 'sleep';
++    window.EcoToast?.error(`Choose a valid ${field} time before applying this controller schedule.`);
++    document.querySelector?.(`[data-time-target="${field}-${nodeId}"]`)?.focus();
++    return;
++  }
++  if (!Number.isInteger(intervalVal) || !Number.isInteger(seconds) || seconds < 1 || seconds > 86400) {
++    window.EcoToast?.error('The report interval must be a whole number between 1 second and 24 hours. Check the value and unit.');
++    document.getElementById(`interval-val-${nodeId}`)?.focus?.();
+     return;
+   }
+   if (buttonElement) { buttonElement.disabled = true; buttonElement.textContent = 'Saving...'; }
+@@ -1147,6 +1165,10 @@
+     const command = await window.EcoTrackHardwareCloud.request(nodeId, 'configure', { interval_seconds: seconds, interval_val: intervalVal, interval_unit: intervalUnit, wake_time: wakeTime, sleep_time: sleepTime }, { wait: false });
+     scheduleDeliveries.set(nodeId, { nodeId, databaseNodeId: command.node_id, commandId: command.id, seconds, wakeTime, sleepTime, label: 'Queued', button: buttonElement });
+     scheduleDrafts.delete(nodeId);
++    const wakeInput = document.getElementById(`wake-${nodeId}`), sleepInput = document.getElementById(`sleep-${nodeId}`);
++    if (wakeInput) wakeInput.value = wakeTime;
++    if (sleepInput) sleepInput.value = sleepTime;
++    updateNodeSleepNote(nodeId);
+     for (const room of Object.values(savedRooms)) for (const node of room.nodes || []) {
+       if (node.id === nodeId || node.name === nodeId) Object.assign(node, { wakeTime, sleepTime, intervalVal, intervalUnit });
+     }

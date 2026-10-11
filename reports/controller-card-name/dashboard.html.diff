@@ -1,0 +1,70 @@
+--- before/public/dashboard.html
++++ public/dashboard.html
+@@ -225,16 +225,19 @@
+           isPowerOn ? 'border-teal-500/35 shadow-lg shadow-teal-950/20' : 'border-white/5 opacity-85'
+         }`;
+ 
+-        // Title and brand model
++        // Display the admin's controller name separately from the AC manufacturer.
++        const savedName = typeof node?.name === 'string' ? node.name.trim() : '';
++        const controllerName = savedName && !/^(?:EcoTrack[-_])?esp32s3[-_:][0-9a-f]{12}$/i.test(savedName)
++          ? savedName : 'AC Controller';
+         const titleEl = card.querySelector('h3');
+-        if (titleEl && ac.name) {
+-          titleEl.textContent = ac.name;
+-          titleEl.title = ac.name;
++        if (titleEl) {
++          titleEl.textContent = controllerName;
++          titleEl.title = controllerName;
+         }
+         const subEl = card.querySelector('h3 + p');
+         if (subEl) {
+-          subEl.textContent = `${ac.brand} • ${ac.model}`;
+-          subEl.title = `${ac.brand} • ${ac.model}`;
++          subEl.textContent = ac.model || ac.aircon_type || '';
++          subEl.title = subEl.textContent;
+         }
+ 
+         // Power toggle button
+@@ -293,7 +296,9 @@
+         }
+         const nodeNameEl = card.querySelector('.ac-node-name');
+         if (nodeNameEl) {
+-          nodeNameEl.textContent = node?.name || ac.node_id;
++          nodeNameEl.textContent = controllerName;
++          nodeNameEl.title = controllerName;
++          if (nodeNameEl.parentElement) nodeNameEl.parentElement.title = controllerName;
+         }
+       }
+ 
+@@ -541,8 +546,8 @@
+                 <!-- TOP ROW: LOCATION + POWER TOGGLE -->
+                 <div class="flex items-start justify-between gap-3 mb-2.5">
+                   <div class="min-w-0 flex-1">
+-                    <h3 class="font-bold text-sm md:text-base text-slate-800 dark:text-white truncate" title="${ac.name}">${ac.name}</h3>
+-                    <p class="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5" title="${ac.brand} • ${ac.model}">${ac.brand} &bull; ${ac.model}</p>
++                    <h3 class="font-bold text-sm md:text-base text-slate-800 dark:text-white truncate"></h3>
++                    <p class="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5"></p>
+                   </div>
+                   <button class="power-toggle-btn shrink-0 p-2 rounded-xl transition-all border ${
+                     isPowerOn 
+@@ -603,9 +608,9 @@
+ 
+               <!-- FOOTER: CONTROLLER DEVICE STATUS & CONTROL LINK -->
+               <div class="pt-2.5 border-t border-white/5 flex items-center justify-between text-xs">
+-                <div class="flex items-center gap-1.5 text-gray-400 min-w-0 flex-1 mr-2" title="${node?.name || ac.node_id}">
++                <div class="flex items-center gap-1.5 text-gray-400 min-w-0 flex-1 mr-2">
+                   <span class="ac-node-status-dot w-2 h-2 rounded-full shrink-0 ${isNodeOnline ? 'bg-emerald-400' : 'bg-rose-500'}"></span>
+-                  <span class="ac-node-name text-[11px] font-medium truncate">${node?.name || ac.node_id}</span>
++                  <span class="ac-node-name text-[11px] font-medium truncate"></span>
+                 </div>
+ 
+                 <a href="control.html?id=${encodeURIComponent(ac.device_id)}" class="shrink-0 text-teal-400 hover:text-cyan-300 font-semibold text-xs flex items-center gap-1">
+@@ -614,6 +619,7 @@
+               </div>
+             `;
+ 
++            updateSingleCardDom(card, ac, node);
+             grid.appendChild(card);
+           });
+ 

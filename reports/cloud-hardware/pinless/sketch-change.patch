@@ -1,0 +1,64 @@
+--- original-pasted-sketch
++++ pinless-sketch
+@@ -2,6 +2,7 @@
+ // Arduino ESP32 core 3.3.12, ArduinoJson 7, IRremoteESP8266 2.9.0.
+ // Board: ESP32S3 Dev Module; Partition Scheme: Huge APP (3MB No OTA).
+ // IR receiver: VCC=3.3V, GND=GND, OUT=IR_RX_PIN. No IR transmitter/battery.
++// Bluetooth: encrypted Just Works pairing and bonding, with no six-digit PIN.
+ #include <WiFi.h>
+ #include <WiFiClientSecure.h>
+ #include <HTTPClient.h>
+@@ -25,7 +26,7 @@
+ constexpr char SERVICE_UUID[] = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+ constexpr char INFO_UUID[] = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+ constexpr char WIFI_UUID[] = "1c95d5e3-d8f7-413a-bf3d-7a2e5d7be87e";
+-constexpr char VERSION[] = "cloud-ir-receiver-1.0";
++constexpr char VERSION[] = "cloud-ir-receiver-1.1-pinless";
+ 
+ IRrecv receiver(IR_RX_PIN, 1024, 50, true);
+ decode_results decoded;
+@@ -126,37 +127,33 @@
+   void onDisconnect(BLEServer *) override { bluetoothConnected = false; advertiseAgain = true; }
+ };
+ class SecurityCallbacks : public BLESecurityCallbacks {
+-  uint32_t onPassKeyRequest() override { return BLESecurity::getPassKey(); }
+-  void onPassKeyNotify(uint32_t passkey) override { Serial.printf("Bluetooth pairing code: %06lu\n", (unsigned long)passkey); }
+   bool onSecurityRequest() override { return true; }
+   bool onConfirmPIN(uint32_t) override { return false; }
+ #if defined(CONFIG_BLUEDROID_ENABLED)
+   void onAuthenticationComplete(esp_ble_auth_cmpl_t result) override {
+-    Serial.println(result.success ? "Bluetooth secure pairing completed." : "Bluetooth pairing failed.");
++    Serial.println(result.success ? "Bluetooth encrypted pairing completed (no PIN)." : "Bluetooth pairing failed.");
+   }
+ #else
+   void onAuthenticationComplete(ble_gap_conn_desc *, int status) override {
+-    Serial.println(status == 0 ? "Bluetooth secure pairing completed." : "Bluetooth pairing failed.");
++    Serial.println(status == 0 ? "Bluetooth encrypted pairing completed (no PIN)." : "Bluetooth pairing failed.");
+   }
+ #endif
+ };
+ void beginBluetooth() {
+   BLEDevice::init("EcoTrack-" + deviceId); BLEDevice::setMTU(247);
+   BLEDevice::setSecurityCallbacks(new SecurityCallbacks());
+-  BLESecurity::setAuthenticationMode(true, true, true);
+-  BLESecurity::setCapability(ESP_IO_CAP_OUT);
+-  uint32_t passkey = 100000 + (esp_random() % 900000);
+-  BLESecurity::setPassKey(true, passkey);
+-  Serial.printf("Bluetooth pairing code: %06lu\n", (unsigned long)passkey);
++  // Bonding + LE Secure Connections, without PIN/MITM authentication.
++  BLESecurity::setAuthenticationMode(true, false, true);
++  BLESecurity::setCapability(ESP_IO_CAP_NONE);
+   BLEServer *server = BLEDevice::createServer(); server->setCallbacks(new ServerCallbacks());
+   BLEService *service = server->createService(SERVICE_UUID);
+   infoCharacteristic = service->createCharacteristic(INFO_UUID, BLECharacteristic::PROPERTY_READ);
+   infoCharacteristic->setCallbacks(new InfoCallbacks());
+   #if defined(CONFIG_BLUEDROID_ENABLED)
+   BLECharacteristic *writer = service->createCharacteristic(WIFI_UUID, BLECharacteristic::PROPERTY_WRITE);
+-  writer->setAccessPermissions(ESP_GATT_PERM_WRITE_ENC_MITM);
++  writer->setAccessPermissions(ESP_GATT_PERM_WRITE_ENC);
+ #else
+-  BLECharacteristic *writer = service->createCharacteristic(WIFI_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_ENC | BLECharacteristic::PROPERTY_WRITE_AUTHEN);
++  BLECharacteristic *writer = service->createCharacteristic(WIFI_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_ENC);
+ #endif
+   writer->setCallbacks(new ProvisionCallbacks());
+   service->start();

@@ -1,0 +1,14 @@
+{
+  "result": "passed",
+  "board": "esp32:esp32:heltec_wireless_stick_lite_V3",
+  "firmware_version": "cloud-ir-controller-1.4-rxtx",
+  "program_bytes": 1540628,
+  "program_limit": 3342336,
+  "global_variable_bytes": 50900,
+  "dynamic_memory_limit": 327680,
+  "source_sha256": "1eb427534c227c4b8ba8d0dec54dde3a66131f64507ba2823f137695554c12e5",
+  "hardware_flashed": false,
+  "physical_hardware_tested": false,
+  "firmware_directory_edited": false,
+  "compile_command": "arduino-cli compile --fqbn esp32:esp32:heltec_wireless_stick_lite_V3 --build-path scratch/build-receiver-transmitter scratch/EcoTrackReceiverTransmitter"
+}
