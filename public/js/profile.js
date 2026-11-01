@@ -1,37 +1,115 @@
-document.addEventListener('DOMContentLoaded', () => {
+let currentUser = null;
+
+// Role spelling is presentation only; access comes from the authenticated RPC.
+function isAdministratorProfile(user) {
+  if (typeof user.adminAccess === 'boolean') return user.adminAccess;
+  const role = String(user.role || '').trim().toLowerCase().replace(/[_-]+/g, ' ');
+  return ['admin', 'administrator', 'system administrator', 'super admin'].includes(role) ||
+    String(user.userType || '').toLowerCase() === 'admin';
+}
+
+async function verifyAdministratorAccess(sb) {
+  if (!sb?.rpc) return null;
+  try {
+    const { data, error } = await sb.rpc('ecotrack_is_admin');
+    return !error && typeof data === 'boolean' ? data : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function loadProfileWithSWR(forceRefresh = false) {
   const sb = window.supabaseClient || window.sb;
-  
-  // Load profile merging localStorage and Supabase session
   const localUser = JSON.parse(localStorage.getItem('ecoTrack_profile_user') || '{}');
-  const user = {
-    id: localUser.id || 'admin_default_01',
-    username: localUser.username || 'admin',
-    email: localUser.email || 'admin@ecotrack.local',
-    role: localUser.role || 'admin',
-    location: localUser.location || 'Philippines',
-    avatar: localStorage.getItem('ecoTrack_avatar') || '',
-    created: localUser.created || '2026-07-03T00:00:00Z',
-    last_login: localUser.last_login || '2026-07-03T08:00:00Z',
-    is_active: localUser.is_active !== undefined ? localUser.is_active : true,
-    session_timeout: localUser.session_timeout || '30 minutes'
+  
+  const fetchProfileData = async (signal) => {
+    let merged = { ...localUser };
+    if (sb) {
+      try {
+        // Fetch real authenticated profile via RPC
+        const { data: rpcProfile, error: rpcErr } = await sb.rpc('ecotrack_my_profile');
+        if (!rpcErr && rpcProfile) {
+          merged = {
+            ...merged,
+            id: rpcProfile.id || merged.id,
+            username: rpcProfile.name || rpcProfile.username || merged.username,
+            name: rpcProfile.name || merged.name,
+            email: rpcProfile.email || merged.email,
+            role: rpcProfile.role || (rpcProfile.userType === 'staff' ? 'Staff' : 'admin'),
+            userType: rpcProfile.userType || merged.userType,
+            phone: rpcProfile.phone || merged.phone,
+            photoUrl: rpcProfile.photoUrl || merged.photoUrl,
+            avatar: rpcProfile.photoUrl || rpcProfile.avatar || merged.avatar,
+            assignment: rpcProfile.assignment || merged.assignment,
+          };
+          return merged;
+        }
+      } catch (err) {
+        console.warn('Profile RPC fetch warning:', err);
+      }
+
+      try {
+        const { data: { user: authUser } } = await sb.auth.getUser();
+        if (authUser && authUser.id) {
+          const { data: adminRows } = await sb.from('administrators').select('id, username, email, role, location, created, last_login, is_active, session_timeout').eq('auth_user_id', authUser.id).maybeSingle();
+          if (adminRows) {
+            merged = { ...merged, ...adminRows };
+          }
+        }
+      } catch (err) {
+        console.warn('Profile Supabase fetch warning:', err);
+      }
+    }
+    return merged;
   };
 
-  // Format Date Function
-  const formatDate = (dateStr) => {
-    if (!dateStr) return 'N/A';
-    const options = { year: 'numeric', month: 'long', day: 'numeric' };
-    return new Date(dateStr).toLocaleDateString('en-US', options);
+  let loadedProfile;
+  if (window.EcoDataBus) {
+    loadedProfile = await window.EcoDataBus.query('profile:data', fetchProfileData, {
+      forceRefresh,
+      ttl: 60000
+    });
+  } else {
+    loadedProfile = await fetchProfileData();
+  }
+
+  // Verify on each load, even when the profile itself came from the cache.
+  const adminAccess = await verifyAdministratorAccess(sb);
+  const profileId = loadedProfile?.id || localUser.id;
+  currentUser = {
+    adminAccess,
+    userType: loadedProfile?.userType || localUser.userType,
+    id: profileId || 'admin_default_01',
+    username: loadedProfile?.username || localUser.username || 'admin',
+    email: loadedProfile?.email || localUser.email || 'admin@ecotrack.local',
+    role: loadedProfile?.role || localUser.role || 'admin',
+    location: loadedProfile?.location || localUser.location || 'Philippines',
+    // The legacy shared key has no owner and must never be assigned to an account.
+    avatar: profileId ? localStorage.getItem(`ecoTrack_avatar:${profileId}`) || '' : '',
+    created: loadedProfile?.created || localUser.created || '2026-07-03T00:00:00Z',
+    last_login: loadedProfile?.last_login || localUser.last_login || '2026-07-03T08:00:00Z',
+    is_active: loadedProfile?.is_active !== undefined ? loadedProfile.is_active : true,
+    session_timeout: getSessionTimeoutSetting({session_timeout: loadedProfile?.session_timeout ?? localUser.session_timeout})
   };
 
-  const formatDateTime = (dateStr) => {
-    if (!dateStr) return 'N/A';
-    const options = { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' };
-    return new Date(dateStr).toLocaleDateString('en-US', options);
-  };
+  populateProfileUI(currentUser);
+}
 
-  // Populate UI Fields
-  const roleDisplay = user.role === 'admin' ? 'Administrator' : (user.role || 'User');
-  const roleTitle = user.role === 'admin' ? 'System Administrator' : 'System User';
+const formatDate = (dateStr) => {
+  if (!dateStr) return 'N/A';
+  const options = { year: 'numeric', month: 'long', day: 'numeric' };
+  return new Date(dateStr).toLocaleDateString('en-US', options);
+};
+
+const formatDateTime = (dateStr) => {
+  if (!dateStr) return 'N/A';
+  const options = { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' };
+  return new Date(dateStr).toLocaleDateString('en-US', options);
+};
+
+function populateProfileUI(user) {
+  const roleDisplay = isAdministratorProfile(user) ? 'Administrator' : (user.role || 'User');
+  const roleTitle = isAdministratorProfile(user) ? 'System Administrator' : 'System User';
   const name = user.username || 'Administrator';
   
   const profileNameEl = document.getElementById('profile-name');
@@ -56,13 +134,17 @@ document.addEventListener('DOMContentLoaded', () => {
     profileAvatarImg.src = user.avatar;
     profileAvatarImg.classList.remove('hidden');
     profileAvatarSvg.classList.add('hidden');
+  } else if (profileAvatarImg && profileAvatarSvg) {
+    profileAvatarImg.removeAttribute('src');
+    profileAvatarImg.classList.add('hidden');
+    profileAvatarSvg.classList.remove('hidden');
   }
   
   const profileRoleTextEl = document.getElementById('profile-role-text');
   if (profileRoleTextEl) profileRoleTextEl.textContent = roleDisplay;
   
   const profilePermissionsEl = document.getElementById('profile-permissions');
-  if (profilePermissionsEl) profilePermissionsEl.textContent = user.role === 'admin' ? 'Full Access' : 'Limited Access';
+  if (profilePermissionsEl) profilePermissionsEl.textContent = user.adminAccess === true ? 'Full Access' : user.adminAccess === false ? 'Limited Access' : 'Access unverified';
   
   const profileLastLoginEl = document.getElementById('profile-last-login');
   if (profileLastLoginEl) profileLastLoginEl.textContent = formatDateTime(user.last_login || user.created);
@@ -72,7 +154,92 @@ document.addEventListener('DOMContentLoaded', () => {
   
   const overviewEmailEl = document.getElementById('overview-email');
   if (overviewEmailEl) overviewEmailEl.textContent = user.email;
-  
+
+  const sessionTimeoutSelect = document.getElementById('session-timeout-select');
+  if (sessionTimeoutSelect) sessionTimeoutSelect.value = getSessionTimeoutSetting(user);
+}
+
+function initProfileSessionTimeout() {
+  const select = document.getElementById('session-timeout-select');
+  if (!select) return;
+  select.value = getSessionTimeoutSetting(currentUser);
+  select.addEventListener('change', () => {
+    const setting = select.value;
+    localStorage.setItem('ecoTrack_session_timeout', setting);
+    let cachedUser;
+    try { cachedUser = JSON.parse(localStorage.getItem('ecoTrack_profile_user') || '{}'); }
+    catch (_) { cachedUser = {}; }
+    localStorage.setItem('ecoTrack_profile_user', JSON.stringify({...cachedUser, session_timeout: setting}));
+    if (currentUser) currentUser.session_timeout = setting;
+    resetSessionTimeoutTimer();
+    showProfileToast(`✓ Session timeout set to ${setting}`, 'success');
+  });
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  // Bind local security preferences before waiting for the account profile request.
+  initProfileSessionTimeout();
+  // Tab Navigation Logic
+  const tabs = [
+    { btn: document.getElementById('tabBtnProfile'), panel: document.getElementById('panelProfile') },
+    { btn: document.getElementById('tabBtnSecurity'), panel: document.getElementById('panelSecurity') },
+    { btn: document.getElementById('tabBtnHistory'), panel: document.getElementById('panelHistory'), onOpen: () => renderLoginHistory() }
+  ];
+
+  function switchTab(activeTab) {
+    window.EcoTrackPageState?.save({profileTab:activeTab.btn?.id});
+    tabs.forEach(tab => {
+      if (!tab.btn || !tab.panel) return;
+      tab.btn.setAttribute('aria-selected', String(tab === activeTab));
+      tab.btn.tabIndex = tab === activeTab ? 0 : -1;
+      if (tab === activeTab) {
+        tab.btn.classList.remove('border-transparent', 'text-gray-500', 'dark:text-gray-400');
+        tab.btn.classList.add('border-emerald-500', 'text-emerald-600', 'dark:text-emerald-400');
+        tab.panel.classList.remove('hidden');
+        if (tab.onOpen) tab.onOpen();
+      } else {
+        tab.btn.classList.remove('border-emerald-500', 'text-emerald-600', 'dark:text-emerald-400');
+        tab.btn.classList.add('border-transparent', 'text-gray-500', 'dark:text-gray-400');
+        tab.panel.classList.add('hidden');
+      }
+    });
+  }
+
+  tabs.forEach(tab => {
+    if (tab.btn) {
+      tab.btn.setAttribute('role', 'tab'); tab.btn.setAttribute('aria-controls', tab.panel.id);
+      tab.panel.setAttribute('role', 'tabpanel'); tab.panel.setAttribute('aria-labelledby', tab.btn.id);
+      tab.btn.addEventListener('click', () => {
+        switchTab(tab);
+      });
+      tab.btn.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        const index = tabs.indexOf(tab), next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+        tabs[next].btn.click(); tabs[next].btn.focus();
+      });
+    }
+  });
+
+  if (location.hash === '#device-mode') history.replaceState(null, '', location.pathname + location.search);
+  const profileTab = new URLSearchParams(location.search).get('tab') || window.EcoTrackPageState?.read().profileTab;
+  switchTab(tabs.find(tab => tab.btn?.id === profileTab || tab.btn?.id.toLowerCase() === 'tabbtn' + String(profileTab).toLowerCase()) || tabs[0]);
+
+  await loadProfileWithSWR();
+
+  if (window.EcoDataBus) {
+    window.EcoDataBus.on('data:invalidated', (payload) => {
+      if (payload && payload.key === 'profile:data') {
+        loadProfileWithSWR(true);
+      }
+    });
+  }
+
+  const sb = window.supabaseClient || window.sb;
+  const user = currentUser || JSON.parse(localStorage.getItem('ecoTrack_profile_user') || '{}');
+  const name = user.username || 'Administrator';
+  const roleTitle = isAdministratorProfile(user) ? 'System Administrator' : 'System User';
+
   // Initialize and bind Dark Mode Toggle
   const darkModeToggle = document.getElementById('dark-mode-toggle-ui');
   const darkModeStatusText = document.getElementById('dark-mode-status-text');
@@ -81,10 +248,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!darkModeStatusText) return;
     if (isDark) {
       darkModeStatusText.textContent = 'Dark Mode';
-      darkModeStatusText.className = 'text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-950/80 text-emerald-400 border border-emerald-500/40 transition-colors shadow-sm';
+      darkModeStatusText.className = 'theme-pill-badge theme-dark text-xs font-bold px-3 py-1 rounded-full border transition-all select-none cursor-pointer shadow-xs focus:outline-none';
     } else {
       darkModeStatusText.textContent = 'Light Mode';
-      darkModeStatusText.className = 'text-xs font-bold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600 transition-colors shadow-sm';
+      darkModeStatusText.className = 'theme-pill-badge theme-light text-xs font-bold px-3 py-1 rounded-full border transition-all select-none cursor-pointer shadow-xs focus:outline-none';
     }
   }
 
@@ -114,6 +281,13 @@ document.addEventListener('DOMContentLoaded', () => {
       }));
     });
 
+    if (darkModeStatusText) {
+      darkModeStatusText.addEventListener('click', () => {
+        darkModeToggle.checked = !darkModeToggle.checked;
+        darkModeToggle.dispatchEvent(new Event('change'));
+      });
+    }
+
     window.addEventListener('storage', (e) => {
       if (e.key === 'ecoTrackTheme') {
         const isDarkNow = e.newValue === 'dark';
@@ -128,6 +302,158 @@ document.addEventListener('DOMContentLoaded', () => {
       updateDarkModeStatus(isDarkNow);
     });
   }
+
+  // Header notification badge live synchronization
+  function updateHeaderNotificationBadge() {
+    const badge = document.getElementById('headerNotificationBadge');
+    if (!badge) return;
+    const isEnabled = localStorage.getItem('ecoTrack_notifications_enabled') !== 'false';
+    if (!isEnabled) {
+      badge.classList.add('hidden');
+      badge.style.display = 'none';
+      return;
+    }
+    try {
+      const readState = JSON.parse(localStorage.getItem('ecoTrackNotificationReadState') || '{}');
+      
+      const processNotifs = (data) => {
+        if (localStorage.getItem('ecoTrack_notifications_enabled') === 'false') {
+          badge.classList.add('hidden');
+          badge.style.display = 'none';
+          return;
+        }
+        const unread = (data || []).filter(n => 
+          n.triggered && 
+          n.is_dismissed_from_inbox !== true &&
+          !(n.content && String(n.content).startsWith('__INBOX_DISMISSED__|||')) && 
+          !readState[String(n.id || '')]
+        ).length;
+        if (unread > 0) {
+          badge.textContent = unread > 99 ? '99+' : unread;
+          badge.classList.remove('hidden');
+          badge.style.display = 'flex';
+        } else {
+          badge.classList.add('hidden');
+          badge.style.display = 'none';
+        }
+      };
+
+      if (window.electron && typeof window.electron.invoke === 'function') {
+        window.electron.invoke('notifications-fetch-all').then(res => {
+          if (res && res.success && res.data) {
+            processNotifs(res.data);
+          }
+        }).catch(() => {});
+      } else {
+        const sb = window.supabaseClient || window.sb;
+        if (sb) {
+          sb.from('notifications')
+            .select('id, triggered, content')
+            .then(({ data, error }) => {
+              if (!error && data) processNotifs(data);
+            }).catch(() => {});
+        }
+      }
+    } catch (_) {}
+  }
+  updateHeaderNotificationBadge();
+  setInterval(updateHeaderNotificationBadge, 8000);
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'ecoTrackNotificationReadState') {
+      updateHeaderNotificationBadge();
+    }
+    if (e.key === 'ecoTrack_notifications_enabled') {
+      const isEnabled = e.newValue !== 'false';
+      renderNotifToggleState(isEnabled);
+      updateHeaderNotificationBadge();
+    }
+  });
+
+  // ==========================================
+  // Header Notification ON / OFF Toggle Button
+  // ==========================================
+  const notifToggleBtn = document.getElementById('headerNotificationToggleBtn');
+  const notifBellIcon = document.getElementById('headerNotifBellIcon');
+  const notifMutedIcon = document.getElementById('headerNotifMutedIcon');
+  const notifStatusText = document.getElementById('headerNotifStatusText');
+  const headerNotifBadge = document.getElementById('headerNotificationBadge');
+
+  function renderNotifToggleState(isEnabled) {
+    if (!notifToggleBtn) return;
+    if (isEnabled) {
+      if (notifBellIcon) notifBellIcon.classList.remove('hidden');
+      if (notifMutedIcon) notifMutedIcon.classList.add('hidden');
+      if (notifStatusText) {
+        notifStatusText.textContent = 'Alerts ON';
+        notifStatusText.className = 'theme-pill-badge notif-on text-xs font-bold px-2.5 py-1 rounded-full border transition-all select-none cursor-pointer shadow-xs focus:outline-none';
+      }
+      notifToggleBtn.title = 'Notifications: ON (Click to Mute / Turn OFF)';
+      notifToggleBtn.setAttribute('aria-pressed', 'true');
+      updateHeaderNotificationBadge();
+    } else {
+      if (notifBellIcon) notifBellIcon.classList.add('hidden');
+      if (notifMutedIcon) notifMutedIcon.classList.remove('hidden');
+      if (notifStatusText) {
+        notifStatusText.textContent = 'Alerts OFF';
+        notifStatusText.className = 'theme-pill-badge notif-off text-xs font-bold px-2.5 py-1 rounded-full border transition-all select-none cursor-pointer shadow-xs focus:outline-none';
+      }
+      notifToggleBtn.title = 'Notifications: OFF (Muted - Click to Turn ON)';
+      notifToggleBtn.setAttribute('aria-pressed', 'false');
+      if (headerNotifBadge) {
+        headerNotifBadge.classList.add('hidden');
+        headerNotifBadge.style.display = 'none';
+      }
+      const dialog = document.getElementById('globalNotificationDialog');
+      if (dialog) dialog.style.display = 'none';
+    }
+  }
+
+  const isNotifEnabled = localStorage.getItem('ecoTrack_notifications_enabled') !== 'false';
+  renderNotifToggleState(isNotifEnabled);
+
+  if (notifToggleBtn) {
+    notifToggleBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const current = localStorage.getItem('ecoTrack_notifications_enabled') !== 'false';
+      const newState = !current;
+      localStorage.setItem('ecoTrack_notifications_enabled', newState ? 'true' : 'false');
+      renderNotifToggleState(newState);
+
+      window.dispatchEvent(new CustomEvent('notifications:toggled', { detail: { enabled: newState } }));
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'ecoTrack_notifications_enabled',
+        newValue: newState ? 'true' : 'false'
+      }));
+
+      if (newState) {
+        showProfileToast('🔔 Notifications turned ON', 'success');
+      } else {
+        showProfileToast('🔕 Notifications turned OFF (Muted)', 'info');
+      }
+    });
+  }
+
+  if (notifStatusText && notifToggleBtn) {
+    notifStatusText.addEventListener('click', (e) => {
+      e.preventDefault();
+      notifToggleBtn.click();
+    });
+  }
+
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'ecoTrack_notifications_enabled') {
+      const isEnabled = e.newValue !== 'false';
+      renderNotifToggleState(isEnabled);
+      updateHeaderNotificationBadge();
+    }
+  });
+
+  window.addEventListener('notifications:toggled', (e) => {
+    if (e.detail && typeof e.detail.enabled === 'boolean') {
+      renderNotifToggleState(e.detail.enabled);
+      updateHeaderNotificationBadge();
+    }
+  });
   
   const overviewStatusEl = document.getElementById('overview-status');
   if (overviewStatusEl) {
@@ -140,24 +466,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Populate Timeout dropdown
-  const sessionTimeoutSelect = document.getElementById('session-timeout-select');
-  if (sessionTimeoutSelect) {
-    const savedTimeout = localStorage.getItem('ecoTrack_session_timeout') || user.session_timeout || '30 minutes';
-    sessionTimeoutSelect.value = savedTimeout;
-    sessionTimeoutSelect.addEventListener('change', () => {
-      user.session_timeout = sessionTimeoutSelect.value;
-      localStorage.setItem('ecoTrack_session_timeout', sessionTimeoutSelect.value);
-      localStorage.setItem('ecoTrack_profile_user', JSON.stringify(user));
-      
-      if (typeof resetSessionTimeoutTimer === 'function') {
-        resetSessionTimeoutTimer();
-      }
-      
-      showProfileToast(`✓ Session timeout set to ${sessionTimeoutSelect.value}`, 'success');
-    });
-  }
-  
   // Populate Edit Modal Fields
   const editNameEl = document.getElementById('edit-name');
   if (editNameEl) editNameEl.value = name;
@@ -174,122 +482,77 @@ document.addEventListener('DOMContentLoaded', () => {
   const editLocationEl = document.getElementById('edit-location');
   if (editLocationEl) editLocationEl.value = user.location;
 
-  // Modal logic
+  // Top header button shortcuts to profile tab
   const editProfileBtn = document.getElementById('editProfileBtn');
-  const changePasswordBtn = document.getElementById('changePasswordBtn');
-  const viewHistoryBtn = document.getElementById('viewHistoryBtn');
-  
+  if (editProfileBtn) {
+    editProfileBtn.addEventListener('click', () => {
+      switchTab(tabs[0]);
+      if (editNameEl) editNameEl.focus();
+    });
+  }
+
+  // Legacy modal references handled safely
   const editProfileModal = document.getElementById('editProfileModal');
   const changePasswordModal = document.getElementById('changePasswordModal');
   const viewHistoryModal = document.getElementById('viewHistoryModal');
   const viewAirconTypesModal = document.getElementById('viewAirconTypesModal');
   const addAirconTypeModal = document.getElementById('addAirconTypeModal');
-  const closeBtns = document.querySelectorAll('.close-modal-btn');
 
-  function openModal(modal) {
-    if (modal) {
-      modal.classList.remove('hidden');
-    }
-  }
-
-  function closeModal(modal) {
-    if (modal) {
-      modal.classList.add('hidden');
-    }
-  }
-
-  if (editProfileBtn) {
-    editProfileBtn.addEventListener('click', () => openModal(editProfileModal));
-  }
-
-  if (changePasswordBtn) {
-    changePasswordBtn.addEventListener('click', () => openModal(changePasswordModal));
-  }
-
-  if (viewHistoryBtn) {
-    viewHistoryBtn.addEventListener('click', () => {
-      openModal(viewHistoryModal);
-      renderLoginHistory();
-    });
-  }
-
-  const viewAirconTypesBtn = document.getElementById('viewAirconTypesBtn');
-  if (viewAirconTypesBtn) {
-    viewAirconTypesBtn.addEventListener('click', () => {
-      openModal(viewAirconTypesModal);
-      renderAirconTypes();
-    });
-  }
-
-  const addAirconTypeBtn = document.getElementById('addAirconTypeBtn');
-  if (addAirconTypeBtn) {
-    addAirconTypeBtn.addEventListener('click', () => openModal(addAirconTypeModal));
-  }
-
-  closeBtns.forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const modal = e.target.closest('div[id$="Modal"]');
-      closeModal(modal);
-    });
-  });
-
-  // Close when clicking outside modal content
-  window.addEventListener('click', (e) => {
-    if (e.target === editProfileModal) {
-      closeModal(editProfileModal);
-    }
-    if (e.target === changePasswordModal) {
-      closeModal(changePasswordModal);
-    }
-    if (e.target === viewHistoryModal) {
-      closeModal(viewHistoryModal);
-    }
-    if (e.target === viewAirconTypesModal) {
-      closeModal(viewAirconTypesModal);
-    }
-    if (e.target === addAirconTypeModal) {
-      closeModal(addAirconTypeModal);
-    }
-  });
+  // Helper toast notifier
+  const notifySuccess = (msg) => (window.EcoToast ? window.EcoToast.success(msg) : alert(msg));
+  const notifyError = (msg) => (window.EcoToast ? window.EcoToast.error(msg) : alert(msg));
+  const notifyWarning = (msg) => (window.EcoToast ? window.EcoToast.warning(msg) : alert(msg));
 
   // Save Profile Changes
   const saveProfileBtn = document.getElementById('save-profile-btn');
   if (saveProfileBtn) {
     saveProfileBtn.addEventListener('click', async () => {
-      const originalText = saveProfileBtn.textContent;
-      saveProfileBtn.textContent = 'Saving...';
+      const originalText = saveProfileBtn.innerHTML;
+      saveProfileBtn.innerHTML = `
+        <svg class="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10" stroke-opacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="0.9"/></svg>
+        Saving Profile...
+      `;
       saveProfileBtn.disabled = true;
       
       try {
         const updatedData = {
-          username: editNameEl.value,
-          email: editEmailEl.value,
-          location: editLocationEl ? editLocationEl.value : 'Philippines'
+          username: editNameEl.value.trim() || 'Administrator',
+          email: editEmailEl.value.trim() || user.email,
+          location: editLocationEl ? editLocationEl.value.trim() : 'Philippines'
         };
         
-        // Save to localStorage
         const profileToSave = { ...user, ...updatedData };
+        const clientToUpdate = window.supabaseClient || window.sb || sb;
+        if (!user.id || !clientToUpdate) throw new Error('Sign in and reconnect before saving your profile.');
+        const isStaff = user.id.startsWith('stf_') || user.userType === 'staff';
+        const table = isStaff ? 'staff' : 'administrators';
+        const payload = isStaff
+          ? { name: updatedData.username, email: updatedData.email }
+          : { username: updatedData.username, email: updatedData.email, location: updatedData.location, updated: new Date().toISOString() };
+        const { data: receipt, error: sbUpdateErr } = await clientToUpdate.from(table).update(payload).eq('id', user.id).select('id').single();
+        if (sbUpdateErr) throw new Error(sbUpdateErr.message || 'The profile could not be saved.');
+        if (receipt?.id !== user.id) throw new Error('The server did not confirm your profile update.');
         localStorage.setItem('ecoTrack_profile_user', JSON.stringify(profileToSave));
-
-        if (sb && user.id) {
-          const { error: sbUpdateErr } = await sb.from('administrators').update({
-            username: updatedData.username,
-            email: updatedData.email,
-            updated: new Date().toISOString()
-          }).eq('id', user.id);
-
-          if (sbUpdateErr) {
-            console.warn('[Supabase Profile Update]', sbUpdateErr.message);
-          }
-        }
+        Object.assign(user, updatedData);
         
-        alert('Profile updated successfully!');
-        window.location.reload();
+        // Update live fields on page immediately
+        const profileNameEl = document.getElementById('profile-name');
+        const profileEmailEl = document.getElementById('profile-email');
+        const profileLocationEl = document.getElementById('profile-location');
+        if (profileNameEl) profileNameEl.textContent = updatedData.username;
+        if (profileEmailEl) profileEmailEl.textContent = updatedData.email;
+        if (profileLocationEl) profileLocationEl.textContent = updatedData.location;
+        populateProfileUI(profileToSave);
+
+        notifySuccess('Profile updated successfully!');
+        if (window.EcoDataBus) {
+          window.EcoDataBus.invalidate('profile:data');
+        }
       } catch (err) {
         console.error(err);
-        alert('Failed to update profile: ' + (err.data?.message || err.message));
+        notifyError('Failed to update profile: ' + (err.data?.message || err.message));
       } finally {
-        saveProfileBtn.textContent = originalText;
+        saveProfileBtn.innerHTML = originalText;
         saveProfileBtn.disabled = false;
       }
     });
@@ -304,30 +567,36 @@ document.addEventListener('DOMContentLoaded', () => {
       const confirmPassword = document.getElementById('confirm-password').value;
       
       if (!currentPassword || !newPassword || !confirmPassword) {
-        alert('Please fill in all password fields.');
+        notifyWarning('Please fill in all password fields.');
         return;
       }
       
       if (newPassword !== confirmPassword) {
-        alert('New passwords do not match.');
+        notifyWarning('New passwords do not match.');
+        return;
+      }
+
+      if (newPassword.length < 6) {
+        notifyWarning('New password should be at least 6 characters long.');
         return;
       }
       
-      const originalText = updatePasswordBtn.textContent;
-      updatePasswordBtn.textContent = 'Updating...';
+      const originalText = updatePasswordBtn.innerHTML;
+      updatePasswordBtn.innerHTML = `
+        <svg class="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10" stroke-opacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="0.9"/></svg>
+        Updating...
+      `;
       updatePasswordBtn.disabled = true;
       
       try {
-        if (sb && user.id) {
-          const { error: pwdErr } = await sb.from('administrators').update({
-            password: newPassword,
-            updated: new Date().toISOString()
-          }).eq('id', user.id);
-
-          if (pwdErr) throw new Error(pwdErr.message);
-        }
-        alert('Password updated successfully!');
-        closeModal(changePasswordModal);
+        if (!sb?.auth || !user.id) throw new Error('Sign in before changing your password.');
+        const { data: identity, error: identityError } = await sb.auth.getUser();
+        if (identityError || !identity.user?.email) throw new Error('Sign in before changing your password.');
+        const { error: currentError } = await sb.auth.signInWithPassword({ email: identity.user.email, password: currentPassword });
+        if (currentError) throw new Error('Current password is incorrect.');
+        const { error: pwdErr } = await sb.auth.updateUser({ password: newPassword });
+        if (pwdErr) throw new Error(pwdErr.message);
+        notifySuccess('Password updated successfully!');
         
         // Clear inputs
         document.getElementById('current-password').value = '';
@@ -336,9 +605,9 @@ document.addEventListener('DOMContentLoaded', () => {
         
       } catch (err) {
         console.error(err);
-        alert('Failed to update password: ' + (err.data?.message || err.message));
+        notifyError('Failed to update password: ' + (err.data?.message || err.message));
       } finally {
-        updatePasswordBtn.textContent = originalText;
+        updatePasswordBtn.innerHTML = originalText;
         updatePasswordBtn.disabled = false;
       }
     });
@@ -356,17 +625,20 @@ document.addEventListener('DOMContentLoaded', () => {
       const file = avatarFileInput.files[0];
       if (!file) return;
 
+      const profileId = currentUser?.id;
+      if (!profileId || profileId === 'admin_default_01') {
+        notifyError('Sign in before changing your profile picture.');
+        return;
+      }
+
       const reader = new FileReader();
       reader.onload = (e) => {
+        if (currentUser?.id !== profileId) return;
         const base64Data = e.target.result;
-        localStorage.setItem('ecoTrack_avatar', base64Data);
-        
-        if (profileAvatarImg && profileAvatarSvg) {
-          profileAvatarImg.src = base64Data;
-          profileAvatarImg.classList.remove('hidden');
-          profileAvatarSvg.classList.add('hidden');
-        }
-        alert('Profile picture updated successfully!');
+        localStorage.setItem(`ecoTrack_avatar:${profileId}`, base64Data);
+        currentUser.avatar = base64Data;
+        populateProfileUI(currentUser);
+        notifySuccess('Profile picture updated successfully!');
       };
       reader.readAsDataURL(file);
     });
@@ -399,7 +671,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const history = getLoginHistory();
     if (history.length === 0) {
-      listEl.innerHTML = '<li class="text-sm text-gray-500 dark:text-gray-400 text-center py-6">No login activity recorded yet.</li>';
+      listEl.innerHTML = `
+        <li class="py-12 px-4 text-center flex flex-col items-center justify-center">
+          <div class="w-14 h-14 rounded-2xl bg-teal-500/10 dark:bg-teal-500/15 text-teal-600 dark:text-teal-400 border border-teal-500/30 flex items-center justify-center mb-3 shadow-xs">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+          </div>
+          <p class="font-bold text-sm text-slate-800 dark:text-white mb-1">No Login History Recorded</p>
+          <p class="text-xs text-slate-500 dark:text-gray-400 max-w-xs leading-relaxed">
+            Authentication timestamps, IP addresses, and active browser sessions will be logged here.
+          </p>
+        </li>
+      `;
       return;
     }
 
@@ -442,73 +727,6 @@ document.addEventListener('DOMContentLoaded', () => {
       localStorage.setItem('ecoTrack_loginHistory', JSON.stringify(newHistory));
       renderLoginHistory();
       showProfileToast('Past login activity history cleared.', 'info');
-    });
-  }
-
-  // Aircon Types Logic
-  let airconTypes = JSON.parse(localStorage.getItem('ecoTrack_airconTypes')) || [
-    { name: 'Window Type (Inverter)' },
-    { name: 'Split Type (Inverter)' },
-    { name: 'Floor Standing' }
-  ];
-
-  function renderAirconTypes() {
-    const listEl = document.getElementById('aircon-types-list');
-    if (!listEl) return;
-    
-    listEl.innerHTML = '';
-    
-    if (airconTypes.length === 0) {
-      listEl.innerHTML = '<li class="text-sm text-gray-500 dark:text-gray-400 text-center py-4">No aircon types added yet.</li>';
-      return;
-    }
-
-    airconTypes.forEach((type, index) => {
-      const li = document.createElement('li');
-      li.className = 'flex justify-between items-center py-2 border-b border-gray-100 dark:border-white/5 last:border-0';
-      li.innerHTML = `
-        <div>
-          <p class="font-bold text-gray-800 dark:text-gray-200 text-sm">${type.name}</p>
-        </div>
-        <button class="text-red-500 hover:text-red-700 text-xs px-2 py-1 bg-red-50 dark:bg-red-950/20 border border-red-500/10 rounded font-semibold transition-colors delete-type-btn" data-index="${index}">Remove</button>
-      `;
-      listEl.appendChild(li);
-    });
-
-    // Attach delete listeners
-    document.querySelectorAll('.delete-type-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const index = parseInt(e.target.getAttribute('data-index'));
-        airconTypes.splice(index, 1);
-        localStorage.setItem('ecoTrack_airconTypes', JSON.stringify(airconTypes));
-        renderAirconTypes();
-      });
-    });
-  }
-
-  const saveAirconTypeBtn = document.getElementById('save-aircon-type-btn');
-  if (saveAirconTypeBtn) {
-    saveAirconTypeBtn.addEventListener('click', () => {
-      const nameInput = document.getElementById('new-aircon-name');
-      const name = nameInput.value.trim();
-      
-      if (!name) {
-        alert('Please fill in the Type Name.');
-        return;
-      }
-      
-      airconTypes.push({ name });
-      localStorage.setItem('ecoTrack_airconTypes', JSON.stringify(airconTypes));
-      
-      // Clear inputs
-      nameInput.value = '';
-      closeModal(addAirconTypeModal);
-      
-      // If view modal is open, refresh it
-      if (!viewAirconTypesModal.classList.contains('hidden')) {
-        renderAirconTypes();
-      }
-      alert('Aircon type added successfully!');
     });
   }
 

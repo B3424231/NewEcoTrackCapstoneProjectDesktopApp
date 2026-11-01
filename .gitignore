@@ -76,3 +76,61 @@ out/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Private firmware configuration and browser session caches
+firmware/**/wifi-secrets.h
+**/browser-profile/
+**/browser-profile-*/
+**/.ecotrack-*.key
+supabase/.temp/
+
+# Release binaries belong in GitHub Releases, not source history.
+*.apk
+*.aab
+*.msi
+*.msix
+*.appx
+*.blockmap
+*.zip
+*.7z
+*.tar
+*.tar.gz
+!/scripts/ble_scanner.exe
+
+# Local automation, audit output, and build caches.
+/artifacts/
+/scratch/
+/.agents/
+/.impeccable/
+/.claude/
+/.codex/
+/.pytest_cache/
+/.ruff_cache/
+/htmlcov/
+.coverage*
+coverage/
+*.db-*
+*.sqlite-*
+*.sqlite3-*
+/backend/backups/
+/REPORT.md
+
+# Keep only the small reference fixtures required by the energy model tests.
+/reports/*
+!/reports/extra-trees-energy/
+/reports/extra-trees-energy/*
+!/reports/extra-trees-energy/artifacts/
+/reports/extra-trees-energy/artifacts/*
+!/reports/extra-trees-energy/artifacts/held_out_predictions.csv
+!/reports/extra-trees-energy/artifacts/control_test_inputs.csv
+
+# Retain the reproducible active model input; omit downloaded research corpora.
+/datasets/*
+!/datasets/control_energy_reference/
+
+# Diagram sources and Markdown are retained; rendered copies stay local.
+/docs/diagrams/*.png
+/docs/diagrams/*.svg
+/docs/*.docx
+/docs/superpowers/
+/assets/installer/artwork-preview.png

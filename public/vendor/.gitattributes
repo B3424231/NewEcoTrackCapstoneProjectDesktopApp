@@ -1,0 +1,2 @@
+# Preserve upstream bytes and the checksums in assets.json across platforms.
+* -text

@@ -14,7 +14,7 @@ function getCleanStaffList() {
           if (s.email && s.email.includes('@ecotrack.local')) return false;
           if (['Carlos Rivera', 'Maria Santos', 'Jose Reyes', 'Ana Cruz', 'Mark Villanueva'].includes(s.name)) return false;
           return true;
-        });
+        }).map(({ password, password_hash, ...safe }) => safe);
         localStorage.setItem('ecoTrack_staff', JSON.stringify(cleaned));
         return cleaned;
       }
@@ -23,16 +23,49 @@ function getCleanStaffList() {
   return [];
 }
 
-let staffList = getCleanStaffList();
+let staffList = window.EcoDataBus?.getCached('staff:data') ?? getCleanStaffList();
 let currentPage = 1;
-const PAGE_SIZE = 10;
+let archivedCurrentPage = 1;
+const PAGE_SIZE = 20;
 let pendingDeleteId = null;
 let searchQuery = '';
 let statusFilter = 'all';
+const rememberedStaffView = window.EcoTrackPageState?.read() || {};
+let pendingStaffPage = Number.isInteger(rememberedStaffView.currentPage) && rememberedStaffView.currentPage > 0 ? rememberedStaffView.currentPage : 1;
+let pendingArchivedPage = Number.isInteger(rememberedStaffView.archivedCurrentPage) && rememberedStaffView.archivedCurrentPage > 0 ? rememberedStaffView.archivedCurrentPage : 1;
+window.addEventListener('pagehide', () => {
+  const maintenanceTab = !document.getElementById('tabArchivedContent')?.classList.contains('hidden') ? 'archived' : !document.getElementById('tabReportsContent')?.classList.contains('hidden') ? 'reports' : 'staff';
+  window.EcoTrackPageState?.save({searchQuery,statusFilter,currentPage,archivedSearchQuery,archivedCurrentPage,maintenanceTab});
+});
 
 let _buildingsData = [];
 let _floorsData = [];
 let _roomsData = [];
+let _staffLocationsReady = null;
+let _staffLocationsLoaded = false;
+let _staffEditSaving = false;
+let _staffEditBaseline = null;
+let _staffEditSession = 0;
+let _staffEditAvatarReading = false;
+let _staffEditPreparing = false;
+let _staffEditTargetId = null;
+const STAFF_EDITOR_LOAD_TIMEOUT = 15000;
+const STAFF_EDIT_VERSION_FIELDS = ['name', 'email', 'phone', 'role', 'room_id', 'assignment_scope',
+  'assigned_floor_id', 'assigned_building_id', 'avatar', 'photo_url', 'avatar_url'];
+function staffEditVersion(row) {
+  return Object.fromEntries(STAFF_EDIT_VERSION_FIELDS.map(key => [key, row[key] ?? null]));
+}
+function staffEditNotice(message, type = 'error', toast = true) {
+  const notice = document.getElementById('editStaffNotice');
+  if (notice) { notice.textContent = message; notice.classList.toggle('hidden', !message); }
+  if (message && toast) {
+    if (window.EcoToast?.[type]) window.EcoToast[type](message);
+    else showEcoTrackToast(message, type);
+  }
+}
+function staffEditEscape(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
 
 function resolveAvatarUrl(s) {
   if (!s) return '';
@@ -70,6 +103,8 @@ function resolveAvatarUrl(s) {
   if (!raw) return '';
 
   // 1. Data URL (Base64) or full HTTP/HTTPS URL
+  if (raw.startsWith('storage://')) return window.ecotrackResolveStorageImage?.(raw) || raw;
+
   if (raw.startsWith('data:') || raw.startsWith('http://') || raw.startsWith('https://')) {
     return raw;
   }
@@ -99,58 +134,93 @@ function resolveAvatarUrl(s) {
   return raw;
 }
 
+function applyStaffData(data, replaceOnlyId = null) {
+  if (!Array.isArray(data)) return;
+  const previousStaff = staffList;
+  const incomingStaff = data.map(s => {
+    const editVersion = staffEditVersion(s);
+    const location = window.EcoTrackMaintenance?.resolveStaffHierarchy?.(s);
+    if (location) s = { ...s, building_id: location.buildingId, building_name: location.buildingName,
+      floor_id: location.floorId, floor_name: location.floorName, room_id: location.roomId,
+      room_name: location.roomName, assignment: location.assignment };
+    const rawStatus = (s.status || '').toLowerCase();
+    const isArch = isStaffArchived(s);
+    const isOnline = (rawStatus === 'online' || s.is_online === true || s.online_status === 'online') && rawStatus !== 'offline' && s.is_online !== false && !isArch;
+    const status = isArch ? 'Archived' : rawStatus === 'on leave' ? 'On Leave' : (isOnline ? 'Online' : 'Offline');
+
+    return {
+      id: s.id,
+      editVersion,
+      authUserId: s.auth_user_id || null,
+      assignmentScope: s.assignment_scope || 'room',
+      assignedFloorId: s.assigned_floor_id || '',
+      assignedBuildingId: s.assigned_building_id || '',
+      name: s.name,
+      email: s.email,
+      phone: s.phone || '',
+      role: s.role || 'HVAC / Aircon Technician',
+      avatar: resolveAvatarUrl(s),
+      buildingId: (s.building_name === 'All Buildings' || s.building_id === 'all_buildings' || (s.assignment && s.assignment.toLowerCase().includes('all building'))) ? 'all_buildings' : (s.building_id || ''),
+      buildingName: s.building_name || 'Unassigned',
+      floorId: (s.floor_name === 'All Floors' || s.floor_id === 'all_floors' || (s.assignment && s.assignment.toLowerCase().includes('all floor'))) ? 'all_floors' : (s.floor_id || ''),
+      floorName: s.floor_name || 'Unassigned',
+      roomId: (s.room_name === 'All Rooms' || s.room_id === 'all_rooms' || (s.assignment && s.assignment.toLowerCase().includes('all room')) || (!s.room_id && (s.room_name?.toLowerCase().includes('all') || s.floor_name?.toLowerCase().includes('all') || s.building_name?.toLowerCase().includes('all')))) ? 'all_rooms' : (s.room_id || ''),
+      roomName: s.room_name || ((s.room_id === 'all_rooms' || s.floor_name === 'All Floors' || s.building_name === 'All Buildings') ? 'All Rooms' : 'Unassigned'),
+      assignment: s.assignment || [s.building_name, s.floor_name, s.room_name].filter(Boolean).join(' • ') || 'Unassigned',
+      status: status,
+      isOnline: isOnline,
+      isArchived: isArch,
+      is_archived: isArch,
+      archiveReason: s.archive_reason || '',
+      archiveNotes: s.archive_notes || '',
+      archivedAt: s.archived_at || null,
+      lastActive: s.last_active || s.created,
+      created: s.created
+    };
+  });
+  staffList = replaceOnlyId ? [...previousStaff.filter(s => s.id !== replaceOnlyId), ...incomingStaff] : incomingStaff;
+  window.EcoDataBus?.mutate('staff:data', staffList);
+  saveStaff();
+  if (pendingStaffPage) { currentPage = pendingStaffPage; pendingStaffPage = null; }
+  if (pendingArchivedPage) { archivedCurrentPage = pendingArchivedPage; pendingArchivedPage = null; }
+  renderTable();
+  renderArchivedTable();
+  updateStats();
+
+  const modal = document.getElementById('staffDetailModal');
+  if (modal && !modal.classList.contains('hidden')) {
+    const detailName = document.getElementById('detailName')?.textContent;
+    const currentStaff = staffList.find(st => st.name === detailName);
+    if (currentStaff) showStaffDetails(null, currentStaff.id);
+  }
+}
+
 async function loadStaffFromSupabase() {
+  const tbody = document.getElementById('staffTableBody');
+  if (tbody && (!staffList || staffList.length === 0) && window.EcoDataBus?.getCached('staff:data') == null) {
+    window.EcoTrackSkeletons?.renderStaffTableSkeleton('staffTableBody', { rows: 5 });
+  }
+
+  // 1. Authenticated administrator IPC
+  if (window.electron && typeof window.electron.invoke === 'function') {
+    try {
+      await window.ecotrackAuthReady;
+      const res = await window.electron.invoke('staff-fetch-all');
+      if (res && res.success && Array.isArray(res.data)) {
+        applyStaffData(res.data);
+        return;
+      }
+    } catch (e) {
+      console.warn('[Staff fetch IPC failed, attempting client fallback]:', e);
+    }
+  }
+
+  // 2. Client-side Supabase
   if (sb) {
     try {
-      const tbody = document.getElementById('staffTableBody');
-      if (tbody && (!staffList || staffList.length === 0)) {
-        window.EcoTrackSkeletons?.renderStaffTableSkeleton('staffTableBody', { rows: 5 });
-      }
-      const { data, error } = await sb.from('staff').select('*').order('created', { ascending: false });
+      const { data, error } = await sb.rpc('ecotrack_admin_list_staff');
       if (!error && Array.isArray(data)) {
-        console.log('[Supabase staff data loaded]:', data);
-        staffList = data.map(s => {
-          const rawStatus = (s.status || '').toLowerCase();
-          const isArch = isStaffArchived(s);
-          const isOnline = (rawStatus === 'online' || s.is_online === true || s.online_status === 'online') && rawStatus !== 'offline' && s.is_online !== false && !isArch;
-          const status = isArch ? 'Archived' : (isOnline ? 'Online' : 'Offline');
-
-          return {
-            id: s.id,
-            name: s.name,
-            email: s.email,
-            phone: s.phone || '',
-            role: s.role || 'HVAC / Aircon Technician',
-            avatar: resolveAvatarUrl(s),
-            buildingId: (s.building_name === 'All Buildings' || s.building_id === 'all_buildings' || (s.assignment && s.assignment.toLowerCase().includes('all building'))) ? 'all_buildings' : (s.building_id || 'bld_main'),
-            buildingName: s.building_name || 'Main Campus Building',
-            floorId: (s.floor_name === 'All Floors' || s.floor_id === 'all_floors' || (s.assignment && s.assignment.toLowerCase().includes('all floor'))) ? 'all_floors' : (s.floor_id || 'flr_2nd_it'),
-            floorName: s.floor_name || '2nd Floor - IT Wing',
-            roomId: (s.room_name === 'All Rooms' || s.room_id === 'all_rooms' || (s.assignment && s.assignment.toLowerCase().includes('all room')) || (!s.room_id && (s.room_name?.toLowerCase().includes('all') || s.floor_name?.toLowerCase().includes('all') || s.building_name?.toLowerCase().includes('all')))) ? 'all_rooms' : (s.room_id || 'rm_svr_01'),
-            roomName: s.room_name || ((s.room_id === 'all_rooms' || s.floor_name === 'All Floors' || s.building_name === 'All Buildings') ? 'All Rooms' : 'Server Room A'),
-            assignment: s.assignment || `${s.building_name || 'Main Campus Building'} • ${s.floor_name || '2nd Floor - IT Wing'} • ${s.room_name || 'Server Room A'}`,
-            status: status,
-            isOnline: isOnline,
-            isArchived: isArch,
-            archiveReason: s.archive_reason || '',
-            archiveNotes: s.archive_notes || '',
-            archivedAt: s.archived_at || null,
-            lastActive: s.last_active || s.created,
-            created: s.created
-          };
-        });
-        saveStaff();
-        renderTable();
-        renderArchivedTable();
-        updateStats();
-
-        // If detail modal is open, refresh its content
-        const modal = document.getElementById('staffDetailModal');
-        if (modal && !modal.classList.contains('hidden')) {
-          const detailName = document.getElementById('detailName')?.textContent;
-          const currentStaff = staffList.find(st => st.name === detailName);
-          if (currentStaff) showStaffDetails(null, currentStaff.id);
-        }
+        applyStaffData(data);
         return;
       }
     } catch (e) {
@@ -163,6 +233,23 @@ async function loadStaffFromSupabase() {
 }
 
 async function loadBuildingsFloorsRooms() {
+  if (window.electron && typeof window.electron.invoke === 'function') {
+    try {
+      const res = await window.electron.invoke('locations-fetch-all');
+      if (res && res.success) {
+        _buildingsData = res.buildings || [];
+        _floorsData = res.floors || [];
+        _roomsData = res.rooms || [];
+        window.EcoTrackMaintenance?.setLocationHierarchy?.(_roomsData, _floorsData, _buildingsData);
+        _staffLocationsLoaded = true;
+        populateLocationDropdowns();
+        return;
+      }
+    } catch (e) {
+      console.warn('[Locations IPC load error]:', e);
+    }
+  }
+
   if (sb) {
     try {
       const [bRes, fRes, rRes] = await Promise.all([
@@ -170,6 +257,8 @@ async function loadBuildingsFloorsRooms() {
         sb.from('floors').select('*').order('name'),
         sb.from('rooms').select('*').order('name')
       ]);
+      if (bRes.error || fRes.error || rRes.error) throw new Error('Locations could not be loaded.');
+      _staffLocationsLoaded = true;
       _buildingsData = bRes.data || [];
       _floorsData = fRes.data || [];
       _roomsData = rRes.data || [];
@@ -178,22 +267,12 @@ async function loadBuildingsFloorsRooms() {
     }
   }
 
-  // Fallbacks if tables are empty
-  if (!_buildingsData.length) {
-    _buildingsData = [{ id: 'bld_main', name: 'Main Campus Building' }];
-  }
-  if (!_floorsData.length) {
-    _floorsData = [{ id: 'flr_2nd_it', name: '2nd Floor - IT Wing', building_id: 'bld_main' }];
-  }
-  if (!_roomsData.length) {
-    _roomsData = [
-      { id: 'rm_svr_01', name: 'Server Room A', floor_id: 'flr_2nd_it' },
-      { id: 'rm_ofc_01', name: 'Main Office Area', floor_id: 'flr_2nd_it' },
-      { id: 'rm_lab_01', name: 'Laboratory A', floor_id: 'flr_2nd_it' }
-    ];
-  }
+  _buildingsData = _buildingsData || [];
+  _floorsData = _floorsData || [];
+  _roomsData = _roomsData || [];
 
-  populateLocationDropdowns();
+  window.EcoTrackMaintenance?.setLocationHierarchy?.(_roomsData, _floorsData, _buildingsData);
+        populateLocationDropdowns();
 }
 
 function populateLocationDropdowns() {
@@ -249,7 +328,7 @@ function populateLocationDropdowns() {
 }
 
 function saveStaff() {
-  localStorage.setItem('ecoTrack_staff', JSON.stringify(staffList));
+  localStorage.setItem('ecoTrack_staff', JSON.stringify(staffList.map(({ password, password_hash, ...safe }) => safe)));
   window.dispatchEvent(new Event('storage'));
 }
 
@@ -294,7 +373,13 @@ function getFilteredStaff() {
   let list = staffList.filter(s => !isStaffArchived(s));
 
   if (statusFilter !== 'all') {
-    list = list.filter(s => (s.status || '').toLowerCase() === statusFilter.toLowerCase());
+    const sf = statusFilter.toLowerCase();
+    list = list.filter(s => {
+      const st = (s.status || '').toLowerCase();
+      if (sf === 'online' || sf === 'active') return st === 'online' || st === 'active';
+      if (sf === 'offline' || sf === 'inactive') return st === 'offline' || st === 'inactive';
+      return st === sf;
+    });
   }
 
   if (searchQuery) {
@@ -454,6 +539,9 @@ function renderTable() {
     ? 'Showing 0 of 0'
     : `Showing ${start + 1}–${Math.min(end, filtered.length)} of ${filtered.length}`;
 
+  const staffPagesEl = document.getElementById('staffPaginationPages');
+  if (staffPagesEl) staffPagesEl.textContent = `Page ${currentPage} of ${totalPages}`;
+
   document.getElementById('staffPrevBtn').disabled = currentPage <= 1;
   document.getElementById('staffNextBtn').disabled = currentPage >= totalPages;
 
@@ -482,12 +570,16 @@ function updateStats() {
   const pageReportCountBadge = document.getElementById('pageReportCountBadge');
   if (pageReportCountBadge) {
     const tabReportsContent = document.getElementById('tabReportsContent');
+    const tabArchivedContent = document.getElementById('tabArchivedContent');
     const isReportsTab = tabReportsContent && !tabReportsContent.classList.contains('hidden');
+    const isArchivedTab = tabArchivedContent && !tabArchivedContent.classList.contains('hidden');
     if (isReportsTab) {
       const reports = window.EcoTrackMaintenance?.getReports?.() || [];
       pageReportCountBadge.textContent = `${reports.length} records`;
+    } else if (isArchivedTab) {
+      pageReportCountBadge.textContent = `${archived} archived`;
     } else {
-      pageReportCountBadge.textContent = `${activeStaff.length} records`;
+      pageReportCountBadge.textContent = `${activeStaff.length} staff`;
     }
   }
 }
@@ -501,7 +593,7 @@ function updateStats() {
 const DEFAULT_STAFF_ROLES = [
   'HVAC / Aircon Technician',
   'Electrical & Power Specialist',
-  'Sensor & IoT Calibration Specialist',
+  'Control & IoT Calibration Specialist',
   'Refrigeration & Cooling Engineer',
   'General Maintenance & Facilities',
   'Preventive Maintenance Lead'
@@ -529,7 +621,7 @@ function getRoleIcon(roleName) {
   const lower = roleName.toLowerCase();
   if (lower.includes('hvac') || lower.includes('aircon') || lower.includes('cooling')) return '❄️';
   if (lower.includes('electric') || lower.includes('power')) return '⚡';
-  if (lower.includes('sensor') || lower.includes('iot') || lower.includes('calibration')) return '📡';
+  if (lower.includes('control') || lower.includes('iot') || lower.includes('calibration')) return '📡';
   if (lower.includes('refriger')) return '🧊';
   if (lower.includes('lead') || lower.includes('supervisor') || lower.includes('manager')) return '🛡️';
   if (lower.includes('facility') || lower.includes('facilities') || lower.includes('general')) return '🛠️';
@@ -543,7 +635,8 @@ function renderRoleDropdown(prefix, selectedValue) {
   const menu = document.getElementById(`${prefix}DropdownMenu`);
   if (!selectEl || !menu) return;
 
-  const roles = getStaffRoles();
+  const roles = [...getStaffRoles()];
+  if (selectedValue && !roles.includes(selectedValue)) roles.push(selectedValue);
   let currentVal = selectedValue || selectEl.value || roles[0];
   if (!roles.includes(currentVal)) {
     currentVal = roles[0];
@@ -551,7 +644,7 @@ function renderRoleDropdown(prefix, selectedValue) {
   selectEl.value = currentVal;
 
   // Update hidden select options
-  selectEl.innerHTML = roles.map(r => `<option value="${r}" ${r === currentVal ? 'selected' : ''}>${r}</option>`).join('');
+  selectEl.innerHTML = roles.map(r => `<option value="${staffEditEscape(r)}" ${r === currentVal ? 'selected' : ''}>${staffEditEscape(r)}</option>`).join('');
 
   // Update trigger display
   if (triggerText) triggerText.textContent = currentVal;
@@ -568,10 +661,10 @@ function renderRoleDropdown(prefix, selectedValue) {
         const isSel = r === currentVal;
         return `
           <div class="custom-role-item group flex items-center justify-between px-2.5 py-2 rounded-lg cursor-pointer transition-all duration-150 ${isSel ? 'bg-emerald-50 dark:bg-[#10b981]/25 text-[#18392B] dark:text-emerald-300 font-bold border border-emerald-500/30 shadow-xs' : 'text-gray-700 dark:text-gray-200 hover:bg-emerald-50 dark:hover:bg-[#10b981]/15 hover:text-[#10b981] dark:hover:text-emerald-300'}"
-               data-role-val="${r}">
+               data-role-val="${staffEditEscape(r)}">
             <div class="flex items-center gap-2 min-w-0 flex-1 mr-2">
               <span class="text-xs shrink-0">${getRoleIcon(r)}</span>
-              <span class="text-xs truncate font-semibold">${r}</span>
+              <span class="text-xs truncate font-semibold">${staffEditEscape(r)}</span>
             </div>
             <div class="flex items-center gap-1.5 shrink-0">
               ${isSel ? `
@@ -580,7 +673,7 @@ function renderRoleDropdown(prefix, selectedValue) {
                 </svg>
               ` : ''}
               <button type="button" class="btn-delete-role opacity-40 group-hover:opacity-100 hover:bg-rose-100 dark:hover:bg-rose-950/80 text-gray-400 hover:text-rose-600 dark:hover:text-rose-400 p-1 rounded-md transition-all shrink-0"
-                      title="Delete role: ${r}" data-delete-role="${r}">
+                      title="Delete role: ${staffEditEscape(r)}" data-delete-role="${staffEditEscape(r)}">
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="3 6 5 6 21 6"></polyline>
                   <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -704,12 +797,30 @@ function renderRoleDropdown(prefix, selectedValue) {
   });
 }
 
+function positionRoleDropdown(prefix) {
+  const menu = document.getElementById(`${prefix}DropdownMenu`);
+  const trigger = document.getElementById(`${prefix}DropdownTrigger`);
+  if (!menu || !trigger || menu.classList.contains('hidden')) return;
+  const rect = trigger.getBoundingClientRect();
+  if (!rect.width || !rect.height) { closeRoleDropdown(prefix); return; }
+  const width = Math.min(Math.max(rect.width, 240), window.innerWidth - 24);
+  const below = window.innerHeight - rect.bottom - 18, above = rect.top - 18;
+  menu.style.position = 'fixed'; menu.style.right = 'auto'; menu.style.marginTop = '0';
+  menu.style.width = width + 'px'; menu.style.maxHeight = Math.max(40, Math.min(280, Math.max(above, below))) + 'px';
+  menu.style.left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12)) + 'px';
+  const height = menu.getBoundingClientRect().height;
+  menu.style.top = (below >= height || below >= above ? rect.bottom + 6 : Math.max(12, rect.top - height - 6)) + 'px';
+}
+
 function openRoleDropdown(prefix) {
   const menu = document.getElementById(`${prefix}DropdownMenu`);
   const arrow = document.getElementById(`${prefix}DropdownArrow`);
   const trigger = document.getElementById(`${prefix}DropdownTrigger`);
   if (!menu) return;
+  window.EcoTrackSelectControls?.close();
+  document.body.appendChild(menu);
   menu.classList.remove('hidden');
+  positionRoleDropdown(prefix);
   if (arrow) arrow.style.transform = 'rotate(180deg)';
   if (trigger) trigger.setAttribute('aria-expanded', 'true');
 }
@@ -743,7 +854,7 @@ function setupRoleDropdownListeners(prefix) {
 if (!window._ecoRoleDropdownGlobalBound) {
   window._ecoRoleDropdownGlobalBound = true;
   document.addEventListener('click', (e) => {
-    if (!e.target.closest('#staffRoleDropdownContainer') && !e.target.closest('#editStaffRoleDropdownContainer')) {
+    if (!e.target.closest('#staffRoleDropdownContainer') && !e.target.closest('#editStaffRoleDropdownContainer') && !e.target.closest('.custom-dropdown-menu')) {
       closeRoleDropdown('staffRole');
       closeRoleDropdown('editStaffRole');
     }
@@ -756,6 +867,11 @@ if (!window._ecoRoleDropdownGlobalBound) {
   });
 }
 
+
+window.addEventListener('resize', () => ['staffRole', 'editStaffRole'].forEach(positionRoleDropdown));
+document.addEventListener('scroll', (event) => {
+  if (!event.target.closest?.('.custom-dropdown-menu')) ['staffRole', 'editStaffRole'].forEach(positionRoleDropdown);
+}, true);
 
 // Restrict phone numbers to max 11 digits and numeric only
 function setupPhoneInputRestraints() {
@@ -811,7 +927,8 @@ function openRegisterModal() {
   if (pcInput) { pcInput.value = ''; pcInput.type = 'password'; }
 
   document.querySelectorAll('#registerStaffModal .password-toggle-btn').forEach(btn => {
-    btn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12C1 12 5 4 12 4C19 4 23 12 23 12C23 12 19 20 12 20C5 20 1 12 1 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
+    const input = btn.parentElement.querySelector('input');
+    if (input) staffPasswordVisibility(input, btn, false);
   });
 
   renderRoleDropdown('staffRole');
@@ -829,91 +946,69 @@ function populateEditLocationDropdowns(selectedBldId, selectedFlrId, selectedRmI
   const fSelect = document.getElementById('editStaffFloor');
   const rSelect = document.getElementById('editStaffRoom');
   if (!bSelect || !fSelect || !rSelect) return;
-
-  const bldOptions = [
-    '<option value="all_buildings">All Buildings</option>',
-    ..._buildingsData.map(b => `<option value="${b.id}">${b.name}</option>`)
-  ];
-  bSelect.innerHTML = bldOptions.join('');
-
-  if (selectedBldId === 'all_buildings' || String(selectedBldId || '').toLowerCase().includes('all') || !_buildingsData.some(b => b.id === selectedBldId)) {
-    if (selectedBldId === 'all_buildings' || String(selectedBldId || '').toLowerCase().includes('all')) {
-      bSelect.value = 'all_buildings';
-    } else if (selectedBldId && _buildingsData.some(b => b.id === selectedBldId)) {
-      bSelect.value = selectedBldId;
-    }
-  } else {
-    bSelect.value = selectedBldId;
+  function options(select, rows, allId, allText, selected, prompt) {
+    select.replaceChildren(new Option(prompt, ''), new Option(allText, allId),
+      ...rows.map(row => new Option(row.name, String(row.id))));
+    select.value = [...select.options].some(o => o.value === String(selected || '')) ? String(selected || '') : '';
+    select.dispatchEvent(new Event('input', { bubbles: true }));
   }
-
-  function updateFloors() {
-    const curBldId = bSelect.value;
-    if (curBldId === 'all_buildings') {
-      fSelect.innerHTML = '<option value="all_floors">All Floors</option>';
-      fSelect.value = 'all_floors';
-      updateRooms();
-      return;
-    }
-
-    const filteredFloors = _floorsData.filter(f => !f.building_id || f.building_id === curBldId);
-    const flrOptions = [
-      '<option value="all_floors">All Floors</option>',
-      ...filteredFloors.map(f => `<option value="${f.id}">${f.name}</option>`)
-    ];
-    fSelect.innerHTML = flrOptions.join('');
-
-    if (selectedFlrId === 'all_floors' || String(selectedFlrId || '').toLowerCase().includes('all')) {
-      fSelect.value = 'all_floors';
-    } else if (selectedFlrId && filteredFloors.some(f => f.id === selectedFlrId)) {
-      fSelect.value = selectedFlrId;
+  function updateRooms() {
+    if (fSelect.value === 'all_floors') {
+      options(rSelect, [], 'all_rooms', 'All Rooms', 'all_rooms', 'Choose room');
     } else {
-      fSelect.value = 'all_floors';
+      options(rSelect, _roomsData.filter(r => String(r.floor_id) === fSelect.value),
+        'all_rooms', 'All Rooms', selectedRmId, 'Choose room');
+    }
+  }
+  function updateFloors() {
+    if (bSelect.value === 'all_buildings') {
+      options(fSelect, [], 'all_floors', 'All Floors', 'all_floors', 'Choose floor');
+    } else {
+      options(fSelect, _floorsData.filter(f => String(f.building_id) === bSelect.value),
+        'all_floors', 'All Floors', selectedFlrId, 'Choose floor');
     }
     updateRooms();
   }
-
-  function updateRooms() {
-    const curFlrId = fSelect.value;
-    if (curFlrId === 'all_floors') {
-      rSelect.innerHTML = '<option value="all_rooms">All Rooms</option>';
-      rSelect.value = 'all_rooms';
-      return;
-    }
-
-    const filteredRooms = _roomsData.filter(r => !r.floor_id || r.floor_id === curFlrId);
-    const rmOptions = [
-      '<option value="all_rooms">All Rooms</option>',
-      ...filteredRooms.map(r => `<option value="${r.id}">${r.name}</option>`)
-    ];
-    rSelect.innerHTML = rmOptions.join('');
-
-    if (selectedRmId === 'all_rooms' || String(selectedRmId || '').toLowerCase().includes('all') || !selectedRmId) {
-      rSelect.value = 'all_rooms';
-    } else if (selectedRmId && filteredRooms.some(r => r.id === selectedRmId)) {
-      rSelect.value = selectedRmId;
-    } else {
-      rSelect.value = 'all_rooms';
-    }
-  }
-
-  bSelect.onchange = () => { selectedFlrId = null; selectedRmId = null; updateFloors(); };
-  fSelect.onchange = () => { selectedRmId = null; updateRooms(); };
-
+  options(bSelect, _buildingsData, 'all_buildings', 'All Buildings', selectedBldId, 'Choose building');
+  bSelect.onchange = () => { selectedFlrId = ''; selectedRmId = ''; updateFloors(); };
+  fSelect.onchange = () => { selectedRmId = ''; updateRooms(); };
   updateFloors();
 }
 
-function openEditStaffModal(event, staffId) {
-  if (event) {
-    event.preventDefault();
-    event.stopPropagation();
+function staffEditLocation(staff) {
+  const room = _roomsData.find(r => String(r.id) === String(staff.roomId));
+  if (staff.assignmentScope === 'all') return ['all_buildings', 'all_floors', 'all_rooms'];
+  if (room && staff.assignmentScope === 'room') {
+    const floor = _floorsData.find(f => String(f.id) === String(room.floor_id));
+    return [floor?.building_id || '', floor?.id || '', room.id];
   }
+  if (staff.buildingId === 'all_buildings') return ['all_buildings', 'all_floors', 'all_rooms'];
+  const floor = _floorsData.find(f => String(f.id) === String(staff.assignedFloorId || room?.floor_id || staff.floorId));
+  const buildingId = staff.assignedBuildingId || floor?.building_id || staff.buildingId || '';
+  return [buildingId, staff.assignmentScope === 'building' ? 'all_floors' : (floor?.id || ''),
+    ['building', 'floor'].includes(staff.assignmentScope) || staff.roomId === 'all_rooms' ? 'all_rooms' : ''];
+}
 
-  const staff = staffList.find(s => s.id === staffId);
-  if (!staff) return;
+function staffPasswordVisibility(input, button, visible) {
+  input.type = visible ? 'text' : 'password';
+  button.innerHTML = visible
+    ? `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`
+    : `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12C1 12 5 4 12 4C19 4 23 12 23 12C23 12 19 20 12 20C5 20 1 12 1 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
+  const label = input.id === 'editStaffPassword' ? 'new password' : input.id.toLowerCase().includes('confirm') ? 'confirmation password' : 'password';
+  button.title = visible ? 'Hide Password' : 'Show Password';
+  button.setAttribute('aria-label', `${visible ? 'Hide' : 'Show'} ${label}`);
+  button.setAttribute('aria-controls', input.id);
+  button.setAttribute('aria-pressed', String(visible));
+}
 
-  const modal = document.getElementById('editStaffModal');
-  if (!modal) return;
+function resetEditStaffPasswordVisibility() {
+  document.querySelectorAll('#editStaffModal .password-toggle-btn').forEach(button => {
+    const input = button.parentElement.querySelector('input');
+    if (input) staffPasswordVisibility(input, button, false);
+  });
+}
 
+function fillStaffEditor(staff) {
   document.getElementById('editStaffId').value = staff.id;
   document.getElementById('editStaffName').value = staff.name || '';
   
@@ -921,13 +1016,12 @@ function openEditStaffModal(event, staffId) {
 
   document.getElementById('editStaffEmail').value = staff.email || '';
   document.getElementById('editStaffPhone').value = staff.phone || '';
+  const editStaffPassInput = document.getElementById('editStaffPassword');
+  if (editStaffPassInput) { editStaffPassInput.value = ''; editStaffPassInput.type = 'password'; }
+  const confirmation = document.getElementById('editStaffPasswordConfirm');
+  if (confirmation) confirmation.value = '';
   
-  const statusEl = document.getElementById('editStaffStatus');
-  if (statusEl) {
-    statusEl.value = (staff.status === 'Online' || staff.status === 'Active') ? 'Active' : (staff.status === 'On Leave' ? 'On Leave' : 'Offline');
-  }
-
-  window._editStaffAvatarBase64 = staff.avatar || '';
+  window._editStaffAvatarBase64 = '';
   const img = document.getElementById('editAvatarImg');
   const placeholder = document.getElementById('editAvatarPlaceholder');
   const fileInput = document.getElementById('editAvatarFileInput');
@@ -942,104 +1036,193 @@ function openEditStaffModal(event, staffId) {
     if (placeholder) placeholder.classList.remove('hidden');
   }
 
-  const bldId = (staff.buildingName === 'All Buildings' || staff.buildingId === 'all_buildings' || (staff.assignment && staff.assignment.toLowerCase().includes('all building'))) ? 'all_buildings' : staff.buildingId;
-  const flrId = (staff.floorName === 'All Floors' || staff.floorId === 'all_floors' || (staff.assignment && staff.assignment.toLowerCase().includes('all floor'))) ? 'all_floors' : staff.floorId;
-  const rmId = (staff.roomName === 'All Rooms' || staff.roomId === 'all_rooms' || (staff.assignment && staff.assignment.toLowerCase().includes('all room')) || !staff.roomId) ? 'all_rooms' : staff.roomId;
+  populateEditLocationDropdowns(...staffEditLocation(staff));
+  resetEditStaffPasswordVisibility();
 
-  populateEditLocationDropdowns(bldId, flrId, rmId);
+}
 
+function staffEditorLoadState(state, message = '') {
+  const modal = document.getElementById('editStaffModal');
+  const loading = state === 'loading';
+  const blocked = loading || state === 'error';
+  _staffEditPreparing = loading;
+  modal?.setAttribute('aria-busy', String(loading));
+  document.querySelectorAll('#editStaffModal input, #editStaffModal select, #editStaffModal button').forEach(control => {
+    if (!['closeEditStaffModalBtn', 'cancelEditStaffBtn', 'editStaffRetryBtn'].includes(control.id)) control.disabled = blocked;
+  });
+  document.getElementById('editStaffLoadState')?.classList.toggle('hidden', !blocked);
+  const spinner = document.getElementById('editStaffLoadSpinner');
+  if (spinner) spinner.hidden = !loading;
+  const status = document.getElementById('editStaffLoadStatus');
+  if (status) status.textContent = loading ? 'Loading staff details…' : message;
+  const retry = document.getElementById('editStaffRetryBtn');
+  if (retry) { retry.disabled = loading; retry.classList.toggle('hidden', state !== 'error'); }
+}
+
+async function prepareStaffEditor(session) {
+  const targetId = _staffEditTargetId;
+  let timer;
+  _staffEditBaseline = null;
+  staffEditNotice('');
+  staffEditorLoadState('loading');
+  try {
+    const staff = await Promise.race([
+      (async () => {
+        const ready = await window.ecotrackAuthReady;
+        if (ready?.success === false) throw new Error(ready.error || 'Sign in again before editing staff.');
+        if (!_staffLocationsLoaded) {
+          await (_staffLocationsReady || (_staffLocationsReady = loadBuildingsFloorsRooms()));
+          if (!_staffLocationsLoaded) { _staffLocationsReady = null; throw new Error('Locations could not be loaded. Check the connection and retry.'); }
+        }
+        if (!staffList.find(row => row.id === targetId)?.editVersion) await loadStaffFromSupabase();
+        return staffList.find(row => row.id === targetId);
+      })(),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Staff details took too long to load. Check the connection and retry.')), STAFF_EDITOR_LOAD_TIMEOUT); })
+    ]);
+    if (session !== _staffEditSession) return;
+    if (!staff?.editVersion) throw new Error('Staff details could not be verified. Retry or refresh the directory.');
+    if (isStaffArchived(staff)) throw new Error('Restore this account before editing it.');
+    _staffEditBaseline = JSON.parse(JSON.stringify(staff));
+    fillStaffEditor(staff);
+    staffEditorLoadState('ready');
+  } catch (error) {
+    if (session !== _staffEditSession) return;
+    _staffEditBaseline = null;
+    staffEditorLoadState('error', error?.message || 'Staff details could not be loaded. Retry or sign in again.');
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function openEditStaffModal(event, staffId) {
+  if (event) { event.preventDefault(); event.stopPropagation(); }
+  if (_staffEditSaving) return;
+  const modal = document.getElementById('editStaffModal');
+  if (!modal) return;
+  _staffEditTargetId = staffId;
+  const staff = staffList.find(row => row.id === staffId);
+  _staffEditSession++; _staffEditAvatarReading = false;
+  _staffEditBaseline = null;
+  if (staff) fillStaffEditor(staff);
+  else {
+    for (const id of ['editStaffName', 'editStaffEmail', 'editStaffPhone', 'editStaffPassword', 'editStaffPasswordConfirm']) {
+      const input = document.getElementById(id); if (input) input.value = '';
+    }
+    document.getElementById('editStaffId').value = staffId || '';
+    renderRoleDropdown('editStaffRole');
+    populateEditLocationDropdowns('', '', '');
+    resetEditStaffPasswordVisibility();
+  }
   modal.classList.remove('hidden');
+  return prepareStaffEditor(_staffEditSession);
+}
+
+function retryEditStaffLoad() {
+  if (_staffEditSaving || _staffEditPreparing || !_staffEditTargetId) return;
+  _staffEditSession++;
+  return prepareStaffEditor(_staffEditSession);
 }
 
 function closeEditStaffModal() {
+  if (_staffEditSaving) return;
   const modal = document.getElementById('editStaffModal');
   if (modal) modal.classList.add('hidden');
+  for (const id of ['editStaffPassword', 'editStaffPasswordConfirm']) {
+    const input = document.getElementById(id); if (input) input.value = '';
+  }
+  window._editStaffAvatarBase64 = '';
+  _staffEditBaseline = null;
+  _staffEditSession++; _staffEditAvatarReading = false;
+  _staffEditTargetId = null;
+  staffEditorLoadState('closed');
+  resetEditStaffPasswordVisibility();
+  window.EcoTrackSelectControls?.close();
 }
 
 async function saveEditStaff() {
+  if (_staffEditSaving) return;
+  if (_staffEditPreparing) { staffEditNotice('Wait for staff details to load before saving.'); return; }
+  if (_staffEditAvatarReading) { staffEditNotice('Please wait for the selected photo to finish loading.'); return; }
   const staffId = document.getElementById('editStaffId').value;
-  const staff = staffList.find(s => s.id === staffId);
-  if (!staff) return;
-
-  const name = document.getElementById('editStaffName').value.trim();
-  const email = document.getElementById('editStaffEmail').value.trim();
-  const phone = document.getElementById('editStaffPhone').value.trim();
-  const role = document.getElementById('editStaffRole')?.value || 'HVAC / Aircon Technician';
-  const status = document.getElementById('editStaffStatus')?.value || 'Offline';
-
-  if (!name) {
-    showStaffInputError('editStaffName', 'Full name cannot be empty.');
-    return;
+  const baseline = _staffEditBaseline;
+  if (!baseline || baseline.id !== staffId) { staffEditNotice('Reopen the staff editor before saving.'); return; }
+  const value = id => document.getElementById(id)?.value || '';
+  const name = value('editStaffName').trim();
+  const email = value('editStaffEmail').trim().toLowerCase();
+  const phone = value('editStaffPhone').trim();
+  const role = value('editStaffRole');
+  const password = value('editStaffPassword');
+  function invalid(id, message) { staffEditNotice(message, 'error', false); showStaffInputError(id, message); }
+  if (!name || name.length > 120) { invalid('editStaffName', 'Enter a name of up to 120 characters.'); return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { invalid('editStaffEmail', 'Enter a valid email address.'); return; }
+  if (phone && !/^\d{11}$/.test(phone)) { invalid('editStaffPhone', 'Phone number must contain 11 digits.'); return; }
+  if (!role || role.length > 120) { invalid('editStaffRoleDropdownTrigger', 'Choose a valid worker role.'); return; }
+  if (staffList.some(s => s.id !== staffId && String(s.email || '').trim().toLowerCase() === email)) {
+    invalid('editStaffEmail', 'This email already belongs to a staff account.'); return;
   }
-  if (!email || !email.includes('@')) {
-    showStaffInputError('editStaffEmail', 'Please enter a valid email address.');
-    return;
+  if (phone && staffList.some(s => s.id !== staffId && String(s.phone || '').replace(/\D/g, '') === phone)) {
+    invalid('editStaffPhone', 'This phone number already belongs to a staff account.'); return;
   }
-  if (phone && phone.length !== 11) {
-    showStaffInputError('editStaffPhone', 'Phone number must be exactly 11 digits (e.g. 09853308630).');
-    return;
+  if (password && (password.length < 8 || password.length > 1024)) { invalid('editStaffPassword', 'Use a password of at least 8 characters.'); return; }
+  if (password !== value('editStaffPasswordConfirm')) { invalid('editStaffPasswordConfirm', 'Passwords do not match.'); return; }
+  const [buildingId, floorId, roomId] = ['editStaffBuilding', 'editStaffFloor', 'editStaffRoom'].map(value);
+  const building = _buildingsData.find(b => String(b.id) === buildingId);
+  const floor = _floorsData.find(f => String(f.id) === floorId && String(f.building_id) === buildingId);
+  const room = _roomsData.find(r => String(r.id) === roomId && String(r.floor_id) === floorId);
+  const scope = buildingId === 'all_buildings' ? 'all' : floorId === 'all_floors' ? 'building' : roomId === 'all_rooms' ? 'floor' : 'room';
+  if (!buildingId || !floorId || !roomId || (scope !== 'all' && !building) || (['room','floor'].includes(scope) && !floor) || (scope === 'room' && !room)) {
+    invalid('editStaffBuilding', 'Choose a valid building, floor and room.'); return;
   }
-
-  const bSelect = document.getElementById('editStaffBuilding');
-  const fSelect = document.getElementById('editStaffFloor');
-  const rSelect = document.getElementById('editStaffRoom');
-
-  const buildingId = bSelect?.value || staff.buildingId || 'all_buildings';
-  const buildingName = (bSelect?.selectedOptions && bSelect.selectedOptions[0]) ? bSelect.selectedOptions[0].text : (staff.buildingName || (buildingId === 'all_buildings' ? 'All Buildings' : 'Main Campus Building'));
-  const floorId = fSelect?.value || staff.floorId || 'all_floors';
-  const floorName = (fSelect?.selectedOptions && fSelect.selectedOptions[0]) ? fSelect.selectedOptions[0].text : (staff.floorName || (floorId === 'all_floors' ? 'All Floors' : '2nd Floor - IT Wing'));
-  const roomId = rSelect?.value || staff.roomId || 'all_rooms';
-  const roomName = (rSelect?.selectedOptions && rSelect.selectedOptions[0]) ? rSelect.selectedOptions[0].text : (staff.roomName || (roomId === 'all_rooms' ? 'All Rooms' : 'Server Room A'));
-
-  staff.name = name;
-  staff.email = email;
-  staff.phone = phone;
-  staff.role = role;
-  staff.status = status;
-  staff.isOnline = status === 'Active' || status === 'Online';
-  staff.buildingId = buildingId;
-  staff.buildingName = buildingName;
-  staff.floorId = floorId;
-  staff.floorName = floorName;
-  staff.roomId = roomId;
-  staff.roomName = roomName;
-  staff.assignment = `${buildingName} • ${floorName} • ${roomName}`;
-
-  if (window._editStaffAvatarBase64) {
-    staff.avatar = window._editStaffAvatarBase64;
-    staff.photo_url = window._editStaffAvatarBase64;
-    staff.avatar_url = window._editStaffAvatarBase64;
-  }
-
-  // Persist to Supabase
-  if (sb) {
-    try {
-      await sb.from('staff').update({
-        name: staff.name,
-        email: staff.email,
-        phone: staff.phone,
-        role: staff.role,
-        status: staff.status,
-        is_online: staff.isOnline,
-        building_name: staff.buildingName,
-        floor_name: staff.floorName,
-        room_name: staff.roomName,
-        room_id: staff.roomId === 'all_rooms' ? null : staff.roomId,
-        assignment: staff.assignment,
-        avatar_url: staff.avatar,
-        photo_url: staff.avatar,
-        updated: new Date().toISOString()
-      }).eq('id', staff.id);
-    } catch (err) {
-      console.warn('[Supabase staff update error]:', err.message);
+  const changes = { name, phone, role, assignment_scope: scope,
+    assigned_building_id: scope === 'all' ? null : buildingId,
+    assigned_floor_id: ['room', 'floor'].includes(scope) ? floorId : null,
+    room_id: scope === 'room' ? roomId : null };
+  const credentials = {};
+  if (email !== String(baseline.email || '').trim().toLowerCase()) credentials.email = email;
+  if (password) credentials.password = password;
+  const payload = { id: staffId, changes, expected: baseline.editVersion, credentials,
+    ...(window._editStaffAvatarBase64 ? { avatar: window._editStaffAvatarBase64 } : {}) };
+  const saveBtn = document.getElementById('saveEditStaffBtn');
+  const original = saveBtn?.innerHTML;
+  _staffEditSaving = true; staffEditNotice('');
+  const controls = [...document.querySelectorAll('#editStaffModal input, #editStaffModal select, #editStaffModal button')];
+  const previousDisabled = controls.map(control => control.disabled);
+  controls.forEach(control => { control.disabled = true; });
+  if (saveBtn) saveBtn.textContent = 'Saving…';
+  let complete = false;
+  try {
+    await window.ecotrackAuthReady;
+    let data;
+    if (window.electron?.invoke) {
+      const result = await window.electron.invoke('staff-edit', payload);
+      if (!result?.success) throw new Error(result?.error || 'The server did not confirm this update.');
+      data = result.data;
+    } else {
+      if (!sb) throw new Error('Database connection is unavailable.');
+      const result = await sb.functions.invoke('update-staff', { body: payload });
+      if (result.error || !result.data?.profile) throw new Error(await window.EcoTrackProvisioningErrors.readProvisioningError(result.error, result.data, 'edit'));
+      data = result.data;
     }
+    if (data?.profile?.id !== staffId) throw new Error('The server did not confirm this staff update.');
+    // Replace only the confirmed row; preserve concurrent refreshes of other staff.
+    applyStaffData([data.profile], staffId);
+    _staffEditBaseline = JSON.parse(JSON.stringify(staffList.find(s => s.id === staffId)));
+    window._editStaffAvatarBase64 = '';
+    if (data.credentialError) {
+      staffEditNotice('Profile saved. Sign-in details were not confirmed: ' + data.credentialError);
+    } else {
+      complete = true;
+      if (window.EcoToast) window.EcoToast.success(`Updated ${data.profile.name} successfully.`);
+      else showEcoTrackToast(`Updated ${data.profile.name} successfully.`, 'success');
+    }
+  } catch (error) {
+    staffEditNotice(error.message || 'Could not save staff changes. Your entries are still here.');
+  } finally {
+    _staffEditSaving = false;
+    controls.forEach((control, index) => { control.disabled = previousDisabled[index]; });
+    if (saveBtn) saveBtn.innerHTML = original;
+    if (complete) closeEditStaffModal();
   }
-
-  saveStaff();
-  closeEditStaffModal();
-  renderTable();
-  updateStats();
-  showEcoTrackToast(`Updated ${staff.name} successfully!`, 'success');
 }
 
 // ===== CUSTOM TOAST NOTIFICATION SYSTEM =====
@@ -1080,12 +1263,13 @@ function showEcoTrackToast(message, type = 'info') {
   toast.classList.add(borderColor, bgColor, textColor);
   toast.innerHTML = `
     ${iconSvg}
-    <span class="flex-1">${message}</span>
+    <span class="flex-1"></span>
     <button class="text-gray-400 hover:text-white transition-colors p-1 border-0 bg-transparent cursor-pointer ml-1">
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
     </button>
   `;
 
+  toast.querySelector('span.flex-1').textContent = String(message);
   toast.querySelector('button').addEventListener('click', () => {
     toast.classList.remove('toast-slide-in');
     toast.classList.add('toast-slide-out');
@@ -1204,7 +1388,8 @@ function closeStaffSuccessModal(highlightId) {
 }
 
 // Add staff
-function addStaff() {
+let pendingStaffRegistration = null;
+async function addStaff() {
   const name = document.getElementById('staffName').value.trim();
   const email = document.getElementById('staffEmail').value.trim();
   const phone = document.getElementById('staffPhone').value.trim();
@@ -1223,12 +1408,23 @@ function addStaff() {
     showStaffInputError('staffPassword', 'Please enter an account password.');
     return;
   }
-  if (password.length < 6) {
-    showStaffInputError('staffPassword', 'Password must be at least 6 characters long.');
+  if (password.length < 8) {
+    showStaffInputError('staffPassword', 'Password must be at least 8 characters long.');
     return;
   }
   if (password !== confirmPassword) {
     showStaffInputError('staffPasswordConfirm', 'Passwords do not match. Please re-check.');
+    return;
+  }
+
+  if (phone && phone.length !== 11) {
+    showStaffInputError('staffPhone', 'Phone number must be exactly 11 digits (e.g. 09123456789).');
+    return;
+  }
+
+  const normalizedPhone = phone.replace(/\D/g, '');
+  if (normalizedPhone && staffList.some(staff => String(staff.phone || '').replace(/\D/g, '') === normalizedPhone)) {
+    showStaffInputError('staffPhone', 'This phone number already belongs to a staff account. Edit or restore that account instead.');
     return;
   }
 
@@ -1264,48 +1460,59 @@ function addStaff() {
     roomId,
     roomName,
     assignment: `${buildingName} • ${floorName} • ${roomName}`,
-    status: 'Active',
+    status: 'Online',
     lastActive: new Date().toISOString(),
     created: new Date().toISOString()
   };
 
-  // Sync to Supabase staff table
-  if (sb) {
-    const fullPayload = {
-      name: newStaff.name,
-      email: newStaff.email,
-      phone: newStaff.phone,
-      role: newStaff.role,
-      building_name: newStaff.buildingName,
-      floor_name: newStaff.floorName,
-      room_name: newStaff.roomName,
-      room_id: newStaff.roomId === 'all_rooms' ? null : newStaff.roomId,
-      assignment: newStaff.assignment,
-      status: newStaff.status,
-      last_active: newStaff.lastActive
-    };
+  const addBtn = document.getElementById('addStaffBtn');
+  const origAddHtml = addBtn ? addBtn.innerHTML : '';
+  if (addBtn) {
+    addBtn.disabled = true;
+    addBtn.innerHTML = `<svg class="animate-spin" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-opacity="0.25"></circle><path d="M4 12a8 8 0 018-8" stroke="currentColor" stroke-width="3"></path></svg> <span>Registering...</span>`;
+  }
 
-    sb.from('staff').insert([fullPayload]).select().single().then(({ data, error }) => {
-      if (error) {
-        // Graceful fallback to base columns if new columns aren't in Supabase schema cache yet
-        return sb.from('staff').insert([{
-          name: newStaff.name,
-          email: newStaff.email,
-          phone: newStaff.phone,
-          status: newStaff.status,
-          last_active: newStaff.lastActive
-        }]).select().single();
-      }
-      return { data, error };
-    }).then(({ data, error }) => {
-      if (!error && data) {
-        newStaff.id = data.id;
-        saveStaff();
-        renderTable();
-        const idEl = document.getElementById('successStaffId');
-        if (idEl) idEl.textContent = data.id;
-      }
-    }).catch(console.warn);
+  // Sync to Supabase staff table via Electron IPC or client
+  const fullPayload = {
+    password,
+    name: newStaff.name,
+    email: newStaff.email,
+    phone: newStaff.phone,
+    role: newStaff.role,
+    building_name: newStaff.buildingName,
+    floor_name: newStaff.floorName,
+    room_name: newStaff.roomName,
+    room_id: newStaff.roomId === 'all_rooms' ? null : newStaff.roomId,
+    assignment: newStaff.assignment,
+    status: newStaff.status,
+    last_active: newStaff.lastActive
+  };
+
+  const signature = JSON.stringify(fullPayload);
+  if (!pendingStaffRegistration || pendingStaffRegistration.signature !== signature) pendingStaffRegistration = { signature, id: 'desktop-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) };
+  const operationId = pendingStaffRegistration.id;
+  try {
+    await window.ecotrackAuthReady;
+    let profile;
+    if (window.electron?.invoke) {
+      const result = await window.electron.invoke('staff-create', { ...fullPayload, operationId });
+      if (!result.success) throw new Error(result.error);
+      profile = result.data;
+    } else {
+      if (!sb) throw new Error('Database connection is unavailable.');
+      const { data, error } = await sb.functions.invoke('provision-staff', { body: { profile: fullPayload, operationId } });
+      if (error || !data?.profile) throw new Error(await window.EcoTrackProvisioningErrors.readProvisioningError(error, data));
+      profile = data.profile;
+    }
+    pendingStaffRegistration = null;
+    newStaff.id = profile.id;
+    newStaff.status = 'Offline';
+  } catch (error) {
+    if (window.EcoToast) window.EcoToast.error(error.message || 'Staff registration failed.');
+    else alert(error.message || 'Staff registration failed.');
+    return;
+  } finally {
+    if (addBtn) { addBtn.disabled = false; addBtn.innerHTML = origAddHtml; }
   }
 
   staffList.push(newStaff);
@@ -1313,6 +1520,10 @@ function addStaff() {
 
   closeRegisterModal();
   renderTable();
+
+  if (window.EcoToast) {
+    window.EcoToast.success(`Staff member "${newStaff.name}" registered successfully!`);
+  }
 
   // Trigger modern premium success modal
   openStaffSuccessModal(newStaff);
@@ -1345,7 +1556,17 @@ function toggleStaffStatus(eventOrId, possibleId) {
     showEcoTrackToast(`${staff.name} is now Online (Active).`, 'success');
   }
 
-  if (sb) {
+  if (window.electron && typeof window.electron.invoke === 'function') {
+    window.electron.invoke('staff-update', {
+      id: targetId,
+      updates: {
+        status: newStatus,
+        is_online: !isCurrentlyOnline,
+        last_active: staff.lastActive,
+        updated: new Date().toISOString()
+      }
+    }).catch(console.warn);
+  } else if (sb) {
     sb.from('staff').update({
       status: newStatus,
       is_online: !isCurrentlyOnline,
@@ -1415,11 +1636,18 @@ async function confirmArchiveStaff() {
   const notes = document.getElementById('archiveStaffNotes')?.value.trim() || '';
 
   staff.isArchived = true;
+  staff.is_archived = true;
   staff.status = 'Archived';
   staff.isOnline = false;
+  staff.is_online = false;
+  staff.is_active = false;
+  staff.online_status = 'offline';
   staff.archiveReason = reason;
+  staff.archive_reason = reason;
   staff.archiveNotes = notes;
+  staff.archive_notes = notes;
   staff.archivedAt = new Date().toISOString();
+  staff.archived_at = staff.archivedAt;
 
   saveStaff();
   closeArchiveModal();
@@ -1429,6 +1657,20 @@ async function confirmArchiveStaff() {
   updateStats();
 
   showEcoTrackToast(`${staff.name} has been soft-deleted and moved to Archived Accounts.`, 'warning');
+
+  if (window.electron && typeof window.electron.invoke === 'function') {
+    try {
+      const res = await window.electron.invoke('staff-archive', {
+        id: staff.id,
+        reason,
+        notes,
+        archivedAt: staff.archivedAt
+      });
+      if (res && res.success) return;
+    } catch (e) {
+      console.warn('[Staff archive IPC failed]:', e);
+    }
+  }
 
   if (sb) {
     try {
@@ -1463,15 +1705,34 @@ function renderArchivedTable() {
   if (!tbody) return;
 
   const list = getFilteredArchivedStaff();
+  document.getElementById('archivedStaffCard')?.classList.toggle('is-empty', list.length === 0);
+  const totalPages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+  if (archivedCurrentPage > totalPages) archivedCurrentPage = totalPages;
+  if (archivedCurrentPage < 1) archivedCurrentPage = 1;
+
+  const start = (archivedCurrentPage - 1) * PAGE_SIZE;
+  const end = Math.min(start + PAGE_SIZE, list.length);
+  const pageItems = list.slice(start, end);
 
   const info = document.getElementById('archivedPageInfo');
-  if (info) info.textContent = `Showing ${list.length} archived ${list.length === 1 ? 'account' : 'accounts'}`;
+  if (info) {
+    info.textContent = list.length === 0
+      ? 'Showing 0 of 0 archived accounts'
+      : `Showing ${start + 1}–${end} of ${list.length} archived ${list.length === 1 ? 'account' : 'accounts'} (Page ${archivedCurrentPage} of ${totalPages})`;
+  }
+
+  const prevBtn = document.getElementById('archivedPrevBtn');
+  const nextBtn = document.getElementById('archivedNextBtn');
+  const pagesEl = document.getElementById('archivedPaginationPages');
+  if (prevBtn) prevBtn.disabled = archivedCurrentPage <= 1;
+  if (nextBtn) nextBtn.disabled = archivedCurrentPage >= totalPages;
+  if (pagesEl) pagesEl.textContent = `Page ${archivedCurrentPage} of ${totalPages}`;
 
   if (!list || list.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="6" class="px-6 py-16 text-center">
-          <div class="flex flex-col items-center gap-3">
+        <td colspan="6" class="px-6 py-12 text-center">
+          <div class="archived-empty-state flex flex-col items-center gap-3">
             <div class="w-12 h-12 rounded-2xl bg-amber-500/15 text-amber-500 flex items-center justify-center">
               <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="21 8 21 21 3 21 3 8"></polyline>
@@ -1479,8 +1740,8 @@ function renderArchivedTable() {
                 <line x1="10" y1="12" x2="14" y2="12"></line>
               </svg>
             </div>
-            <p class="text-sm font-bold text-gray-500 dark:text-gray-400">No archived personnel accounts</p>
-            <p class="text-xs text-gray-400">Technicians that have been soft-deleted will appear here with full historical records and deletion reasons.</p>
+            <p class="text-sm font-bold text-gray-500 dark:text-gray-400">${archivedSearchQuery.trim() ? 'No matching archived accounts' : 'No archived personnel accounts'}</p>
+            <p class="text-xs text-gray-400">${archivedSearchQuery.trim() ? 'Try a different name, email, or role, or clear the search.' : 'Archived technicians will appear here. You can review their records and restore their accounts.'}</p>
           </div>
         </td>
       </tr>`;
@@ -1488,7 +1749,7 @@ function renderArchivedTable() {
   }
 
   try {
-    tbody.innerHTML = list.map(staff => {
+    tbody.innerHTML = pageItems.map(staff => {
       const name = staff.name || 'Unknown Technician';
       const id = staff.id || '';
       const idDisplay = id ? (id.length > 12 ? `${id.slice(0, 12)}...` : id) : 'stf_archived';
@@ -1580,6 +1841,7 @@ function showArchivedDetails(id) {
   if (!staff) return;
 
   pendingRestoreId = id;
+  _currentDetailStaffId = id;
   const modal = document.getElementById('archivedRecordDetailModal');
   if (!modal) return;
 
@@ -1626,18 +1888,45 @@ function closeArchivedDetailModal() {
   if (modal) modal.classList.add('hidden');
 }
 
-function restoreStaff(id) {
+async function restoreStaff(id) {
   const targetId = id || pendingRestoreId;
   const staff = staffList.find(s => s.id === targetId);
   if (!staff) return;
 
+  const lastActive = new Date().toISOString();
+  try {
+    if (window.electron && typeof window.electron.invoke === 'function') {
+      const result = await window.electron.invoke('staff-restore', targetId);
+      if (!result?.success || !result.data?.length) throw new Error(result?.error || 'No staff account was restored');
+    } else {
+      if (!sb) throw new Error('Database service unavailable');
+      const result = await sb.from('staff').update({
+        status: 'Offline', is_archived: false, is_active: true,
+        is_online: false, online_status: 'offline',
+        archive_reason: null, archive_notes: null, archived_at: null,
+        last_active: lastActive, updated: lastActive
+      }).eq('id', targetId).select('id');
+      if (result.error || !result.data?.length) throw new Error(result.error?.message || 'No staff account was restored');
+    }
+  } catch (error) {
+    showEcoTrackToast(`Could not restore ${staff.name}: ${error.message}`, 'error');
+    return false;
+  }
+
   staff.isArchived = false;
+  staff.is_archived = false;
+  staff.is_active = true;
   staff.status = 'Offline';
   staff.isOnline = false;
-  staff.lastActive = new Date().toISOString();
+  staff.is_online = false;
+  staff.online_status = 'offline';
+  staff.lastActive = lastActive;
   delete staff.archivedAt;
+  delete staff.archived_at;
   delete staff.archiveReason;
+  delete staff.archive_reason;
   delete staff.archiveNotes;
+  delete staff.archive_notes;
 
   saveStaff();
   closeArchivedDetailModal();
@@ -1648,29 +1937,7 @@ function restoreStaff(id) {
 
   showEcoTrackToast(`${staff.name} has been restored to the Active Staff directory!`, 'success');
 
-  if (sb) {
-    sb.from('staff').update({
-      status: 'Offline',
-      is_archived: false,
-      is_active: true,
-      is_online: false,
-      online_status: 'offline',
-      archive_reason: null,
-      archive_notes: null,
-      archived_at: null,
-      last_active: staff.lastActive,
-      updated: new Date().toISOString()
-    }).eq('id', staff.id).then(({ error }) => {
-      if (error) {
-        sb.from('staff').update({
-          status: 'Offline',
-          is_online: false,
-          last_active: staff.lastActive,
-          updated: new Date().toISOString()
-        }).eq('id', staff.id).then();
-      }
-    }).catch(console.warn);
-  }
+  return true;
 }
 
 // Supabase Realtime Staff Synchronization
@@ -1689,12 +1956,29 @@ function setupStaffRealtime() {
   }
 }
 
+window.addEventListener('ecotrack:locations-updated', () => {
+  staffList = staffList.map(staff => ({ ...staff, ...window.EcoTrackMaintenance?.resolveStaffHierarchy?.(staff) }));
+  saveStaff(); renderTable(); renderArchivedTable();
+});
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
+  if (typeof rememberedStaffView.searchQuery === 'string' && rememberedStaffView.searchQuery.length <= 500) searchQuery = rememberedStaffView.searchQuery;
+  if (typeof rememberedStaffView.archivedSearchQuery === 'string' && rememberedStaffView.archivedSearchQuery.length <= 500) archivedSearchQuery = rememberedStaffView.archivedSearchQuery;
+  const statusSelect = document.getElementById('staffStatusFilter');
+  if (statusSelect && [...statusSelect.options].some(option=>option.value === rememberedStaffView.statusFilter)) { statusFilter = rememberedStaffView.statusFilter; statusSelect.value = statusFilter; }
+  if (document.getElementById('staffSearch')) document.getElementById('staffSearch').value = searchQuery;
+  if (document.getElementById('archivedSearch')) document.getElementById('archivedSearch').value = archivedSearchQuery;
+  document.getElementById('btnStaffClearSearch')?.classList.toggle('hidden',!searchQuery.trim());
+  document.getElementById('btnArchivedClearSearch')?.classList.toggle('hidden',!archivedSearchQuery.trim());
+  currentPage = pendingStaffPage; archivedCurrentPage = pendingArchivedPage;
+  const requestedTab = new URLSearchParams(location.search).get('tab') || rememberedStaffView.maintenanceTab;
+  // The unified tab controller registers in a later DOMContentLoaded listener.
+  if (['reports','staff','archived'].includes(requestedTab)) setTimeout(() => window.switchMaintenanceTab?.(requestedTab),0);
   renderTable();
   renderArchivedTable();
   loadStaffFromSupabase();
-  loadBuildingsFloorsRooms();
+  _staffLocationsReady = loadBuildingsFloorsRooms();
   setupStaffRealtime();
 
   // Register modal
@@ -1709,32 +1993,67 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('addStaffBtn')?.addEventListener('click', addStaff);
 
   // Search Active Staff
-  document.getElementById('staffSearch')?.addEventListener('input', (e) => {
+  const staffSearchInp = document.getElementById('staffSearch');
+  const staffSearchClearBtn = document.getElementById('btnStaffClearSearch');
+  staffSearchInp?.addEventListener('input', (e) => {
+    pendingStaffPage = null;
     searchQuery = e.target.value;
     currentPage = 1;
+    if (staffSearchClearBtn) staffSearchClearBtn.classList.toggle('hidden', !searchQuery.trim());
+    renderTable();
+  });
+  staffSearchClearBtn?.addEventListener('click', () => {
+    pendingStaffPage = null;
+    if (staffSearchInp) staffSearchInp.value = '';
+    searchQuery = '';
+    currentPage = 1;
+    staffSearchClearBtn.classList.add('hidden');
     renderTable();
   });
 
   // Search Archived Staff
-  document.getElementById('archivedSearch')?.addEventListener('input', (e) => {
+  const archivedSearchInp = document.getElementById('archivedSearch');
+  const archivedSearchClearBtn = document.getElementById('btnArchivedClearSearch');
+  archivedSearchInp?.addEventListener('input', (e) => {
+    pendingArchivedPage = null;
     archivedSearchQuery = e.target.value;
+    archivedCurrentPage = 1;
+    if (archivedSearchClearBtn) archivedSearchClearBtn.classList.toggle('hidden', !archivedSearchQuery.trim());
+    renderArchivedTable();
+  });
+  archivedSearchClearBtn?.addEventListener('click', () => {
+    pendingArchivedPage = null;
+    if (archivedSearchInp) archivedSearchInp.value = '';
+    archivedSearchQuery = '';
+    archivedCurrentPage = 1;
+    archivedSearchClearBtn.classList.add('hidden');
     renderArchivedTable();
   });
 
   // Status filter
   document.getElementById('staffStatusFilter')?.addEventListener('change', (e) => {
+    pendingStaffPage = null;
     statusFilter = e.target.value;
     currentPage = 1;
     renderTable();
   });
 
-  // Pagination
+  // Pagination (Active Staff)
   document.getElementById('staffPrevBtn')?.addEventListener('click', () => {
     if (currentPage > 1) { currentPage--; renderTable(); }
   });
   document.getElementById('staffNextBtn')?.addEventListener('click', () => {
     const totalPages = Math.ceil(getFilteredStaff().length / PAGE_SIZE);
     if (currentPage < totalPages) { currentPage++; renderTable(); }
+  });
+
+  // Pagination (Archived Staff)
+  document.getElementById('archivedPrevBtn')?.addEventListener('click', () => {
+    if (archivedCurrentPage > 1) { archivedCurrentPage--; renderArchivedTable(); }
+  });
+  document.getElementById('archivedNextBtn')?.addEventListener('click', () => {
+    const totalPages = Math.ceil(getFilteredArchivedStaff().length / PAGE_SIZE);
+    if (archivedCurrentPage < totalPages) { archivedCurrentPage++; renderArchivedTable(); }
   });
 
   // Archive Modal Listeners
@@ -1748,7 +2067,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // Archived Detail Modal Listeners
   document.getElementById('closeArchivedDetailBtn')?.addEventListener('click', closeArchivedDetailModal);
   document.getElementById('archivedDetailCloseBtn')?.addEventListener('click', closeArchivedDetailModal);
-  document.getElementById('archivedDetailRestoreBtn')?.addEventListener('click', () => restoreStaff());
   document.getElementById('archivedRecordDetailModal')?.addEventListener('click', (e) => {
     if (e.target.id === 'archivedRecordDetailModal') closeArchivedDetailModal();
   });
@@ -1802,6 +2120,20 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Global ESC key listener for all staff modals
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeRegisterModal();
+      closeEditStaffModal();
+      closeStaffSuccessModal();
+      closeArchiveModal();
+      const detailModal = document.getElementById('staffDetailModal');
+      if (detailModal) detailModal.classList.add('hidden');
+      closeArchivedDetailModal();
+      if (typeof window.closeDeleteReportModal === 'function') window.closeDeleteReportModal();
+    }
+  });
+
   // Register Staff Photo Uploader
   const regContainer = document.getElementById('registerAvatarContainer');
   const regInput = document.getElementById('registerAvatarFileInput');
@@ -1829,19 +2161,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Password Visibility Toggle Logic (2D Eye)
   document.querySelectorAll('.password-toggle-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      const input = btn.parentElement.querySelector('input');
-      if (!input) return;
-      if (input.type === 'password') {
-        input.type = 'text';
-        btn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`;
-        btn.title = 'Hide Password';
-      } else {
-        input.type = 'password';
-        btn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12C1 12 5 4 12 4C19 4 23 12 23 12C23 12 19 20 12 20C5 20 1 12 1 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
-        btn.title = 'Show Password';
-      }
+    const input = btn.parentElement.querySelector('input');
+    if (input) staffPasswordVisibility(input, btn, false);
+    btn.addEventListener('click', (event) => {
+      event.preventDefault();
+      if (input) staffPasswordVisibility(input, btn, input.type === 'password');
     });
   });
 
@@ -1849,6 +2173,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('closeEditStaffModalBtn')?.addEventListener('click', closeEditStaffModal);
   document.getElementById('cancelEditStaffBtn')?.addEventListener('click', closeEditStaffModal);
   document.getElementById('saveEditStaffBtn')?.addEventListener('click', saveEditStaff);
+  document.getElementById('editStaffRetryBtn')?.addEventListener('click', retryEditStaffLoad);
   document.getElementById('editStaffModal')?.addEventListener('click', (e) => {
     if (e.target.id === 'editStaffModal') closeEditStaffModal();
   });
@@ -1864,8 +2189,19 @@ document.addEventListener('DOMContentLoaded', () => {
     editInput.addEventListener('change', () => {
       const file = editInput.files[0];
       if (file) {
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 2 * 1024 * 1024) {
+          staffEditNotice('Choose a JPG, PNG or WebP photo up to 2 MB.'); editInput.value = ''; return;
+        }
+        const uploadSession = _staffEditSession;
+        _staffEditAvatarReading = true;
         const reader = new FileReader();
+        reader.onerror = () => {
+          if (uploadSession !== _staffEditSession) return;
+          _staffEditAvatarReading = false; staffEditNotice('The photo could not be read. Choose it again.');
+        };
         reader.onload = (e) => {
+          if (uploadSession !== _staffEditSession) return;
+          _staffEditAvatarReading = false;
           window._editStaffAvatarBase64 = e.target.result;
           if (editImg) {
             editImg.src = window._editStaffAvatarBase64;
@@ -1972,6 +2308,8 @@ window.showStaffDetails = showStaffDetails;
 window.renderTable = renderTable;
 window.renderArchivedTable = renderArchivedTable;
 window.loadStaffFromSupabase = loadStaffFromSupabase;
+window.staffList = staffList;
+window.getStaffList = () => staffList;
 
 
 

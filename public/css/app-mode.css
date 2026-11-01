@@ -1,0 +1,10 @@
+body[data-device-mode-profile] .profile-nav-tab { white-space:nowrap; flex-shrink:0; }
+.workspace-menu,.workspace-backdrop { display:none; }
+@media(max-width:760px) {
+ body[data-device-mode-profile] main>header { flex-wrap:wrap; gap:12px; }
+ body[data-device-mode-profile] #sidebar { position:fixed; left:0; top:0; bottom:0; z-index:60; width:256px; transform:translateX(-100%); visibility:hidden; }
+ body[data-device-mode-profile].workspace-sidebar-open #sidebar { transform:translateX(0); visibility:visible; }
+ body[data-device-mode-profile] #sidebarToggle { display:none; }
+ .workspace-menu { display:inline-flex; }
+ .workspace-sidebar-open .workspace-backdrop { display:block; position:fixed; inset:0; background:#02061799; z-index:50; }
+}

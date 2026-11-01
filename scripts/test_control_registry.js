@@ -1,0 +1,38 @@
+'use strict';
+// Production profile and controller code with isolated local storage; no network.
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+const root=process.env.ECOTRACK_DESKTOP_ROOT||'C:/Users/reygay/Desktop/EcoTrackDesktopDashboardNew-main-control';
+const saved=new Map(),window={};
+const localStorage={getItem:key=>saved.get(key)||null,setItem:(key,value)=>saved.set(key,String(value)),removeItem:key=>saved.delete(key)};
+window.localStorage=localStorage;
+const context={window,localStorage,console:{log(){},warn(){},error(){}},setTimeout,clearTimeout,setInterval,clearInterval,AbortController};
+vm.runInNewContext(fs.readFileSync(path.join(root,'public/js/aircon-system.js'),'utf8'),context);
+const {AirconProfileManager:profiles}=window.EcoTrackAirconSystem;
+function seed(aircons,nodes){localStorage.setItem('ecoTrack_aircons',JSON.stringify(aircons));localStorage.setItem('ecoTrack_nodes',JSON.stringify(nodes));}
+const orphan=[{device_id:'Aircon Matrix',aircon_id:'orphan-one',name:'AC Controller',node_id:null,controller_node_id:null},{device_id:'Matriz',aircon_id:'orphan-two',name:'AC Controller',node_id:'deleted-device',controller_node_id:'deleted-controller'}];
+seed(orphan,[]);
+assert.equal(profiles.getAll().length,2);
+assert.equal(profiles.getControllable().length,0,'Saved AC assets must not become control targets after ESP32 deletion');
+assert.equal(profiles.getAll().length,2,'Keep unassigned assets and their history intact');
+const device={node_id:'esp32s3-001122334455',db_id:'registered-controller',name:'Registered controller',status:'Offline',device_mode:'both'};
+const live={device_id:'Registered AC',aircon_id:'real-ac',name:'Registered AC',controller_node_id:device.db_id,node_id:device.node_id};
+seed([...orphan,live],[device]);
+assert.equal(profiles.getControllable().length,1,'Registered offline controllers remain selectable');
+assert.equal(profiles.getControllable()[0].device_id,'Registered AC');
+seed([...orphan,live],[]);
+assert.equal(profiles.getControllable().length,0,'Removing registry identity immediately removes control eligibility');
+seed([...orphan,live],[device]);
+assert.equal(profiles.getControllable().length,1,'Re-registering restores the valid assignment');
+seed([live],[{...device,device_mode:'monitoring'}]);
+assert.equal(profiles.getControllable().length,0,'Monitoring-only nodes cannot act as assigned controllers');
+seed([live,{...live,device_id:'Conflicting AC',aircon_id:'other-ac'}],[device]);
+assert.equal(profiles.getControllable().length,0,'Conflicting AC ownership must not select a controller arbitrarily');
+seed([{...live,controller_node_id:'deleted-controller'}],[device]);
+assert.equal(profiles.getControllable().length,0,'A stale authoritative controller ID cannot fall back to another device');
+seed([{...live,controller_node_id:null,node_id:device.name}],[device]);
+assert.equal(profiles.getControllable().length,1,'Existing legacy controller-name links remain supported');
+const replacement={...device,db_id:'replacement-controller'};
+seed([{...live,device_id:'Previous AC',aircon_id:'previous-ac',controller_node_id:'retired-controller'},{...live,controller_node_id:replacement.db_id}],[replacement]);
+assert.equal(profiles.getControllable().length,1,'A retired assignment must not hide a new registered controller reusing the hardware identity');
+assert.equal(profiles.getControllable()[0].device_id,'Registered AC');
+console.log('PASS orphan exclusion, preserved assets, offline controller, deletion, restoration, monitoring-only role, conflicting ownership, stale identity and legacy link.');

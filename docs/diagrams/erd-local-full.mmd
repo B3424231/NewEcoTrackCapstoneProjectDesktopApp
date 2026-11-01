@@ -1,0 +1,173 @@
+erDiagram
+  %% Solid = declared FK; dashed = selected logical reference (no FK).
+  %% PK/UK markers on multiple fields can be components of one tuple; see dictionary.
+  %% External auth/public projections list selected reference fields only.
+  sqlite_cloud_sync_state {
+    TEXT source PK
+    TEXT cursor_created
+    TEXT cursor_id
+  }
+  sqlite_monitor_calibrations {
+    TEXT id PK
+    TEXT node_id FK
+    TEXT valid_from
+    REAL temperature_offset_c
+    TEXT notes
+    INTEGER field_calibrated
+    TEXT created_at
+  }
+  sqlite_monitor_changed_nodes {
+    TEXT node_id PK
+    INTEGER version
+  }
+  sqlite_monitor_nodes {
+    TEXT id PK
+    TEXT name
+    TEXT aircon_id
+    TEXT aircon_name
+    TEXT location
+    TEXT state_source
+    REAL expected_interval_seconds
+    INTEGER active
+    TEXT token_hash
+    TEXT created_at
+    TEXT updated_at
+    TEXT aircon_type
+    TEXT registry_node_id
+    INTEGER registry_retired
+  }
+  sqlite_monitor_revision {
+    INTEGER id PK
+    TEXT generation
+    INTEGER version
+  }
+  sqlite_monitor_samples {
+    TEXT id PK
+    TEXT node_id UK, FK
+    TEXT aircon_id
+    TEXT aircon_name
+    TEXT observed_at
+    TEXT received_at
+    TEXT boot_id UK
+    INTEGER sequence UK
+    INTEGER uptime_ms
+    REAL interval_seconds
+    TEXT clock_quality
+    REAL raw_temperature_c
+    REAL outlet_temperature_c
+    INTEGER ac_on
+    TEXT state_source
+    TEXT temperature_quality
+    TEXT calibration_id FK
+    TEXT payload_hash
+    TEXT sensor_name
+    TEXT location
+    TEXT aircon_type
+    REAL battery_voltage
+    REAL rssi_dbm
+    TEXT connection_status
+    TEXT operating_mode
+    REAL rotation_rpm
+    TEXT rotation_quality
+    TEXT control_snapshot
+  }
+  sqlite_monitor_sync_outbox {
+    INTEGER id PK
+    TEXT table_name
+    TEXT object_id
+    TEXT payload
+  }
+  sqlite_monitor_sync_status {
+    INTEGER id PK
+    TEXT last_success
+    TEXT error
+  }
+  sqlite_schedule_dispatches {
+    TEXT id PK
+    TEXT node_id
+    TEXT ip
+    INTEGER interval_seconds
+    TEXT status
+    TEXT error
+    TEXT created
+    TEXT updated
+  }
+  sqlite_sensor_schedules {
+    TEXT node_id PK, FK
+    TEXT wake_time
+    TEXT sleep_time
+    INTEGER interval_seconds
+    TEXT updated_at
+  }
+  sqlite_telemetry {
+    TEXT id PK
+    TEXT node_id
+    TEXT sensor_name
+    TEXT room_name
+    TEXT floor_name
+    TEXT building_name
+    TEXT aircon_type
+    REAL temperature
+    REAL battery
+    REAL rssi
+    TEXT status
+    TEXT created
+    TEXT updated
+    TEXT event_type
+    INTEGER interval_seconds
+    TEXT wake_time
+    TEXT sleep_time
+    INTEGER ac_on
+    TEXT aircon_id
+    TEXT control_snapshot
+    TEXT ac_state
+    REAL rotation_rpm
+    TEXT rotation_quality
+    TEXT observed_at
+    TEXT boot_id
+    INTEGER sequence
+  }
+  sqlite_telemetry_backup_state {
+    INTEGER id PK
+    TEXT last_success
+    REAL completed_epoch
+    TEXT filename
+    TEXT error
+  }
+  sqlite_telemetry_cloud_receipts {
+    TEXT id PK
+    TEXT payload
+    TEXT cleaned_at
+  }
+  sqlite_telemetry_history_generation {
+    INTEGER id PK
+    TEXT token
+  }
+  sqlite_telemetry_local_reset {
+    INTEGER id PK
+    TEXT deleted_through
+  }
+  sqlite_telemetry_monitor_sources {
+    TEXT source_id PK
+    TEXT node_id
+    TEXT payload
+  }
+  public_aircons {
+    text id PK
+  }
+  public_nodes {
+    text id PK
+  }
+  sqlite_monitor_nodes ||--o{ sqlite_monitor_calibrations : "node_id"
+  sqlite_monitor_calibrations ||--o{ sqlite_monitor_samples : "calibration_id"
+  sqlite_monitor_nodes ||--o{ sqlite_monitor_samples : "node_id"
+  sqlite_monitor_nodes |o--o| sqlite_sensor_schedules : "node_id"
+  public_nodes |o..o{ sqlite_telemetry : "node_id REF no FK"
+  public_aircons |o..o{ sqlite_telemetry : "aircon_id REF no FK"
+  public_aircons |o..o{ sqlite_monitor_nodes : "aircon_id REF no FK"
+  public_nodes |o..o{ sqlite_monitor_nodes : "registry_node_id REF no FK"
+  public_aircons |o..o{ sqlite_monitor_samples : "aircon_id REF no FK"
+  sqlite_monitor_nodes |o..o{ sqlite_monitor_changed_nodes : "node_id REF no FK"
+  sqlite_telemetry |o..o{ sqlite_telemetry_cloud_receipts : "id REF no FK"
+  sqlite_telemetry |o..o{ sqlite_telemetry_monitor_sources : "source_id REF no FK"
+  public_nodes |o..o{ sqlite_telemetry_monitor_sources : "node_id REF no FK"

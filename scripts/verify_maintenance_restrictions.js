@@ -56,18 +56,18 @@ assert(
 );
 
 assert(
-  modalJs.includes('const notifId = isNeedsRepair ? `mob_repair_${targetReport.id}` : `mob_task_${targetReport.id}`;'),
-  'Deterministic notification IDs mapped to report ID in client JS'
+  modalJs.includes("window.electron.invoke('maintenance-save-report'"),
+  'Maintenance uses the authenticated atomic save transport'
 );
 
 assert(
-  modalJs.includes('existingNotifs && existingNotifs.length > 0'),
-  'Client JS pre-checks existing notifications before inserting'
+  modalJs.includes('pendingReportOperations'),
+  'Client retains pending idempotent report operation identities'
 );
 
 assert(
-  modalJs.includes(".upsert(notifPayload, { onConflict: 'id' })"),
-  'Client JS uses idempotent upsert on notification ID'
+  modalJs.includes('operationId: operation.id'),
+  'Client submits the original operation identity for safe retry'
 );
 
 // 2. Audit supabase_mobile_notifications_setup.sql
@@ -110,12 +110,12 @@ assert(
 );
 
 assert(
-  modalJs.includes('Duplicate Report Rejected') && modalJs.includes('already has an ongoing maintenance report'),
+  modalJs.includes('Duplicate Report Rejected') && modalJs.includes('already has an ongoing report'),
   'Form validation halts and rejects reporting for aircons with unverified/pending reports'
 );
 
 assert(
-  modalJs.includes('.in(\'status\', [\'Pending\', \'Assigned\', \'In Progress\', \'For Verification\', \'Needs Repair\'])'),
+  modalJs.includes("'Awaiting Admin Verification', 'Needs Repair', 'Under Repair'"),
   'Direct Supabase database-level duplicate check halts concurrent unverified reports'
 );
 

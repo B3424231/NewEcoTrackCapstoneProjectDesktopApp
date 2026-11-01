@@ -1,0 +1,189 @@
+---
+title: EcoTrack ERD - Desktop and Mobile
+config:
+  theme: base
+  look: classic
+  layout: dagre
+  themeVariables:
+    fontFamily: Arial
+    fontSize: 14px
+    lineColor: "#64748b"
+---
+erDiagram
+    direction TB
+
+    AUTH_USERS["AUTH.USERS"] {
+        uuid id PK
+        varchar email
+    }
+    ADMINISTRATORS {
+        text id PK
+        uuid auth_user_id FK, UK
+        text username UK
+        text email UK
+        text role
+        boolean is_active
+    }
+    STAFF["STAFF - MOBILE"] {
+        text id PK
+        uuid auth_user_id FK, UK
+        text room_id
+        text name
+        text role
+        text assignment_scope
+        text status
+    }
+    BUILDINGS {
+        text id PK
+        text admin_id FK
+        text name
+    }
+    FLOORS {
+        text id PK
+        text building_id FK
+        text name
+    }
+    ROOMS {
+        text id PK
+        text floor_id FK
+        text admin_id FK
+        text name
+        integer node_limit
+    }
+    NODES {
+        text id PK
+        text room_id FK
+        text maintainer_id FK
+        text monitor_aircon_id FK
+        text name UK
+        text device_mode
+        text wake_time
+        text sleep_time
+        integer interval_val
+        text interval_unit
+        double rotation_rpm
+    }
+    AIRCONS {
+        text id PK
+        text room_id FK
+        text controller_node_id FK
+        text asset_tag UK
+        text name
+        text brand
+        text model
+        text protocol
+        jsonb desired_state
+        jsonb reported_state
+    }
+    RULES {
+        text id PK
+        text admin_id FK
+        text room_id FK
+        text type
+        text condition
+        numeric value
+        boolean enabled
+    }
+    RULE_NODES {
+        text id PK
+        text rule_id FK
+        text node_id FK
+    }
+    NOTIFICATIONS["NOTIFICATIONS - DESKTOP"] {
+        text id PK
+        text admin_id FK
+        text room_id FK
+        text rule_id FK
+        text type
+        text content
+        timestamptz created
+    }
+    MAINTENANCE_REPORTS {
+        text id PK
+        text aircon_id FK
+        text staff_id FK
+        text admin_id FK
+        text room_id FK
+        text type
+        text priority
+        text status
+        jsonb tasks
+        jsonb photos
+    }
+    MOBILE_NOTIFICATIONS {
+        text id PK
+        text staff_id FK
+        text related_report_id
+        text title
+        text message
+        boolean is_read
+        timestamptz created_at
+    }
+    CLOUD_TELEMETRY["TELEMETRY - SUPABASE"] {
+        text id PK
+        text node_id
+        text aircon_id
+        double rotation_rpm
+        text rotation_quality
+        timestamptz observed_at
+        numeric interval_seconds
+        jsonb control_snapshot
+    }
+    LOCAL_TELEMETRY["TELEMETRY - SQLITE"] {
+        TEXT id PK
+        TEXT node_id
+        TEXT aircon_id
+        REAL rotation_rpm
+        TEXT observed_at
+        INTEGER interval_seconds
+        TEXT control_snapshot
+    }
+
+    %% Dashed relationships are non-identifying. Labels ending REF are application associations, not database FKs.
+    %% The child aircon_id in maintenance_reports actually references nodes.id.
+    %% The rule_nodes (rule_id,node_id) pair is unique as a tuple.
+    %% monitor_aircon_id has partial uniqueness for monitoring/both nodes, not a universal UK.
+
+    AUTH_USERS |o..o| ADMINISTRATORS : authenticates
+    AUTH_USERS |o..o| STAFF : authenticates
+    ADMINISTRATORS |o..o{ BUILDINGS : manages
+    BUILDINGS |o..o{ FLOORS : contains
+    FLOORS |o..o{ ROOMS : contains
+    ADMINISTRATORS |o..o{ ROOMS : owns
+    ROOMS |o..o{ NODES : contains
+    ROOMS |o..o{ AIRCONS : houses
+    ROOMS |o..o{ STAFF : assigns_REF
+    STAFF |o..o{ NODES : maintains
+    NODES |o..o{ AIRCONS : controls
+    AIRCONS |o..o{ NODES : monitors
+    ADMINISTRATORS |o..o{ RULES : creates
+    RULES ||..o{ RULE_NODES : applies
+    NODES ||..o{ RULE_NODES : receives
+    RULES |o..o{ NOTIFICATIONS : triggers
+    ADMINISTRATORS |o..o{ NOTIFICATIONS : receives
+    STAFF |o..o{ MAINTENANCE_REPORTS : handles
+    ADMINISTRATORS |o..o{ MAINTENANCE_REPORTS : reviews
+    NODES |o..o{ MAINTENANCE_REPORTS : services
+    STAFF |o..o{ MOBILE_NOTIFICATIONS : receives
+    MAINTENANCE_REPORTS |o..o{ MOBILE_NOTIFICATIONS : alerts_REF
+    NODES |o..o{ CLOUD_TELEMETRY : records_REF
+    AIRCONS |o..o{ CLOUD_TELEMETRY : tags_REF
+    CLOUD_TELEMETRY |o..o| LOCAL_TELEMETRY : archives_REF
+
+    classDef auth fill:#fce7f3,stroke:#ec4899,color:#111827
+    classDef location fill:#ccfbf1,stroke:#14b8a6,color:#111827
+    classDef device fill:#dcfce7,stroke:#22c55e,color:#111827
+    classDef rule fill:#ffedd5,stroke:#f97316,color:#111827
+    classDef junction fill:#fef9c3,stroke:#eab308,color:#111827
+    classDef alert fill:#e0f2fe,stroke:#0ea5e9,color:#111827
+    classDef readings fill:#fee2e2,stroke:#ef4444,color:#111827
+    classDef maintenance fill:#ede9fe,stroke:#8b5cf6,color:#111827
+    class AUTH_USERS,ADMINISTRATORS,STAFF auth
+    class BUILDINGS,FLOORS,ROOMS location
+    class NODES,AIRCONS device
+    class RULES rule
+    class RULE_NODES junction
+    class NOTIFICATIONS,MOBILE_NOTIFICATIONS alert
+    class CLOUD_TELEMETRY,LOCAL_TELEMETRY readings
+    class MAINTENANCE_REPORTS maintenance
+

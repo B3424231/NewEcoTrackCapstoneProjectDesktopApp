@@ -1,0 +1,28 @@
+'use strict';
+const assert=require('node:assert/strict'),path=require('node:path');
+const api=require(process.env.ECOTRACK_RULE_REPORT_MODULE||path.join(__dirname,'../public/js/report-rules.js'));
+const report={filters:{from:'2026-10-20T16:00:00Z',to:'2026-10-21T16:00:00Z'},devices:[{id:'monitor-1',aircon_id:'ac-1',name:'Monitoring 1',aircon_name:'Matrix'},{id:'monitor-2',aircon_id:'ac-2',name:'Monitoring 2',aircon_name:'Office'}],rows:[{node_id:'monitor-1',location:'Building A · Floor 1 · Room 1'},{node_id:'monitor-2',location:'Building A · Floor 1 · Room 2'}]};
+const event=(id,node_id,room_id,rule_id,content,created='2026-10-21T02:15:00Z')=>({id,node_id,room_id,rule_id,content,created,date:'2026-10-21',time:'10:15:00 AM',triggered:true});
+const first=event('one','controller-1','r1','temp1','Controller 1|||Temperature went above 25°C (was 31°C)');
+const source={complete:true,rules:[{id:'temp1',type:'temperature',condition:'above',value:29,unit:'°C',room_id:'r1',enabled:false},{id:'temp2',type:'temperature',condition:'below',value:20,unit:'°C',room_id:'r2',enabled:true},{id:'battery',type:'battery',condition:'below',value:10,unit:'%',room_id:'r1'}],ruleNodes:[],nodes:[{id:'controller-1',name:'Controller 1',monitoring_id:'monitor-1',room_id:'r1'},{id:'controller-2',name:'Controller 2',monitoring_id:'monitor-2',room_id:'r2'},{id:'other',name:'Other Controller',room_id:'r1'}],rooms:[{id:'r1',name:'Room 1',floor_id:'f1'},{id:'r2',name:'Room 2',floor_id:'f1'}],floors:[{id:'f1',name:'Floor 1',building_id:'b1'}],buildings:[{id:'b1',name:'Building A'}],notifications:[first,{...first,id:'two',created:'2026-10-21T03:15:00Z',time:'11:15:00 AM',is_dismissed_from_inbox:true},event('three','controller-2','r2','temp2','Controller 2|||Temperature went below 20°C'),event('battery','controller-1','r1','battery','Battery dropped to 9%'),event('schedule','controller-1','r1',null,'Scheduled wake time'),{...first,id:'installation',type:'controller_installation'},event('other','other','r1','temp1','Other Controller|||Temperature went above 25°C (was 40°C)'),event('outside','controller-1','r1','temp1','Temperature went above 25°C (was 33°C)','2026-10-20T12:00:00Z'),{...first,id:'not-triggered',triggered:false}],audit:[{...first,archived:true},{...first,id:'local-copy',pbId:'one',archived:true}]};
+const result=api.prepare(report,source);
+assert.equal(result.available,true);assert.equal(result.events.length,3);
+assert.equal(result.events.find(e=>e.id==='one').recordedValue,'31°C');
+assert.match(result.events.find(e=>e.id==='one').condition,/25/);assert.doesNotMatch(result.events.find(e=>e.id==='one').condition,/29/);
+assert.equal(result.events.find(e=>e.id==='three').recordedValue,'Unavailable');
+assert.equal(result.events.filter(e=>e.nodeId==='monitor-1').length,2);
+assert.equal(result.rooms[0].count,2);assert.match(result.rooms[0].name,/Room 1/);
+assert.equal(result.rules.find(r=>r.id==='temp1').enabled,false);
+assert.equal(api.forDevice(result,'monitor-1').events.length,2);
+assert.equal(api.prepare({...report,devices:[report.devices[1]],rows:[report.rows[1]]},source).events.length,1);
+assert.equal(api.prepare({...report,filters:{...report.filters,start_time:'10:30',end_time:'12:00'}},source).events.length,1);
+assert.equal(api.prepare(report,{...source,complete:false,reason:'Cloud history unavailable'}).available,false);
+assert.equal(api.prepare(report,{...source,notifications:[],audit:[]}).events.length,0);
+(async()=>{
+ const pages=Array.from({length:501},(_,i)=>({id:String(i)}));let calls=0;
+ const client={from(){return {select(){return this;},order(){return this;},range(a,b){this.a=a;this.b=b;return this;},abortSignal(){return this;},then(resolve){calls++;return Promise.resolve({data:pages.slice(this.a,this.b+1),count:501,error:null}).then(resolve);}};}};
+ const fetched=await api.fetchSource(client,new AbortController().signal);assert.equal(fetched.notifications.length,501);assert(calls>=14);
+ const failed={from(){return {select(){return this;},order(){return this;},range(){return this;},abortSignal(){return this;},then(resolve){return Promise.resolve({data:null,error:{message:'Offline'}}).then(resolve);}};}};
+ await assert.rejects(api.fetchSource(failed,new AbortController().signal),/unavailable|Offline/i);
+ console.log('PASS rules: historical temperatures, edited/disabled rules, dismissed records, deduplication, date/time/device filters, room ranking, partial data and complete pagination.');
+})().catch(error=>{console.error(error.stack);process.exitCode=1;});

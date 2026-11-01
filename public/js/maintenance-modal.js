@@ -2,7 +2,7 @@
  * EcoTrack - Maintenance Management Controller
  * Dynamically linked to live Supabase nodes, rooms, and real maintenance records.
  * Handles Create Report Modal, Report Details Modal with full Light & Dark theme support,
- * Aircon Sensor Diagnostics, Task Checklists, Progress Tracking, and Verification.
+ * AC Device Diagnostics, Task Checklists, Progress Tracking, and Verification.
  */
 
 (function () {
@@ -10,8 +10,13 @@
   // 1. SUPABASE DATA LAYER & STORE
   // ===================================================================
 
-  const getSb = () => window.supabaseClient || window.sb;
+  function getSb() {
+    return window.supabaseClient || window.sb;
+  }
   let _reportsCache = [];
+  const reportVersions = new Map();
+  let reportWriteRevision = 0;
+  const confirmedReportWrites = new Map();
 
   // Preserve legacy relative labels while rendering precise timestamps written
   // by the mobile app in a concise, consistent desktop format.
@@ -28,6 +33,17 @@
     });
   }
 
+  function isActualRepairTask(r) {
+    if (!r) return false;
+    const idStr = String(r.id || '').trim().toUpperCase();
+    if (idStr.startsWith('REP-') || idStr.startsWith('RWK-')) return true;
+    // Parent references identify children; linkedRepairId points down from a maintenance report.
+    if ([r.parentReportId, r.parent_report_id, r.linkedParentId].some(id => String(id || '').trim())) return true;
+    const typeStr = String(r.type || '').trim().toLowerCase();
+    if (['preventive', 'cleaning', 'routine', 'calibration', 'inspection'].some(type => typeStr.includes(type))) return false;
+    return typeStr.includes('corrective') || typeStr.includes('repair');
+  }
+
   function isComponentInIssue(componentName, issue) {
     if (!issue || !componentName) return false;
     const target = String(componentName).toLowerCase().trim();
@@ -42,6 +58,17 @@
       if (parts.some(p => p && (target.includes(p) || p.includes(target)))) return true;
     }
     return false;
+  }
+
+  function isMockOrTestReport(r) {
+    if (!r) return false;
+    const id = String(typeof r === 'string' ? r : (r.id || '')).trim().toUpperCase();
+    return id.includes('-TEST-') || id.startsWith('TEST-') || id.endsWith('-TEST') || id.includes('TEST_') || id.includes('MOCK');
+  }
+
+  function isReportSubmittedForVerification(report) {
+    return ['for verification', 'pending verification', 'awaiting admin verification']
+      .includes(String(report?.status || '').trim().toLowerCase());
   }
 
   function normalizeReport(r) {
@@ -61,9 +88,9 @@
       rawTasks = [
         { id: 1, name: 'Aircon Cleaning', status: 'Not Started', notes: '', updated: 'Today' },
         { id: 2, name: 'Filter Cleaning', status: 'Not Started', notes: '', updated: 'Today' },
-        { id: 3, name: 'Temperature Sensor Inspection', status: 'Not Started', notes: '', updated: 'Today' },
-        { id: 4, name: 'Air Pressure Sensor Inspection', status: 'Not Started', notes: '', updated: 'Today' },
-        { id: 5, name: 'Energy Sensor Inspection', status: 'Not Started', notes: '', updated: 'Today' }
+        { id: 3, name: 'Temperature Control Inspection', status: 'Not Started', notes: '', updated: 'Today' },
+        { id: 4, name: 'Rotation Monitoring Inspection', status: 'Not Started', notes: '', updated: 'Today' },
+        { id: 5, name: 'Energy Control Inspection', status: 'Not Started', notes: '', updated: 'Today' }
       ];
     }
     const tasks = rawTasks.map((t, idx) => {
@@ -87,7 +114,7 @@
       // A "Not Started" task cannot have a worker completion photo.
       // Also prevent accidental inheritance of parent defect photo.
       const isNotStarted = (t.status || 'Not Started') === 'Not Started';
-      const isRepairOrder = String(r.id || '').trim().toUpperCase().startsWith('REP') || r.type === 'Corrective Repair' || String(r.type || '').trim().toLowerCase().includes('corrective') || String(r.type || '').trim().toLowerCase().includes('repair');
+      const isRepairOrder = isActualRepairTask(r);
       const isParentDefectPhoto = Boolean(
         (r.photo_url && taskPhoto === r.photo_url) ||
         (r.issue && (taskPhoto === r.issue.photo || taskPhoto === r.issue.photoUri))
@@ -115,6 +142,7 @@
       };
     });
     let status = r.status || 'Pending';
+    if (['pending verification', 'awaiting admin verification'].includes(String(status).toLowerCase())) status = 'For Verification';
     let issue = r.issue || null;
     if (issue) {
       if (typeof issue === 'string') {
@@ -152,7 +180,7 @@
 
     // Synchronize defect/issue with checklist tasks ONLY IF report is actively in defect/repair state
     // and NOT when actively undergoing rework, verified, closed, or already repaired/all completed
-    const isRepTask = String(r.id || '').trim().toUpperCase().startsWith('REP') || r.type === 'Corrective Repair' || r.type === 'Repair Task' || String(r.type || '').trim().toLowerCase().includes('corrective') || String(r.type || '').trim().toLowerCase().includes('repair');
+    const isRepTask = isActualRepairTask(r);
     if (!isRepTask && !isReworkStatus && !isClosedStatus && !isExplicitlyVerified && !isIssueRepaired && !allTasksCompleted && issue && tasks.length > 0) {
       const isMultiComponentIssue = (Array.isArray(issue.components) && issue.components.length > 1) ||
         (typeof issue.component === 'string' && issue.component.split(/[,;/]+/).filter(Boolean).length > 1);
@@ -192,21 +220,23 @@
 
     if (isClosedStatus) {
       status = 'Closed';
-    } else if (isExplicitlyVerified || (allTasksCompleted && (r.verified || status === 'Verified'))) {
-      status = 'Verified';
+    } else if (isExplicitlyVerified || (allTasksCompleted && (r.verified || status === 'Verified' || status === 'Completed'))) {
+      status = 'Completed';
       tasks.forEach(t => { if (t.status === 'Completed' || t.repaired) t.verified = true; });
-    } else if (status === 'Completed') {
-      // A report cannot become Completed/Verified while its own required tasks are unfinished!
+    } else if (status === 'Completed' || status === 'Verified') {
+      // A report cannot become Completed while its own required tasks are unfinished!
       if (allTasksCompleted) {
-        status = r.verified ? 'Verified' : 'Completed';
+        status = 'Completed';
       } else {
         status = isRepTask ? 'In Progress' : (hasRepairTask ? 'Needs Repair' : (hasUnderRepairTask ? 'Under Repair' : 'In Progress'));
       }
     } else if (isReworkStatus) {
       status = 'Need Rework';
-    } else if (allTasksCompleted || status === 'For Verification' || status === 'Awaiting Admin Verification') {
-      // 100% completed checklist tasks automatically transition to For Verification (Awaiting Admin Verification)!
+    } else if (isReportSubmittedForVerification(r)) {
       status = 'For Verification';
+    } else if (allTasksCompleted) {
+      // Checklist completion alone is progress; submission is a separate server transition.
+      status = 'In Progress';
     } else if (isRepTask) {
       // Corrective repair order status: if tasks are not all completed, status is In Progress (never Under Repair or Completed)
       status = 'In Progress';
@@ -284,9 +314,12 @@
       id: r.id,
       airconId: r.aircon_name || r.aircon_id || r.airconId || 'AC-Unassigned',
       aircon_id: r.aircon_id,
+      node_id: r.node_id || r.nodeId || r.controller_node_id || null,
+      controller_name: r.controller_name || r.controllerName || '',
+      room_id: r.room_id || r.roomId || null,
       aircon_name: r.aircon_name || r.airconId,
-      airconType: r.aircon_type || r.airconType || r.brand || 'Split Type (Inverter)',
-      aircon_type: r.aircon_type || r.airconType || r.brand || 'Split Type (Inverter)',
+      airconType: r.aircon_type || r.airconType || 'Type unavailable',
+      aircon_type: r.aircon_type || r.airconType || 'Type unavailable',
       room: r.room_name || r.room || 'Main Campus',
       room_name: r.room_name || r.room,
       type: r.type || 'Preventive Maintenance',
@@ -378,14 +411,14 @@
   // Helper to locate all child Corrective Repair reports connected to a parent report
   function getChildRepairReportsFor(report, reports) {
     if (!report) return [];
-    const isRepReport = String(report.id || '').trim().toUpperCase().startsWith('REP') || report.type === 'Corrective Repair' || report.type === 'Repair Task' || String(report.type || '').trim().toLowerCase().includes('corrective') || String(report.type || '').trim().toLowerCase().includes('repair');
+    const isRepReport = isActualRepairTask(report);
     if (isRepReport) return []; // A Corrective Repair report cannot have child repair reports
     const allReports = Array.isArray(reports) ? reports : getReports();
     const rId = String(report.id || '').trim().toLowerCase();
 
     const children = allReports.filter(r => {
       if (!r || r.id === report.id) return false;
-      const isCorrective = String(r.id || '').trim().toUpperCase().startsWith('REP') || r.type === 'Corrective Repair' || r.type === 'Repair Task' || String(r.type || '').trim().toLowerCase().includes('corrective') || String(r.type || '').trim().toLowerCase().includes('repair');
+      const isCorrective = isActualRepairTask(r);
       if (!isCorrective) return false;
 
       // 1. Explicit parentReportId pointing to this report
@@ -426,16 +459,26 @@
     // 2. Direct parentTaskId match on child repair report
     if (task.id !== undefined && task.id !== null) {
       const found = childRepairs.find(cr => (cr.parentTaskId !== undefined && cr.parentTaskId !== null && String(cr.parentTaskId) === String(task.id)) ||
-        (cr.parent_task_id !== undefined && cr.parent_task_id !== null && String(cr.parent_task_id) === String(task.id)));
+        (cr.parent_task_id !== undefined && cr.parent_task_id !== null && String(cr.parent_task_id) === String(task.id)) ||
+        (cr.issue?.parentTaskId !== undefined && cr.issue?.parentTaskId !== null && String(cr.issue.parentTaskId) === String(task.id)));
       if (found) return found;
     }
 
-    // 3. Match by task name vs parentTaskName or issue.component
+    // 3. Match by task name vs parentTaskName or issue.component (exact match first)
     const tName = String(task.name || '').trim().toLowerCase();
     if (tName) {
+      const foundExact = childRepairs.find(cr => {
+        const crTaskName = String(cr.parentTaskName || cr.parent_task_name || '').trim().toLowerCase();
+        const crIssueComp = String(cr.issue?.component || '').trim().toLowerCase();
+        return crTaskName === tName || crIssueComp === tName;
+      });
+      if (foundExact) return foundExact;
+
+      // 4. Fallback: single-component issue match (never match if child issue has multiple comma-separated components)
       const found = childRepairs.find(cr => {
-        const crTaskName = String(cr.parentTaskName || cr.parent_task_name || cr.issue?.component || '').trim().toLowerCase();
-        return crTaskName === tName || isComponentInIssue(tName, cr.issue);
+        const comp = String(cr.issue?.component || '').trim();
+        if (comp.includes(',') || comp.includes(';') || comp.includes('•')) return false;
+        return isComponentInIssue(tName, cr.issue);
       });
       if (found) return found;
     }
@@ -453,9 +496,6 @@
     if (!repairReport) return false;
     const s = String(repairReport.status || '').trim().toLowerCase();
     if (s === 'verified' || s === 'completed' || s === 'for verification') return true;
-    if (Array.isArray(repairReport.tasks) && repairReport.tasks.length > 0 && repairReport.tasks.every(t => t.status === 'Completed')) {
-      return true;
-    }
     return false;
   }
 
@@ -480,6 +520,19 @@
     if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
       trimmed = trimmed.slice(1, -1).trim();
     }
+    if (trimmed.startsWith('storage://')) {
+      const match = trimmed.match(/^storage:\/\/([^/]+)\/(.+)$/);
+      if (!match || match[2].split('/').some(part => !part || part === '.' || part === '..')) return '';
+      const bucket = match[1];
+      const path = match[2];
+      const sb = getSb();
+      if (sb?.storage && typeof sb.storage.from === 'function') {
+        const { data } = sb.storage.from(bucket).getPublicUrl(path) || {};
+        if (data?.publicUrl) return data.publicUrl;
+      }
+      const base = window.SUPABASE_URL || 'https://ynopdmfhngooknybyahq.supabase.co';
+      return `${base.replace(/\/+$/, '')}/storage/v1/object/public/${bucket}/${path}`;
+    }
     if (trimmed.startsWith('data:') || trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('blob:')) {
       return trimmed;
     }
@@ -500,8 +553,53 @@
         } catch (_) { }
       }
     }
-    return trimmed;
+    const base = window.SUPABASE_URL || 'https://ynopdmfhngooknybyahq.supabase.co';
+    return `${base.replace(/\/+$/, '')}/storage/v1/object/public/photos/${trimmed}`;
   }
+  window.EcoTrackResolvePhoto = resolvePhotoUrl;
+
+  window.handlePhotoLoadError = function (img, idx) {
+    if (!img) return;
+    if (!img.dataset.retried) {
+      img.dataset.retried = '1';
+      const raw = img.getAttribute('data-raw') || img.src;
+      const resolved = resolvePhotoUrl(raw);
+      if (resolved && resolved !== img.src && !resolved.startsWith('storage://')) {
+        img.src = resolved;
+        return;
+      }
+    }
+    img.onerror = null;
+    if (img.parentElement) {
+      img.parentElement.innerHTML = `
+        <div class="w-full h-full flex flex-col items-center justify-center p-1 text-center bg-slate-900/80 text-rose-400 select-none">
+          <svg class="w-4 h-4 opacity-75 mb-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+          <span class="text-[9px] font-bold truncate max-w-full">Photo ${idx || ''}</span>
+        </div>`;
+    }
+  };
+
+  window.handleCarouselPhotoError = function (img, idx) {
+    if (!img) return;
+    if (!img.dataset.retried) {
+      img.dataset.retried = '1';
+      const raw = img.getAttribute('data-raw') || img.src;
+      const resolved = resolvePhotoUrl(raw);
+      if (resolved && resolved !== img.src && !resolved.startsWith('storage://')) {
+        img.src = resolved;
+        return;
+      }
+    }
+    img.onerror = null;
+    if (img.parentElement) {
+      img.parentElement.innerHTML = `
+        <div class="p-6 text-center text-xs font-medium text-gray-400 flex flex-col items-center justify-center">
+          <svg class="w-8 h-8 text-rose-400/80 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          <span class="text-rose-400 font-semibold mb-1">Image preview unavailable</span>
+          <span class="text-[11px] text-gray-500">Click "View Full Size" below to open image</span>
+        </div>`;
+    }
+  };
 
   // Synchronize parent maintenance reports when their child repair tasks are completed/verified
   function syncReportsWithLinkedRepairs(reports) {
@@ -509,11 +607,10 @@
     let changed = false;
     reports.forEach(report => {
       if (!report) return;
-      const isRepTask = String(report.id || '').trim().toUpperCase().startsWith('REP') || report.type === 'Corrective Repair' || report.type === 'Repair Task' || String(report.type || '').trim().toLowerCase().includes('corrective') || String(report.type || '').trim().toLowerCase().includes('repair');
+      const isRepTask = isActualRepairTask(report);
       if (isRepTask) {
         if (report.status === 'Under Repair' || report.status === 'Pending' || report.status === 'Assigned' || report.status === 'Needs Repair') {
-          const allDone = Array.isArray(report.tasks) && report.tasks.length > 0 && report.tasks.every(t => t.status === 'Completed');
-          report.status = allDone ? 'For Verification' : 'In Progress';
+          report.status = 'In Progress';
           changed = true;
         }
         return;
@@ -553,7 +650,19 @@
       if (Array.isArray(report.tasks)) {
         report.tasks.forEach(t => {
           const childRep = getRepairReportForTask(report, t, reports);
-          if (!childRep) return;
+          if (!childRep) {
+            if (t.linkedRepairId) {
+              const directExists = reports.some(r => r && String(r.id || '').toUpperCase() === String(t.linkedRepairId).toUpperCase());
+              if (!directExists) {
+                delete t.linkedRepairId;
+                if (t.status === 'Under Repair' && !t.repaired) {
+                  t.status = 'Needs Repair';
+                }
+                changed = true;
+              }
+            }
+            return;
+          }
 
           if (t.linkedRepairId !== childRep.id) {
             t.linkedRepairId = childRep.id;
@@ -603,16 +712,19 @@
               changed = true;
             }
           } else if (isChildDone) {
-            if (t.status !== 'Completed' || !t.repaired) {
+            if (t.status !== 'Completed' || !t.repaired || t.verified) {
               t.status = 'Completed';
               t.repaired = true;
+              t.verified = false;
               t.updated = 'Just now';
               changed = true;
             }
           } else {
-            // Child repair is still active/in progress
-            if (t.status !== 'Under Repair' && !t.repaired) {
+            // Child repair is still active/in progress: strictly reset task status
+            if (t.status !== 'Under Repair' || t.repaired || t.verified) {
               t.status = 'Under Repair';
+              t.repaired = false;
+              t.verified = false;
               t.updated = 'Just now';
               changed = true;
             }
@@ -623,12 +735,20 @@
       // 4. Recalculate parent report's overall status based on the aggregate status of all tasks
       if (Array.isArray(report.tasks) && report.tasks.length > 0) {
         const hasNeedsRepairTask = report.tasks.some(t => t.status === 'Needs Repair' && !t.repaired);
-        const hasUnderRepairTask = report.tasks.some(t => t.status === 'Under Repair' && !t.repaired);
-        const allTasksDone = report.tasks.every(t => t.status === 'Completed' || t.repaired);
+        const hasUnderRepairTask = report.tasks.some(t => {
+          if (t.status === 'Under Repair' && !t.repaired) return true;
+          const cr = getRepairReportForTask(report, t, reports);
+          return Boolean(cr && !isRepairReportDone(cr));
+        });
+        const allTasksDone = report.tasks.every(t => {
+          const cr = getRepairReportForTask(report, t, reports);
+          if (cr && !isRepairReportDone(cr)) return false;
+          return t.status === 'Completed' || t.repaired;
+        });
         const allTasksVerified = allTasksDone && report.tasks.every(t => t.verified);
 
         if (hasNeedsRepairTask) {
-          if (report.status !== 'Needs Repair') {
+          if (report.status !== 'Needs Repair' || report.verified) {
             report.status = 'Needs Repair';
             report.verified = false;
             changed = true;
@@ -638,7 +758,7 @@
             report.issue.status = 'Needs Repair';
           }
         } else if (hasUnderRepairTask) {
-          if (report.status !== 'Under Repair') {
+          if (report.status !== 'Under Repair' || report.verified) {
             report.status = 'Under Repair';
             report.verified = false;
             changed = true;
@@ -648,8 +768,8 @@
             report.issue.status = 'Under Repair';
           }
         } else if (allTasksVerified) {
-          if (report.status !== 'Verified' || !report.verified) {
-            report.status = 'Verified';
+          if (report.status !== 'Completed' || !report.verified) {
+            report.status = 'Completed';
             report.verified = true;
             changed = true;
           }
@@ -659,7 +779,7 @@
           }
         } else if (allTasksDone) {
           if (report.status !== 'For Verification' && report.status !== 'Completed' && report.status !== 'Closed') {
-            report.status = 'For Verification';
+            report.status = isReportSubmittedForVerification(report) ? 'For Verification' : 'In Progress';
             changed = true;
           }
           if (report.issue) {
@@ -683,7 +803,8 @@
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const list = deduplicateReports(parsed.map(normalizeReport).filter(Boolean));
+          const filtered = parsed.map(normalizeReport).filter(r => r && !isMockOrTestReport(r));
+          const list = deduplicateReports(filtered);
           return syncReportsWithLinkedRepairs(list);
         }
       }
@@ -691,98 +812,26 @@
       console.warn('Error reading maintenance reports from local storage:', e);
     }
     if (Array.isArray(_reportsCache) && _reportsCache.length > 0) {
-      return _reportsCache;
+      return _reportsCache.filter(r => r && !isMockOrTestReport(r));
     }
     return [];
   }
 
-  function mergeReportsSafely(remoteData, localReports) {
-    const remoteNormalized = Array.isArray(remoteData) ? remoteData.map(normalizeReport).filter(Boolean) : [];
-    const remoteMap = new Map();
-    remoteNormalized.forEach(r => {
-      if (r && r.id) remoteMap.set(String(r.id).toUpperCase().trim(), r);
-    });
-
-    const merged = [...remoteNormalized];
-    // Preserve local reports that remote queries haven't returned yet (e.g. newly dispatched tasks)
-    if (Array.isArray(localReports)) {
-      localReports.forEach(lr => {
-        if (!lr || !lr.id) return;
-        const key = String(lr.id).toUpperCase().trim();
-        if (!remoteMap.has(key)) {
-          // Local report not in remote data yet: preserve it at the top so it is never clobbered
-          merged.unshift(lr);
-        } else {
-          // If remote exists, preserve any richer local in-progress task state or defect links
-          const remoteItem = remoteMap.get(key);
-          if (lr.issue && !remoteItem.issue) remoteItem.issue = lr.issue;
-          if (lr.parentReportId && !remoteItem.parentReportId) remoteItem.parentReportId = lr.parentReportId;
-          if (lr.parent_report_id && !remoteItem.parent_report_id) remoteItem.parent_report_id = lr.parent_report_id;
-          if (lr.linkedRepairId && !remoteItem.linkedRepairId) remoteItem.linkedRepairId = lr.linkedRepairId;
-          if (lr.linked_repair_id && !remoteItem.linked_repair_id) remoteItem.linked_repair_id = lr.linked_repair_id;
-          if (lr.photo_url && !remoteItem.photo_url) remoteItem.photo_url = lr.photo_url;
-          if (Array.isArray(lr.photos) && lr.photos.length > (Array.isArray(remoteItem.photos) ? remoteItem.photos.length : 0)) {
-            remoteItem.photos = lr.photos;
-            remoteItem.photoUris = lr.photos;
-          }
-          if (lr.issue && Array.isArray(lr.issue.photos) && lr.issue.photos.length > (Array.isArray(remoteItem.issue?.photos) ? remoteItem.issue.photos.length : 0)) {
-            if (!remoteItem.issue) remoteItem.issue = {};
-            remoteItem.issue.photos = lr.issue.photos;
-            remoteItem.issue.photoUris = lr.issue.photos;
-          }
-          if (Array.isArray(lr.linkedRepairIds) && lr.linkedRepairIds.length > 0) {
-            if (!Array.isArray(remoteItem.linkedRepairIds)) remoteItem.linkedRepairIds = [];
-            lr.linkedRepairIds.forEach(id => {
-              if (!remoteItem.linkedRepairIds.includes(id)) remoteItem.linkedRepairIds.push(id);
-            });
-          }
-          if (lr.status === 'Under Repair' && remoteItem.status === 'Needs Repair') {
-            remoteItem.status = 'Under Repair';
-          }
-          if (Array.isArray(lr.timeline) && lr.timeline.length > 0) {
-            if (!Array.isArray(remoteItem.timeline) || remoteItem.timeline.length === 0) {
-              remoteItem.timeline = lr.timeline;
-            } else {
-              lr.timeline.forEach(tl => {
-                if (tl && tl.title && !remoteItem.timeline.some(rtl => rtl && rtl.title === tl.title)) {
-                  remoteItem.timeline.unshift(tl);
-                }
-              });
-            }
-          }
-          if (Array.isArray(lr.tasks) && Array.isArray(remoteItem.tasks)) {
-            lr.tasks.forEach(lt => {
-              const rt = remoteItem.tasks.find(t => String(t.id) === String(lt.id));
-              if (rt && lt.linkedRepairId && !rt.linkedRepairId) {
-                rt.linkedRepairId = lt.linkedRepairId;
-                if (lt.status === 'Under Repair' && rt.status === 'Needs Repair') {
-                  rt.status = 'Under Repair';
-                }
-              }
-            });
-          }
-        }
-      });
+  function mergeReportsSafely(remoteData, localReports, readRevision = reportWriteRevision) {
+    // Successful full reads are authoritative, including deletions and empty lists.
+    // Retain only writes confirmed after this read started, to avoid a read/save race.
+    const merged = Array.isArray(remoteData) ? remoteData.map(normalizeReport).filter(Boolean) : [];
+    for (const [id, write] of confirmedReportWrites) {
+      if (write.revision <= readRevision) continue;
+      const record = normalizeReport(write.record);
+      const index = merged.findIndex(item => item.id === id);
+      if (index >= 0) merged[index] = record; else merged.push(record);
     }
-
-    const parseReportTime = (r) => {
-      if (!r) return 0;
-      if (r.created && !isNaN(new Date(r.created).getTime())) return new Date(r.created).getTime();
-      if (r.createdDate && !isNaN(new Date(r.createdDate).getTime())) return new Date(r.createdDate).getTime();
-      if (r.created_date && !isNaN(new Date(r.created_date).getTime())) return new Date(r.created_date).getTime();
-      return 0;
-    };
-
-    // Sort by created descending so newest reports are always at the top
     merged.sort((a, b) => {
-      const timeA = parseReportTime(a);
-      const timeB = parseReportTime(b);
-      if (timeA !== timeB) {
-        return timeB - timeA;
-      }
-      return String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true });
+      const timeA = Date.parse(a.created || a.created_date || a.createdDate) || 0;
+      const timeB = Date.parse(b.created || b.created_date || b.createdDate) || 0;
+      return timeB - timeA || String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true });
     });
-
     return syncReportsWithLinkedRepairs(deduplicateReports(merged));
   }
 
@@ -869,17 +918,84 @@
   }
 
   function getReports() {
-    if (_reportsCache && _reportsCache.length > 0) {
-      return deduplicateReports(_reportsCache);
-    }
-    _reportsCache = getReportsLocal();
-    return _reportsCache;
+    if (!_reportsCache || !_reportsCache.length) _reportsCache = getReportsLocal();
+    // Edit detached records so failed writes cannot mutate the authoritative cache.
+    return deduplicateReports(JSON.parse(JSON.stringify(_reportsCache)));
   }
 
-  async function fetchReportsFromSupabase(isSilent = false) {
+  let reportsFetchPromise = null;
+  let reportsFetchPending = false;
+  let reportsAuthoritativePending = false;
+  let reportRowsRead = null;
+  let reportReadClient = null;
+  let reportAuthVersion = 0;
+  function ensureReportReadSession(sb) {
+    if (reportReadClient === sb) return;
+    reportReadClient = sb;
+    reportAuthVersion += 1;
+    reportRowsRead = null;
+    clearMaintenanceInventory();
+    confirmedReportWrites.clear();
+    sb.auth?.onAuthStateChange?.(() => {
+      if (reportReadClient !== sb) return;
+      reportAuthVersion += 1;
+      reportRowsRead = null;
+      clearMaintenanceInventory();
+      confirmedReportWrites.clear();
+      if (reportsFetchPromise) reportsFetchPending = true;
+    });
+  }
+  function readMaintenanceRows(sb) {
+    ensureReportReadSession(sb);
+    if (reportRowsRead?.client === sb) return reportRowsRead.promise;
+    const request = { client: sb, promise: null };
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    let timeout;
+    request.promise = Promise.resolve(window.ecotrackAuthReady).then(async () => {
+      if (typeof sb.auth?.getSession === 'function') {
+        const { data, error } = await sb.auth.getSession();
+        if (error) throw error;
+        if (!data?.session) throw new Error('Sign in to refresh maintenance reports.');
+      }
+      let query = sb.from('maintenance_reports').select('*').order('created', { ascending: false });
+      if (controller && typeof query.abortSignal === 'function') query = query.abortSignal(controller.signal);
+      return Promise.race([
+        Promise.resolve(query),
+        new Promise((_, reject) => { timeout = setTimeout(() => {
+          controller?.abort();
+          reject(new Error('Supabase fetch timed out (2.5s)'));
+        }, 2500); })
+      ]);
+    }).finally(() => {
+      clearTimeout(timeout);
+      if (reportRowsRead === request) reportRowsRead = null;
+    });
+    reportRowsRead = request;
+    return request.promise;
+  }
+  function fetchReportsFromSupabase(isSilent = false, authoritative = false) {
+    reportsFetchPending = true;
+    reportsAuthoritativePending ||= authoritative;
+    if (reportsFetchPromise) return reportsFetchPromise;
+    reportsFetchPromise = Promise.resolve().then(async () => {
+      try {
+        let silent = isSilent;
+        while (reportsFetchPending) {
+          reportsFetchPending = false;
+          const replace = reportsAuthoritativePending;
+          reportsAuthoritativePending = false;
+          await performReportsFetch(silent, replace);
+          silent = true;
+        }
+        return _reportsCache;
+      } finally { reportsFetchPromise = null; }
+    });
+    return reportsFetchPromise;
+  }
+  async function performReportsFetch(isSilent = false, authoritative = false) {
     const sb = getSb();
     const tbody = document.getElementById('pageReportTableBody');
-    const hasLocalData = Array.isArray(_reportsCache) && _reportsCache.length > 0;
+    const hasLocalData = window.EcoDataBus?.getCached('maintenance:reports') != null || Array.isArray(_reportsCache) && _reportsCache.length > 0;
 
     // Only render skeletons if we truly have NO local cached reports to display
     if (!isSilent && !hasLocalData && tbody) {
@@ -888,24 +1004,26 @@
         cols: 10,
         colWidths: ['w-24', 'w-28', 'w-28', 'w-24', 'w-20', 'w-32', 'w-24', 'w-20', 'w-24', 'w-20']
       });
-      window.EcoTrackSkeletons?.renderStatsSkeleton('pageMaintStats', { count: 8 });
+      window.EcoTrackSkeletons?.renderStatsSkeleton('pageMaintStats', { count: 7 });
     }
 
     if (sb) {
       try {
-        const fetchPromise = sb.from('maintenance_reports').select('*').order('created', { ascending: false });
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Supabase fetch timed out (2.5s)')), 2500)
-        );
-
-        const { data, error } = await Promise.race([fetchPromise, timeoutPromise]);
+        ensureReportReadSession(sb);
+        const authVersion = reportAuthVersion;
+        const readRevision = reportWriteRevision;
+        const { data, error } = await readMaintenanceRows(sb);
+        if (authVersion !== reportAuthVersion) return _reportsCache;
         if (!error && Array.isArray(data)) {
-          const localExisting = (_reportsCache && _reportsCache.length > 0) ? _reportsCache : getReportsLocal();
-          _reportsCache = mergeReportsSafely(data, localExisting);
+          data.forEach(record => reportVersions.set(record.id, record.updated));
+          const localExisting = authoritative ? [] : ((_reportsCache && _reportsCache.length > 0) ? _reportsCache : getReportsLocal());
+          _reportsCache = mergeReportsSafely(data, localExisting, readRevision);
+          window.EcoDataBus?.mutate('maintenance:reports', true);
           try {
             localStorage.setItem('ecoTrack_maintenance_reports', JSON.stringify(_reportsCache));
           } catch (e) { }
           window.dispatchEvent(new Event('storage'));
+
         }
       } catch (err) {
         console.warn('[Supabase maintenance load]:', err.message);
@@ -962,7 +1080,47 @@
     }) || null;
   }
 
-  async function saveReports(reports, targetReport = null, isNewReport = false) {
+  async function resolveMaintenanceReference(table, candidateId, candidateName, label) {
+    const sb = getSb();
+    const id = String(candidateId || '').trim(), name = String(candidateName || '').trim();
+    if (!id && !name) return null;
+    let rows, error;
+    if (id) {
+      const result = await sb.from(table).select('id').eq('id', id).maybeSingle();
+      error = result.error;
+      rows = result.data ? [result.data] : [];
+    } else {
+      const result = await sb.from(table).select('id').eq('name', name).limit(2);
+      error = result.error;
+      rows = result.data || [];
+    }
+    if (error) throw error;
+    if (rows.length !== 1) {
+      const failure = new Error(`Selected ${label} no longer exists or is ambiguous. Refresh and choose an existing ${label}.`);
+      failure.code = 'INVALID_REFERENCE';
+      throw failure;
+    }
+    return rows[0].id;
+  }
+
+  function resolveValidNodeId(candidateId, candidateName) {
+    return resolveMaintenanceReference('nodes', candidateId, candidateName, 'controller');
+  }
+
+  function resolveValidRoomId(candidateId, candidateName) {
+    return resolveMaintenanceReference('rooms', candidateId, candidateName, 'room');
+  }
+
+  function resolveValidStaffId(candidateId, candidateName) {
+    const id = String(candidateId || '').trim();
+    if (/^(?:staff_|stf_|usr_)?[a-zA-Z0-9_-]{6,64}$/.test(id)) return id;
+    const staff = getStaffList().filter(person => person && person.name === candidateName);
+    return staff.length === 1 && /^(?:staff_|stf_|usr_)?[a-zA-Z0-9_-]{6,64}$/.test(String(staff[0].id)) ? staff[0].id : null;
+  }
+
+  const pendingReportOperations = new Map();
+
+  async function saveReports(reports, targetReport = null, isNewReport = false, updateProgress = false) {
     // Defense-in-depth: Halt if creating a duplicate for a unit that already has an unverified report
     const isSpecialTaskType = targetReport && (
       targetReport.type === 'Corrective Repair' ||
@@ -972,40 +1130,52 @@
     );
     if (isNewReport && targetReport && !isSpecialTaskType) {
       const activeDup = findActiveUnverifiedReportForAircon(targetReport.airconId || targetReport.aircon_name, targetReport.aircon_id, targetReport.id);
-      if (activeDup) {
+      if (activeDup && activeDup.id !== targetReport.id) {
         console.warn('[saveReports] Blocked duplicate report for aircon with active unverified report:', activeDup.id);
         throw new Error(`Aircon unit already has an ongoing unverified report (${activeDup.id}) with status "${activeDup.status}". Duplicate reporting is halted.`);
       }
     }
 
-    _reportsCache = syncReportsWithLinkedRepairs(deduplicateReports(reports.map(normalizeReport).filter(Boolean)));
-    try {
-      localStorage.setItem('ecoTrack_maintenance_reports', JSON.stringify(_reportsCache));
-      window.dispatchEvent(new Event('storage'));
-      refreshPageReportsView();
-      window.dispatchEvent(new CustomEvent('ecotrack:reports-updated', { detail: _reportsCache }));
-      broadcastMaintenanceChange('SAVED_REPORTS');
-    } catch (e) {
-      console.error('Error saving maintenance reports locally:', e);
-    }
+    if (!targetReport) return;
+    if (!targetReport.id) throw new Error('A report ID is required to save.');
 
     const sb = getSb();
     if (sb && targetReport) {
       try {
+        await window.ecotrackAuthReady;
+        const validNodeId = await resolveValidNodeId(
+          targetReport.aircon_id || targetReport.nodeId || targetReport.node_id,
+          targetReport.aircon_name || targetReport.airconId
+        );
+        const safeNodeId = validNodeId;
+
+        const validRoomId = await resolveValidRoomId(
+          targetReport.room_id || targetReport.roomId,
+          targetReport.room_name || targetReport.room
+        );
+        const safeRoomId = validRoomId;
+
+        const validStaffId = resolveValidStaffId(
+          targetReport.staff_id || targetReport.staffId,
+          targetReport.staff_name || targetReport.staffName
+        );
+        const safeStaffId = validStaffId;
+
         const payload = {
           id: targetReport.id,
-          aircon_id: targetReport.aircon_id || targetReport.airconId || null,
-          aircon_name: targetReport.aircon_name || targetReport.airconId || targetReport.aircon_id || 'AC-Unassigned',
-          aircon_type: targetReport.aircon_type || targetReport.airconType || 'Split Type (Inverter)',
-          room_id: targetReport.room_id || null,
-          room_name: targetReport.room_name || targetReport.room || 'Main Campus',
+          aircon_id: safeNodeId,
+          aircon_name: targetReport.aircon_name || targetReport.airconId || (safeNodeId ? 'AC Unit' : 'AC-Unassigned'),
+          aircon_type: targetReport.aircon_type || targetReport.airconType || null,
+          room_id: safeRoomId,
+          room_name: targetReport.room_name || targetReport.room || 'Unassigned',
           type: targetReport.type,
           priority: targetReport.priority,
-          staff_id: targetReport.staff_id || null,
+          staff_id: safeStaffId,
           staff_name: targetReport.staff_name || targetReport.staffName || 'Unassigned',
           due_date: targetReport.due_date || targetReport.dueDate || '',
           created_date: targetReport.created_date || targetReport.createdDate || '',
           status: targetReport.status,
+          update_progress: updateProgress,
           description: targetReport.description || '',
           tasks: targetReport.tasks,
           issue: targetReport.issue,
@@ -1018,106 +1188,298 @@
           created: targetReport.created || new Date().toISOString(),
           updated: new Date().toISOString()
         };
-        const { error: upsertErr } = await sb.from('maintenance_reports').upsert(payload, { onConflict: 'id' });
-        if (upsertErr) {
-          console.warn('[Supabase saveReports upsert error]:', upsertErr.message);
-        } else {
-          refreshPageReportsView();
+        const parent = reports.find(item => item.id === payload.parent_report_id);
+        const loadedVersion = targetReport.id === editingReportId ? editingReportVersion :
+          targetReport.id === activeEditRepairId ? activeEditRepairReport?.updated : targetReport.updated || targetReport.updated_at || targetReport.updatedAt;
+        const expectedUpdated = isNewReport ? null : loadedVersion || reportVersions.get(targetReport.id) || null;
+        const parentExpected = parent?.updated || parent?.updated_at || reportVersions.get(payload.parent_report_id) || null;
+        // The server owns updated timestamps; retain the version this edit loaded.
+        delete payload.updated;
+        const signature = JSON.stringify([payload, expectedUpdated, parentExpected, isNewReport]);
+        let operation = pendingReportOperations.get(targetReport.id);
+        if (!operation || operation.signature !== signature) {
+          operation = { signature, id: 'desktop-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) };
+          pendingReportOperations.set(targetReport.id, operation);
         }
-
-        // Trigger Mobile Notification ONLY if:
-        // 1) This is a brand new report (isNewReport = true) -> type: 'task_assigned'
-        // 2) Report status is set/transitioned to 'Needs Repair' -> type: 'urgent_repair'
-        // 3) Rework order is dispatched -> type: 'rework_assigned'
-        const isNeedsRepair = targetReport.status === 'Needs Repair';
-        const isReworkOrder = targetReport.status === 'Need Rework' || targetReport.type === 'Maintenance Rework' || targetReport.type === 'Rework';
-        if (isNewReport || isNeedsRepair || isReworkOrder) {
+        await window.ecotrackAuthReady;
+        let result = null;
+        if (window.electron?.invoke) {
           try {
-            const notifType = isNeedsRepair ? 'urgent_repair' : (isReworkOrder ? 'rework_assigned' : 'task_assigned');
-            // Deterministic ID tied directly to the unique report ID prevents duplicate rows
-            const notifId = isNeedsRepair ? `mob_repair_${targetReport.id}` : (isReworkOrder ? `mob_rework_${targetReport.id}` : `mob_task_${targetReport.id}`);
-            const staffTarget = targetReport.staffName || targetReport.staff_name || 'All Staff';
-            const taskDesc = targetReport.description || targetReport.type || 'Preventive Maintenance Inspection';
-            const locationDesc = targetReport.room || targetReport.room_name || 'Assigned Area';
-            const airconDesc = targetReport.airconId || targetReport.aircon_name || 'AC Unit';
-            const dueDesc = targetReport.dueDate || targetReport.due_date || 'Scheduled';
-
-            // Check if notification already exists in Supabase (e.g. created by DB trigger)
-            const { data: existingNotifs } = await sb.from('mobile_notifications')
-              .select('id')
-              .eq('related_report_id', targetReport.id)
-              .eq('type', notifType);
-
-            if (existingNotifs && existingNotifs.length > 0) {
-              console.log(`[Mobile Notif] Notification already exists for report ${targetReport.id} (${notifType}). Skipping duplicate.`);
-            } else {
-              const notifPayload = {
-                id: notifId,
-                staff_name: staffTarget,
-                title: isNeedsRepair ? 'URGENT: Defect / Repair Needed' : (isReworkOrder ? 'ACTION REQUIRED: Maintenance Rework Dispatched' : 'New Maintenance Task Assigned'),
-                message: isNeedsRepair
-                  ? `AC Unit ${airconDesc} at ${locationDesc} requires urgent repair: ${taskDesc}`
-                  : (isReworkOrder ? `Rework dispatched for ${airconDesc} at ${locationDesc}: ${taskDesc}` : `${taskDesc} assigned at ${locationDesc} (${airconDesc}). Due: ${dueDesc}`),
-                type: notifType,
-                priority: isNeedsRepair || isReworkOrder ? 'critical' : (targetReport.priority === 'High' ? 'high' : 'medium'),
-                category: 'task',
-                related_report_id: targetReport.id,
-                aircon_id: targetReport.aircon_id || targetReport.airconId || null,
-                aircon_name: airconDesc,
-                location: locationDesc,
-                due_date: dueDesc,
-                is_read: false,
-                created_at: new Date().toISOString()
-              };
-
-              // Use upsert on deterministic ID so even race conditions cannot insert duplicates
-              await sb.from('mobile_notifications').upsert(notifPayload, { onConflict: 'id' });
-              console.log(`[Mobile Notif Trigger] Dispatched unique mobile notification ${notifId} to ${staffTarget} for report ${targetReport.id}`);
-            }
-          } catch (notifErr) {
-            console.warn('[saveReports] Could not dispatch mobile notification:', notifErr);
+            result = await window.electron.invoke('maintenance-save-report', { record: payload, expectedUpdated, parentExpected, operationId: operation.id, isNew: isNewReport });
+          } catch (ipcErr) {
+            console.warn('[saveReports] Electron IPC save notice:', ipcErr?.message);
           }
         }
-      } catch (err) {
-        console.warn('[Supabase save maintenance report]:', err.message);
+        if (!result) {
+          try {
+            const response = await sb.rpc('ecotrack_admin_save_report', { p_record: payload, p_expected_updated: expectedUpdated, p_parent_expected: parentExpected, p_operation_id: operation.id, p_create: isNewReport });
+            result = { success: !response.error, data: response.data, error: response.error?.message, code: response.error?.code };
+          } catch (rpcErr) {
+            console.warn('[saveReports] Direct RPC invoke notice:', rpcErr?.message);
+          }
+        }
+
+        // Concurrency Conflict Check
+        if (result && result.code === '40001') {
+          const error = new Error('This report changed. Refresh the report before saving again.');
+          error.code = '40001';
+          throw error;
+        }
+
+        if (!result?.success || result?.data?.report?.id !== payload.id) {
+          const failure = new Error(result?.error || 'Database did not confirm the report save. Refresh and retry; the previous state has been preserved.');
+          failure.code = result?.code;
+          throw failure;
+        }
+
+        pendingReportOperations.delete(targetReport.id);
+        reportWriteRevision += 1;
+        for (const record of [result.data.report, result.data.parent].filter(Boolean)) {
+          reportVersions.set(record.id, record.updated);
+          confirmedReportWrites.set(record.id, { revision: reportWriteRevision, record: JSON.parse(JSON.stringify(record)) });
+          const normalized = normalizeReport(record);
+          // Update existing references as well as the cache so linked repair saves use the new parent version.
+          for (const item of reports) if (item.id === record.id) Object.assign(item, normalized);
+          if (targetReport.id === record.id) Object.assign(targetReport, normalized);
+          const index = _reportsCache.findIndex(item => item.id === record.id);
+          if (index >= 0) _reportsCache[index] = normalized; else _reportsCache.push(normalized);
+        }
+        _reportsCache = syncReportsWithLinkedRepairs(deduplicateReports(_reportsCache));
+        localStorage.setItem('ecoTrack_maintenance_reports', JSON.stringify(_reportsCache));
+        window.dispatchEvent(new Event('storage'));
+        window.dispatchEvent(new CustomEvent('ecotrack:reports-updated', { detail: _reportsCache }));
+        broadcastMaintenanceChange('SAVED_REPORTS');
+        refreshPageReportsView();
+        // The transactional RPC/notification trigger dispatches once after a successful save.
+      } catch (error) {
+        if (error.code === '40001') await fetchReportsFromSupabase(false, true);
+        if (typeof showToast === 'function') showToast('Report not saved', error.message, 'warning');
+        throw error;
       }
+    } else if (targetReport) {
+      const error = new Error('Database connection is unavailable. The report was not saved.');
+      if (typeof showToast === 'function') showToast('Report not saved', error.message, 'warning');
+      throw error;
     }
   }
 
   let _nodesAirconCache = [];
+  let _maintenanceInventoryReady = false;
+  let _staffRoomHierarchy = null;
+  function updateStaffLocationHierarchy(rooms, floors, buildings) {
+    const floorMap = new Map(floors.map(item => [String(item.id), item]));
+    const buildingMap = new Map(buildings.map(item => [String(item.id), item]));
+    _staffRoomHierarchy = new Map(rooms.map(room => {
+      const floor = floorMap.get(String(room.floor_id));
+      const building = floor && buildingMap.get(String(floor.building_id));
+      return [String(room.id), { roomId: room.id, roomName: room.name || '',
+        floorId: floor?.id || '', floorName: floor?.name || '',
+        buildingId: building?.id || '', buildingName: building?.name || '',
+        assignment: [building?.name, floor?.name, room.name].filter(Boolean).join(' • ') }];
+    }));
+    window.dispatchEvent(new CustomEvent('ecotrack:locations-updated'));
+  }
+  function resolveStaffHierarchy(staff) {
+    const roomId = String(staff?.room_id || staff?.roomId || '').trim();
+    if (!_staffRoomHierarchy || !roomId || ['all','all_rooms'].includes(roomId.toLowerCase())) return null;
+    return _staffRoomHierarchy.get(roomId) || { roomId, roomName: 'Unassigned',
+      floorId: '', floorName: '', buildingId: '', buildingName: '', assignment: 'Unassigned' };
+  }
+  function clearMaintenanceInventory() {
+    _nodesAirconCache = [];
+    _maintenanceInventoryReady = false;
+    localStorage.removeItem('ecoTrack_aircons_cache');
+  }
+  window.addEventListener?.('devices:synced', clearMaintenanceInventory);
 
   function formatBatteryDisplay(rawVal, isOnline = true) {
-    if (rawVal === undefined || rawVal === null || rawVal === '') {
-      return {
-        val: isOnline ? '100%' : 'Offline',
-        status: isOnline ? 'Connected' : 'Offline',
-        code: isOnline ? 'healthy' : 'offline'
-      };
-    }
-    const num = parseFloat(String(rawVal).replace(/[^\d.-]/g, ''));
-    if (isNaN(num)) {
-      return {
-        val: String(rawVal),
-        status: isOnline ? 'Connected' : 'Offline',
-        code: isOnline ? 'healthy' : 'offline'
-      };
-    }
-    // If voltage (e.g. 4.18V or <= 5.0V), calculate percentage using standard 4.2V nominal max
-    const pct = num <= 5.0
-      ? Math.min(100, Math.max(0, Math.round((num / 4.2) * 100)))
-      : Math.min(100, Math.max(0, Math.round(num)));
-    const isWarning = pct < 25 || num < 3.3;
+    const unknown = { val: 'Unavailable', status: isOnline ? 'Unavailable' : 'Offline',
+      code: isOnline ? 'unknown' : 'offline' };
+    if (!['number', 'string'].includes(typeof rawVal)) return unknown;
+    const match = String(rawVal).trim().match(/^(-?(?:\d+(?:\.\d+)?|\.\d+))\s*(%|v)?$/i);
+    if (!match) return unknown;
+    const num = Number(match[1]);
+    const voltage = String(match[2] || '').toLowerCase() === 'v';
+    if (!Number.isFinite(num) || num < 0 || (!voltage && num > 100)) return unknown;
+    // nodes.battery is a reported percentage, including 0..5%. Explicit legacy
+    // voltage strings retain their unit; do not invent a charge percentage.
+    const val = voltage ? `${num} V` : `${Math.round(num)}%`;
+    const isWarning = voltage ? num < 3.3 : num < 25;
     return {
-      val: `${pct}%`,
-      status: isOnline ? `${pct}%` : 'Offline',
+      val,
+      status: isOnline ? val : 'Offline',
       code: !isOnline ? 'offline' : (isWarning ? 'warning' : 'healthy')
     };
   }
 
-  function getAirconsDatabase() {
-    if (_nodesAirconCache && _nodesAirconCache.length > 0) {
-      return _nodesAirconCache;
+  function maintenanceControllerDiagnostics(measurements = {}, deviceState = null, now = Date.now()) {
+    const seen = Date.parse(deviceState?.last_seen || '');
+    const wake = Date.parse(deviceState?.sleeping_until || '');
+    const validSeen = Number.isFinite(seen) && seen <= now + 5000;
+    const sleeping = validSeen && Number.isFinite(wake) && wake > now && wake > seen;
+    const online = validSeen && !sleeping && now - seen <= 45000;
+    const state = sleeping ? 'Sleeping' : online ? 'Online' : 'Offline';
+    function reading(raw, unit) {
+      const number = ['number', 'string'].includes(typeof raw) && String(raw).trim() !== '' ? Number(raw) : NaN;
+      const available = Number.isFinite(number);
+      return { status: online ? (available ? 'Connected' : 'Unavailable') : state,
+        val: available ? `${number}${unit}` : 'Unavailable',
+        code: online ? (available ? 'healthy' : 'unknown') : 'offline' };
     }
+    const airflow = window.EcoTrackAirflowPressure?.airflowRpmText(measurements.rotation_rpm, measurements.rotation_quality) || 'Unavailable';
+    const airflowAvailable = airflow.endsWith(' RPM');
+    return { state, controls: {
+      temp: { name: 'Temperature', ...reading(measurements.temp, '°C') },
+      rotation_rpm: { name: 'Airflow Indicator (RPM)', status: online ? (airflowAvailable ? 'Connected' : 'Unavailable') : state, val: airflow, code: online && airflowAvailable ? 'healthy' : 'unknown' },
+      battery: { name: 'Battery', ...formatBatteryDisplay(measurements.battery, online) },
+      signal: { name: 'Signal', ...reading(measurements.rssi, ' dBm') }
+    } };
+  }
+  function currentMaintenanceControllers(rows) {
+    return rows.filter(row=>window.EcoTrackMode?.mode==='monitoring' ? ['monitoring','both'].includes(row.deviceMode) : window.EcoTrackMode?.mode==='controller' ? row.deviceMode!=='monitoring' : true).map(row => ({ ...row,
+      ...maintenanceControllerDiagnostics(row.measurements || {}, row.deviceState || null) }));
+  }
+
+  function maintenanceDisplayText(value) {
+    return String(value ?? '').replace(/[&<>"']/g, ch => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[ch]));
+  }
+
+  function maintenanceDeviceLabel() {
+    return window.EcoTrackMode?.mode==='monitoring' ? 'AC Sensor Device' : window.EcoTrackMode?.mode==='both' ? 'AC Device' : 'AC Controller';
+  }
+  function maintenanceControllerName(ac) {
+    if (ac.id === 'None') return window.EcoTrackMode?.mode==='monitoring' ? 'No sensor device assigned' : window.EcoTrackMode?.mode==='both' ? 'No AC device assigned' : 'No controller assigned';
+    const service = window.EcoTrackAirconSystem?.NodeService;
+    const controller = ac.nodeId ? service?.getNode?.(ac.nodeId) : null;
+    return [controller?.name, ac.nodeName].map(value => String(value || '').trim()).find(value => value &&
+      value !== String(ac.nodeId || '') && !/^(?:AC-)?esp32s3-[a-f0-9]{12}$/i.test(value)) ||
+      (ac.nodeId ? window.EcoTrackMode?.mode && window.EcoTrackMode.mode!=='controller' ? 'Unnamed '+maintenanceDeviceLabel().toLowerCase() : 'Unnamed controller' : window.EcoTrackMode?.mode && window.EcoTrackMode.mode!=='controller' ? maintenanceDeviceLabel()+' unavailable' : 'Controller unavailable');
+  }
+
+  function maintenanceAirconType(...values) {
+    const value = values.map(item => String(item || '').trim()).find(Boolean);
+    if (!value) return 'Type unavailable';
+    // Older report snapshots joined a protocol/manufacturer label to the physical type.
+    return value.replace(/^.+?\s+[-–—]\s+(?=(?:split|window|cassette|ducted?|portable|floor|ceiling|central|wall|tower|multi[- ]split)\b)/i, '');
+  }
+
+  function findMaintenanceAircon(report, aircons = getAirconsDatabase()) {
+    const unique = rows => {
+      const matches = new Map(rows.map(ac => [ac.airconId || ac.nodeId || ac.id,ac]));
+      return matches.size === 1 ? [...matches.values()][0] : null;
+    };
+    // Legacy maintenance aircon_id references nodes, while newer clients may provide an AC ID.
+    const references = [report.aircon_id,report.node_id,report.nodeId,report.controller_node_id]
+      .map(value => String(value || '').trim()).filter(Boolean);
+    const exact = aircons.filter(ac => [ac.airconId,ac.nodeId,ac.id].some(value => value && references.includes(String(value))));
+    if (exact.length) return unique(exact);
+    const profiles = (window.EcoTrackAirconSystem?.AirconProfileManager?.getAll?.() || [])
+      .filter(ac => [ac.aircon_id,ac.controller_node_id,ac.node_id,ac.device_id].some(value => value && references.includes(String(value))));
+    const profileMap = new Map(profiles.map(ac => [ac.aircon_id || ac.device_id,ac]));
+    if (profileMap.size === 1) {
+      const profile = [...profileMap.values()][0];
+      const linked = aircons.filter(ac => (ac.airconId && ac.airconId === profile.aircon_id) || (ac.id && ac.id === profile.device_id) ||
+        (ac.nodeId && [profile.controller_node_id,profile.node_id].includes(ac.nodeId)));
+      if (linked.length) return unique(linked);
+      return {id:profile.device_id,airconId:profile.aircon_id,airconName:profile.name,
+        nodeId:profile.controller_node_id || profile.node_id,airconType:profile.aircon_type || profile.model,
+        room:profile.room_name,building:profile.building || profile.building_name,floor:profile.floor || profile.floor_name};
+    }
+    // Never redirect a missing stable reference to another unit that happens to share its old name.
+    if (references.length) return null;
+    const aliases = [report.airconId,report.aircon_name].map(value => String(value || '').trim()).filter(Boolean);
+    return unique(aircons.filter(ac => [ac.id,ac.assetTag,ac.airconName,ac.model].some(value => value && aliases.includes(String(value)))));
+  }
+
+  function maintenanceReportEquipment(report, aircon = findMaintenanceAircon(report)) {
+    const profiles = window.EcoTrackAirconSystem?.AirconProfileManager?.getAll?.() || [];
+    const profileMatches = aircon ? profiles.filter(ac => (aircon.airconId && ac.aircon_id === aircon.airconId) || (aircon.id && ac.device_id === aircon.id)) : [];
+    const profile = profileMatches.length === 1 ? profileMatches[0] : null;
+    const controllerName = aircon ? maintenanceControllerName(aircon) : (window.EcoTrackMode?.mode && window.EcoTrackMode.mode!=='controller' ? maintenanceDeviceLabel()+' unavailable' : 'Controller unavailable');
+    const rawName = String(profile?.name || aircon?.airconName || report.aircon_name || '').trim();
+    const airconName = rawName && !/^(?:AC-)?esp32s3-[a-f0-9]{12}$/i.test(rawName) &&
+      !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(rawName) &&
+      ![report.aircon_id,profile?.controller_node_id,profile?.node_id].some(id => id && String(id) === rawName) ? rawName : 'Aircon name unavailable';
+    return {controllerName,airconName,
+      airconType:maintenanceAirconType(profile?.aircon_type, profile?.model, aircon?.airconType, report.aircon_type, report.airconType),
+      location:[aircon?.building || report.building_name,aircon?.floor || report.floor_name,aircon?.room || report.room_name || report.room].filter(Boolean).join(' • ') || 'Location unavailable',
+      protocol:profile?.protocol_name || profile?.protocol || aircon?.protocolName || 'Unavailable'};
+  }
+
+  function maintenanceStateClasses(state) {
+    return state === 'Online'
+      ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border-emerald-400/40'
+      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-600';
+  }
+
+  function renderMaintenanceDiagnostics(ac) {
+    return [['temp', 'Temp', 'Temperature'], ...(window.EcoTrackMode?.mode==='monitoring' ? [['rotation_rpm','Airflow RPM','Airflow Indicator (RPM)']] : []), ['signal', 'Wi-Fi', 'Wi-Fi signal'], ['battery', 'Battery', 'Battery']]
+      .map(([key, label, fullLabel]) => {
+        const reading = ac.controls?.[key];
+        const available = reading?.val && !['Unavailable','Reference needed'].includes(reading.val);
+        const last = available && ac.state !== 'Online';
+        const value = available ? `${last ? 'Last ' : ''}${reading.val}` : reading?.val === 'Reference needed' ? 'Reference needed' : 'No data';
+        const description = `${fullLabel}: ${value}; controller ${ac.state || 'Unavailable'}`;
+        const dot = reading?.code === 'healthy' ? 'bg-emerald-500'
+          : reading?.code === 'warning' ? 'bg-amber-500' : 'bg-slate-400';
+        return `<span data-maintenance-diagnostic="${key}" title="${maintenanceDisplayText(description)}" aria-label="${maintenanceDisplayText(description)}"
+          class="inline-flex items-center gap-1.5 max-w-full px-2 py-1 rounded-md bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 text-[11px] text-slate-700 dark:text-slate-200">
+          <span aria-hidden="true" class="w-1.5 h-1.5 rounded-full shrink-0 ${dot}"></span>
+          <span class="font-medium">${label}:</span><span>${maintenanceDisplayText(value)}</span>
+        </span>`;
+      }).join('');
+  }
+
+  function getAirconsDatabase() {
+    // An empty verified registry is a result, not permission to invent devices from AC assets.
+    if (_maintenanceInventoryReady) return currentMaintenanceControllers(_nodesAirconCache);
+    if (_nodesAirconCache && _nodesAirconCache.length > 0) {
+      return currentMaintenanceControllers(_nodesAirconCache);
+    }
+    try {
+      const cached = localStorage.getItem('ecoTrack_aircons_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          _nodesAirconCache = parsed;
+          return currentMaintenanceControllers(_nodesAirconCache);
+        }
+      }
+    } catch (_) {}
+
+    if (window.EcoTrackAirconSystem?.AirconProfileManager?.getAll) {
+      const apmList = window.EcoTrackAirconSystem.AirconProfileManager.getAll();
+      if (Array.isArray(apmList) && apmList.length > 0) {
+        _nodesAirconCache = apmList.flatMap(a => {
+          const service = window.EcoTrackAirconSystem.NodeService;
+          const controller = (a.controller_node_id ? service?.getNode?.(a.controller_node_id) : null) ||
+            (a.node_id ? service?.getNode?.(a.node_id) : null);
+          const nodeId = controller?.db_id || controller?.pb_id || controller?.id;
+          if (!nodeId) return [];
+          const measurements = controller ? { temp: controller.temp, rotation_rpm: controller.rotation_rpm, rotation_quality:controller.rotation_quality, sensor_config:controller.sensor_config,
+            battery: controller.cloud_state?.battery ?? controller.battery,
+            rssi: controller.cloud_state?.rssi ?? controller.rssi } : {};
+          const deviceState = controller?.cloud_state || null;
+          return [{
+          id: a.device_id || a.name || a.id,
+          airconId:a.aircon_id || a.id, airconName:a.name || a.asset_tag || a.device_id || '', airconType:a.aircon_type || a.model || '', protocolName:a.protocol_name || a.protocol || '',
+          assetTag:a.device_id || '', building:a.building || a.building_name || '', floor:a.floor || a.floor_name || '',
+          nodeId,
+          room: a.room_name || a.location || 'Assigned Room',
+          roomId: a.room_id || '',
+          brand: a.model || a.aircon_type || 'Split Type (Inverter)',
+          model: a.name || a.device_id,
+          nodeName: controller?.name || a.node_name || '', deviceMode:controller?.device_mode || 'controller',
+          measurements, deviceState,
+          ...maintenanceControllerDiagnostics(measurements, deviceState)
+        }];
+        });
+        return currentMaintenanceControllers(_nodesAirconCache);
+      }
+    }
+
     if (window.activeNodesData && window.activeNodesData.length > 0) {
       return window.activeNodesData
         .filter(n => (n.room_id || n.room_name || n.room) && (n.room_id !== '' && n.room !== ''))
@@ -1127,37 +1489,56 @@
           room: n.room_name || n.room || 'Assigned Room',
           brand: n.aircon_type || 'Split Type (Inverter)',
           model: n.name || n.id,
-          state: n.status === 'online' ? 'Operational' : 'Offline',
-          sensors: {
-            temp: { name: 'Temperature', status: n.status === 'online' ? 'Connected' : 'Offline', val: (n.temp !== undefined && n.temp !== null) ? `${n.temp}°C` : 'Connected', code: n.status === 'online' ? 'healthy' : 'offline' },
-            pressure: { name: 'Air Pressure', status: n.status === 'online' ? 'Connected' : 'Offline', val: (n.pressure !== undefined && n.pressure !== null) ? `${n.pressure} kPa` : 'Connected', code: n.status === 'online' ? 'healthy' : 'offline' },
-            battery: { name: 'Battery', ...formatBatteryDisplay(n.battery, n.status === 'online') },
-            signal: { name: 'Signal', status: n.status === 'online' ? 'Connected' : 'Offline', val: (n.rssi !== undefined && n.rssi !== null) ? `${n.rssi} dBm` : 'Connected', code: (n.rssi && n.rssi < -90) ? 'warning' : (n.status === 'online' ? 'healthy' : 'offline') }
-          }
+          nodeName: n.name || '',deviceMode:n.device_mode || 'controller',
+          measurements: { temp: n.temp ?? n.temperature, rotation_rpm: n.rotation_rpm, rotation_quality:n.rotation_quality, sensor_config:n.sensor_config, battery: n.battery, rssi: n.rssi },
+          deviceState: null,
+          ...maintenanceControllerDiagnostics({ temp: n.temp ?? n.temperature, rotation_rpm: n.rotation_rpm, rotation_quality:n.rotation_quality, sensor_config:n.sensor_config, battery: n.battery, rssi: n.rssi })
         }))
         .sort((a, b) => String(a.id || '').localeCompare(String(b.id || ''), undefined, { numeric: true, sensitivity: 'base' }));
     }
     return [];
   }
 
+  async function readMaintenanceSensors() {
+    if(window.EcoTrackMode?.mode==='controller')return [];
+    try {
+      const base=new URL(window.ECOTRACK_CONFIG?.backendUrl || window.electron?.env?.BACKEND_URL || 'http://localhost:5000');
+      if(!['localhost','127.0.0.1','[::1]'].includes(base.hostname) || !['http:','https:'].includes(base.protocol))return [];
+      const response=await fetch(base.origin+'/api/monitoring/devices',{signal:AbortSignal.timeout(2000),cache:'no-store'});
+      return response.ok ? (await response.json()).items || [] : [];
+    } catch(_){return [];}
+  }
   async function fetchAirconsFromSupabase() {
     const sb = getSb();
     if (sb) {
       try {
+        ensureReportReadSession(sb);
+        const authVersion = reportAuthVersion;
         const fetchPromise = Promise.all([
           sb.from('nodes').select('*'),
           sb.from('rooms').select('*'),
           sb.from('floors').select('*'),
-          sb.from('buildings').select('*')
+          sb.from('buildings').select('*'),
+          sb.from('aircons').select('*'),
+          sb.from('ecotrack_device_state').select('node_id,last_seen,sleeping_until,rssi'),
+          readMaintenanceSensors()
         ]);
         const timeoutPromise = new Promise((_, reject) =>
           setTimeout(() => reject(new Error('Aircons fetch timed out (2.5s)')), 2500)
         );
-        const [nodesRes, roomsRes, floorsRes, buildingsRes] = await Promise.race([fetchPromise, timeoutPromise]);
+        const [nodesRes, roomsRes, floorsRes, buildingsRes, airconsRes, hardwareRes, sensorRows] = await Promise.race([fetchPromise, timeoutPromise]);
+        if (authVersion !== reportAuthVersion || getSb() !== sb) return;
+        for (const response of [nodesRes, roomsRes, floorsRes, buildingsRes, airconsRes]) {
+          if (response.error) throw response.error;
+        }
+        const hardwareMap = Object.fromEntries((hardwareRes.error ? [] : hardwareRes.data || []).map(row => [String(row.node_id), row]));
         const nodes = nodesRes.data || [];
         const rooms = roomsRes.data || [];
         const floors = floorsRes.data || [];
         const buildings = buildingsRes.data || [];
+        const aircons = (airconsRes && airconsRes.data) ? airconsRes.data : [];
+        _maintenanceInventoryReady = true;
+        updateStaffLocationHierarchy(rooms, floors, buildings);
 
         if (nodes && nodes.length > 0) {
           const buildingMap = {};
@@ -1190,51 +1571,51 @@
             }
           });
 
-          // Only include nodes assigned to an active room, matching the Telemetry view
-          const assignedNodes = nodes.filter(n => n.room_id && roomMap[n.room_id]);
+          const airconByNodeMap = {};
+          if (Array.isArray(aircons)) {
+            aircons.forEach(a => {
+              if (a && (a.controller_node_id || a.node_id)) {
+                airconByNodeMap[a.controller_node_id || a.node_id] = a;
+              }
+            });
+          }
+
+          // A device can inherit its location from its assigned air conditioner.
+          const linkedAircon = n => aircons.find(ac=>ac.id===n.monitor_aircon_id) || airconByNodeMap[n.id] || airconByNodeMap[n.name] || null;
+          const assignedNodes = nodes.filter(n => roomMap[n.room_id] || roomMap[linkedAircon(n)?.room_id]);
 
           _nodesAirconCache = (assignedNodes.length > 0 ? assignedNodes : nodes).map(n => {
-            const rInfo = roomMap[n.room_id] || {};
+            const linkedAc = linkedAircon(n);
+            const roomId = roomMap[n.room_id] ? n.room_id : linkedAc?.room_id || n.room_id;
+            const rInfo = roomMap[roomId] || {};
+            const primaryId = n.device_mode==='monitoring' ? 'sensor:'+n.id : linkedAc?.asset_tag || n.name || n.id;
+            const deviceState = hardwareMap[String(n.id)] || null;
+            const sensor=sensorRows?.find(sensor=>sensor.id===n.monitoring_id), sample=sensor?.fresh ? sensor.latest : null;
+            const sensorRole=['monitoring','both'].includes(n.device_mode);
+            const measurements = sensorRole ? {temp:sample?.outlet_temperature_c ?? null,rotation_rpm:sample?.rotation_rpm ?? null,rotation_quality:sample?.rotation_quality,sensor_config:n.sensor_config,battery:sample?.battery_voltage==null ? null : sample.battery_voltage+' V',rssi:sample?.rssi_dbm ?? deviceState?.rssi ?? null} : { temp: n.temp ?? n.temperature, rotation_rpm: n.rotation_rpm, rotation_quality:n.rotation_quality, sensor_config:n.sensor_config,
+              battery: n.battery, rssi: deviceState?.rssi ?? n.rssi };
             return {
-              id: n.name || n.id,
+              id: primaryId,
               nodeId: n.id,
+              nodeName: n.name || '',deviceMode:n.device_mode || 'controller',
+              assetTag: linkedAc ? linkedAc.asset_tag : null,
+              airconId:linkedAc?.id || null, airconName:linkedAc?.name || '',
+              airconType:linkedAc?.aircon_type || linkedAc?.model || n.aircon_type || '',
+              protocolName:linkedAc?.protocol_name || linkedAc?.protocol || n.protocol_name || '',
               room: rInfo.name || n.room_name || n.room || 'Assigned Room',
-              roomId: n.room_id || '',
+              roomId: roomId || '',
               floor: rInfo.floor_name || n.floor_name || '',
               floorId: rInfo.floor_id || '',
               building: rInfo.building_name || n.building_name || '',
               buildingId: rInfo.building_id || '',
-              brand: n.aircon_type || 'Split Type (Inverter)',
-              model: n.name || n.id,
-              state: n.status === 'online' ? 'Operational' : 'Offline',
-              sensors: {
-                temp: {
-                  name: 'Temperature',
-                  status: n.status === 'online' ? 'Connected' : 'Offline',
-                  val: (n.temp !== undefined && n.temp !== null) ? `${n.temp}°C` : 'Connected',
-                  code: n.status === 'online' ? 'healthy' : 'offline'
-                },
-                pressure: {
-                  name: 'Air Pressure',
-                  status: n.status === 'online' ? 'Connected' : 'Offline',
-                  val: (n.pressure !== undefined && n.pressure !== null) ? `${n.pressure} kPa` : 'Connected',
-                  code: n.status === 'online' ? 'healthy' : 'offline'
-                },
-                battery: {
-                  name: 'Battery',
-                  ...formatBatteryDisplay(n.battery, n.status === 'online')
-                },
-                signal: {
-                  name: 'Signal',
-                  status: n.status === 'online' ? 'Connected' : 'Offline',
-                  val: (n.rssi !== undefined && n.rssi !== null) ? `${n.rssi} dBm` : 'Connected',
-                  code: (n.rssi && n.rssi < -90) ? 'warning' : (n.status === 'online' ? 'healthy' : 'offline')
-                }
-              }
+              brand: linkedAc?.aircon_type || linkedAc?.model || n.aircon_type || 'Type unavailable',
+              model: linkedAc?.name || primaryId,
+              measurements, deviceState,
+              ...maintenanceControllerDiagnostics(measurements, deviceState)
             };
           });
 
-          // Sort AC sensors naturally (e.g. node-1, node-2, ... EcoTrack-Node-225)
+          // Sort AC controls naturally (e.g. node-1, node-2, ... EcoTrack-Node-225)
           _nodesAirconCache.sort((a, b) => {
             const nameA = String(a.id || a.model || '');
             const nameB = String(b.id || b.model || '');
@@ -1247,6 +1628,11 @@
 
           if (typeof window.updateReportFilters === 'function') window.updateReportFilters();
           window.dispatchEvent(new CustomEvent('ecotrack:aircons-updated', { detail: _nodesAirconCache }));
+        } else {
+          _nodesAirconCache = [];
+          localStorage.removeItem('ecoTrack_aircons_cache');
+          if (typeof window.updateReportFilters === 'function') window.updateReportFilters();
+          window.dispatchEvent(new CustomEvent('ecotrack:aircons-updated', { detail: [] }));
         }
       } catch (err) {
         console.warn('[Supabase aircons load]:', err.message);
@@ -1254,9 +1640,11 @@
     }
   }
 
-  // Filter AC sensors strictly matching the technician's assigned building, floor, and room
+  // Filter AC controls strictly matching the technician's assigned building, floor, and room
   function getStaffBuilding(staff) {
     if (!staff) return '';
+    const canonical = resolveStaffHierarchy(staff);
+    if (canonical) return canonical.buildingName;
     let bld = (staff.building_name || staff.buildingName || staff.building || '').trim();
     if (!bld && staff.assignment) {
       bld = staff.assignment.split('•')[0].trim();
@@ -1267,6 +1655,10 @@
   function getAirconsForStaff(staff, airconsList) {
     if (!Array.isArray(airconsList) || airconsList.length === 0) return [];
     if (!staff) return airconsList;
+    const assignedRoomId = String(staff.room_id || staff.roomId || '').trim();
+    if (assignedRoomId && !['all','all_rooms'].includes(assignedRoomId.toLowerCase())) {
+      return airconsList.filter(ac => String(ac.roomId || ac.room_id || '') === assignedRoomId);
+    }
 
     // 1. Extract location identifiers and names
     const bldName = (staff.building_name || staff.buildingName || staff.building || '').toLowerCase().trim();
@@ -1422,10 +1814,23 @@
       if (prop === 'map') return (...args) => realAircons.map(...args);
       if (prop === 'filter') return (...args) => realAircons.filter(...args);
       if (prop === 'forEach') return (...args) => realAircons.forEach(...args);
+      if (prop === Symbol.iterator) return realAircons[Symbol.iterator].bind(realAircons);
+      if (typeof prop === 'symbol') return realAircons[prop];
       if (!isNaN(prop)) return realAircons[prop];
       return realAircons[prop];
     }
   });
+
+  function maintenanceStaffPresence(staff) {
+    if (typeof staff?.is_online === 'boolean') return {online:staff.is_online,label:staff.is_online ? 'Online' : 'Offline'};
+    const status = String(staff?.status || '').trim();
+    return {online:status.toLowerCase() === 'online',label:status || 'Offline'};
+  }
+
+  function maintenanceStaffStatusBadge(staff) {
+    const presence = maintenanceStaffPresence(staff);
+    return `<span class="eco-maintenance-staff-status" data-online="${presence.online}"><svg width="7" height="7" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3" fill="currentColor"/></svg>${maintenanceDisplayText(presence.label)}</span>`;
+  }
 
   function getStaffList() {
     try {
@@ -1471,7 +1876,7 @@
         }
       }
     }
-    if (!raw) return '';
+    if (raw.startsWith('storage://')) return resolvePhotoUrl(raw);
     if (raw.startsWith('data:') || raw.startsWith('http://') || raw.startsWith('https://')) {
       return raw;
     }
@@ -1502,6 +1907,8 @@
       if (match) s = match;
       else return '';
     }
+    const canonical = resolveStaffHierarchy(s);
+    if (canonical) return canonical.assignment;
     const bld = (s.building_name || s.buildingName || s.building || '').trim();
     const flr = (s.floor_name || s.floorName || s.floor || '').trim();
     const rm = (s.room_name || s.roomName || s.room || '').trim();
@@ -1532,15 +1939,29 @@
     const sb = getSb();
     if (sb) {
       try {
-        const fetchPromise = sb.from('staff').select('*').order('name');
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Staff fetch timed out (2.5s)')), 2500)
-        );
-        const { data, error } = await Promise.race([fetchPromise, timeoutPromise]);
-        if (!error && Array.isArray(data) && data.length > 0) {
-          const activeStaff = data.filter(s => s && !s.is_archived && s.status !== 'Archived' && !s.isArchived);
+        let staffData = null;
+        try {
+          const fetchPromise = sb.rpc('ecotrack_admin_list_staff');
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Staff fetch timed out (2.5s)')), 2500)
+          );
+          const { data, error } = await Promise.race([fetchPromise, timeoutPromise]);
+          if (!error && Array.isArray(data) && data.length > 0) {
+            staffData = data;
+          }
+        } catch (_) {}
+
+        if (!staffData) {
+          const { data, error } = await sb.from('staff').select('*').order('name');
+          if (!error && Array.isArray(data) && data.length > 0) {
+            staffData = data;
+          }
+        }
+
+        if (Array.isArray(staffData) && staffData.length > 0) {
+          const activeStaff = staffData.filter(s => s && !s.is_archived && s.status !== 'Archived' && !s.isArchived);
           try {
-            localStorage.setItem('ecoTrack_staff', JSON.stringify(data));
+            localStorage.setItem('ecoTrack_staff', JSON.stringify(staffData));
             if (typeof window.updateReportFilters === 'function') window.updateReportFilters();
             window.dispatchEvent(new CustomEvent('ecotrack:staff-updated', { detail: activeStaff }));
           } catch (e) { }
@@ -1562,9 +1983,13 @@
       const sb = getSb();
       if (!sb || document.hidden) return;
       try {
-        const { data, error } = await sb.from('maintenance_reports').select('*').order('created', { ascending: false });
+        ensureReportReadSession(sb);
+        const authVersion = reportAuthVersion;
+        const readRevision = reportWriteRevision;
+        const { data, error } = await readMaintenanceRows(sb);
+        if (authVersion !== reportAuthVersion) return;
         if (!error && Array.isArray(data)) {
-          const freshNormalized = mergeReportsSafely(data, _reportsCache);
+          const freshNormalized = mergeReportsSafely(data, _reportsCache, readRevision);
           const freshHash = JSON.stringify(freshNormalized.map(r => ({
             id: r.id,
             status: r.status,
@@ -1698,10 +2123,10 @@
   // ===================================================================
 
   const DEFAULT_MAINTENANCE_TYPES = [
-    'Sensor Maintenance',
-    'Sensor Inspection',
-    'Sensor Calibration',
-    'Sensor Replacement',
+    'Control Maintenance',
+    'Control Inspection',
+    'Control Calibration',
+    'Control Replacement',
     'Aircon Cleaning',
     'Filter Cleaning',
     'Preventive Maintenance',
@@ -1734,13 +2159,13 @@
   }
 
   function getAllMaintenanceTypes() {
-    const all = [...getStandardTypes(), ...getCustomTypes()];
+    const all = [...getStandardTypes().map(type=>type==='Control Maintenance' && window.EcoTrackMode?.mode && window.EcoTrackMode.mode!=='controller' ? (window.EcoTrackMode.mode==='monitoring'?'Sensor Maintenance':'Device Maintenance') : type), ...getCustomTypes()];
     try {
       if (typeof createFormState !== 'undefined' && createFormState && createFormState.type && !all.some(t => t.toLowerCase() === createFormState.type.toLowerCase())) {
         all.unshift(createFormState.type);
       }
     } catch (_) { }
-    return all.length > 0 ? all : ['Sensor Maintenance'];
+    return all.length > 0 ? all : ['Control Maintenance'];
   }
 
   function saveCustomType(typeName) {
@@ -1773,13 +2198,13 @@
   const DEFAULT_MAINTENANCE_DESCRIPTIONS = [
     'Routine AC filter cleaning, deep coil wash, and airflow check',
     'Refrigerant pressure optimization and leak detection check',
-    'Thermostat sensor calibration, ambient temperature audit, and telemetry check',
+    'Thermostat control calibration, ambient temperature audit, and telemetry check',
     'Electrical voltage inspection, capacitor testing, and wiring safety check',
     'Condensate drain pan flushing and anti-algae pipe clearing',
     'Fan motor servicing, bearing lubrication, and vibration dampening',
     'Emergency compressor diagnostic, contactor check, and thermal overload reset',
     'Preventive seasonal maintenance, multi-point diagnostic, and sanitization',
-    'Environmental sensor node troubleshooting, battery inspection, and telemetry sync'
+    'Environmental control node troubleshooting, battery inspection, and telemetry sync'
   ];
 
   function getDeletedDescriptions() {
@@ -1836,15 +2261,16 @@
   }
 
   let editingReportId = null;
+  let editingReportVersion = null;
 
   const DEFAULT_CHECKLIST_TEMPLATES = [
     { name: 'Aircon Cleaning', selected: true },
     { name: 'Filter Cleaning', selected: true },
-    { name: 'Temperature Sensor Inspection', selected: true },
-    { name: 'Air Pressure Sensor Inspection', selected: true },
-    { name: 'Energy Sensor Inspection', selected: true },
-    { name: 'Sensor Calibration', selected: false },
-    { name: 'Sensor Wiring Inspection', selected: false }
+    { name: 'Temperature Control Inspection', selected: true },
+    { name: 'Rotation Monitoring Inspection', selected: true },
+    { name: 'Energy Control Inspection', selected: true },
+    { name: 'Control Calibration', selected: false },
+    { name: 'Control Wiring Inspection', selected: false }
   ];
 
   function getActiveChecklistTemplates() {
@@ -1866,19 +2292,41 @@
 
   var createFormState = {
     airconId: '',
-    type: 'Sensor Maintenance',
+    type: 'Control Maintenance',
     priority: 'High',
     dueDate: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0],
     staffName: '',
+    staffId: '',
     description: '',
     airconType: 'Split Type (Inverter)',
     checklist: getActiveChecklistTemplates()
   };
-  createFormState.type = getAllMaintenanceTypes()[0] || 'Sensor Maintenance';
+  createFormState.type = getAllMaintenanceTypes()[0] || 'Control Maintenance';
 
-  async function openCreateReportModal() {
+  async function launchReportModal(trigger, prepare, label) {
+    const button = trigger?.currentTarget || trigger || document.activeElement?.closest('button');
+    try {
+      return await (window.EcoTrackModalLoading
+        ? window.EcoTrackModalLoading.run(button, prepare, { label })
+        : prepare());
+    } catch (error) {
+      console.error('[Maintenance] Could not prepare report:', error);
+      showToast('Error', 'The report could not be opened. Check your connection and try again.', 'error');
+    }
+  }
+
+  function openCreateReportModal(trigger) {
+    return launchReportModal(trigger, prepareCreateReportModal, 'Preparing report…');
+  }
+
+  function openEditReportModal(reportId, trigger) {
+    if (!reportId) return;
+    return launchReportModal(trigger, () => prepareEditReportModal(reportId), 'Loading report…');
+  }
+
+  async function prepareCreateReportModal() {
     editingReportId = null;
-    createFormState.type = getAllMaintenanceTypes()[0] || 'Sensor Maintenance';
+    createFormState.type = getAllMaintenanceTypes()[0] || 'Control Maintenance';
     createFormState.priority = 'High';
     createFormState.dueDate = new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0];
     createFormState.description = '';
@@ -1896,7 +2344,9 @@
     if ((!createFormState.staffName || !staffList.some(s => s.name === createFormState.staffName)) && staffList.length > 0) {
       createFormState.staffName = staffList[0].name;
     }
-    const currentStaff = staffList.find(s => s.name === createFormState.staffName) || staffList[0] || null;
+    const currentStaff = staffList.find(s => s.id === createFormState.staffId) || staffList.find(s => s.name === createFormState.staffName) || staffList[0] || null;
+    createFormState.staffId = currentStaff?.id || '';
+    createFormState.staffName = currentStaff?.name || '';
     const allAircons = getAirconsDatabase();
     const staffAircons = getAirconsForStaff(currentStaff, allAircons);
 
@@ -1917,9 +2367,10 @@
     document.body.style.overflow = 'hidden';
   }
 
-  async function openEditReportModal(reportId) {
+  async function prepareEditReportModal(reportId) {
     if (!reportId) return;
     await Promise.all([
+      fetchReportsFromSupabase(true),
       fetchAirconsFromSupabase(),
       fetchStaffFromSupabase()
     ]);
@@ -1930,36 +2381,35 @@
       return;
     }
 
-    const isRepReport = String(report.id || '').trim().toUpperCase().startsWith('REP') || report.type === 'Corrective Repair' || report.type === 'Repair Task' || String(report.type || '').trim().toLowerCase().includes('corrective') || String(report.type || '').trim().toLowerCase().includes('repair');
-    const isReworkReport = String(report.id || '').trim().toUpperCase().startsWith('RWK') || report.type === 'Maintenance Rework' || report.type === 'Rework' || report.status === 'Need Rework' || report.status === 'Needs Rework';
+    const isRepReport = isActualRepairTask(report);
+    
 
     if (isRepReport) {
       openEditRepairTaskModal(report.id);
       return;
     }
 
-    if (isReworkReport) {
-      openEditReworkModal(report.id);
-      return;
-    }
+
 
     editingReportId = report.id;
+    editingReportVersion = report.updated || report.updated_at || reportVersions.get(report.id) || null;
     createFormState.airconId = report.airconId;
     createFormState.airconType = report.airconType || report.aircon_type || 'Split Type (Inverter)';
     createFormState.type = report.type || getAllMaintenanceTypes()[0] || 'Preventive Maintenance';
     createFormState.priority = report.priority || 'Medium';
     createFormState.dueDate = report.dueDate || new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0];
     createFormState.staffName = report.staffName || '';
+    createFormState.staffId = report.staff_id || report.staffId || '';
     createFormState.description = report.description || '';
 
     const baseTasks = [
       'Aircon Cleaning',
       'Filter Cleaning',
-      'Temperature Sensor Inspection',
-      'Air Pressure Sensor Inspection',
-      'Energy Sensor Inspection',
-      'Sensor Calibration',
-      'Sensor Wiring Inspection'
+      'Temperature Control Inspection',
+      'Rotation Monitoring Inspection',
+      'Energy Control Inspection',
+      'Control Calibration',
+      'Control Wiring Inspection'
     ];
     const existingTaskNames = (report.tasks || []).map(t => t.name);
     createFormState.checklist = baseTasks.map(name => ({
@@ -2052,21 +2502,27 @@
 
     const staffList = getStaffList();
     const allAircons = getAirconsDatabase();
-    const selectedStaff = staffList.find(s => s.name === createFormState.staffName) || staffList[0] || null;
+    const selectedStaff = staffList.find(s => s.id === createFormState.staffId) || staffList[0] || null;
 
-    // Filter AC sensors strictly to those matching technician's assigned area
-    const aircons = getAirconsForStaff(selectedStaff, allAircons);
+    // Filter AC controls strictly to those matching technician's assigned area
+    const aircons = getAirconsForStaff(selectedStaff, allAircons).slice();
+    if (editingReportId) {
+      const report = getReports().find(r => r.id === editingReportId);
+      const originalAc = allAircons.find(a => a.id === report?.airconId);
+      if (originalAc && !aircons.some(a => a.id === originalAc.id)) aircons.unshift(originalAc);
+    }
     const staffBuildingName = getStaffBuilding(selectedStaff);
     const staffLocationDisplay = resolveStaffLocation(selectedStaff) || 'Assigned Area';
 
     let selectedAc = aircons.find(a => a.id === createFormState.airconId);
-    if (!selectedAc && aircons.length > 0) {
+    if (!selectedAc && aircons.length > 0 && !editingReportId) {
       selectedAc = aircons[0];
       createFormState.airconId = selectedAc.id;
     }
     if (!selectedAc) {
-      createFormState.airconId = 'None';
-      selectedAc = { id: 'None', room: `No AC units in ${staffLocationDisplay}`, brand: 'N/A', model: 'N/A', state: 'Unavailable', sensors: {} };
+      if (!editingReportId) createFormState.airconId = 'None';
+      selectedAc = { id: createFormState.airconId, room: `AC unit unavailable in ${staffLocationDisplay}`, brand: 'N/A', model: 'N/A', state: 'Unavailable', controls: {} };
+      if (editingReportId) aircons.unshift(selectedAc);
     }
     const selectedAcLoc = formatAcLocation(selectedAc, true);
     const selectedAcFullLoc = formatAcLocation(selectedAc, false);
@@ -2118,7 +2574,7 @@
         <div id="modalFormErrorProgressBar" class="error-progress-bar"></div>
       </div>
 
-      <!-- SECTION 1: AC SENSOR & AIRCON INFORMATION -->
+      <!-- SECTION 1: AC CONTROL & AIRCON INFORMATION -->
       <div class="bg-white dark:bg-slate-900/70 border border-gray-200 dark:border-[#10b981]/30 rounded-2xl p-4 shadow-sm">
         <div class="flex items-center justify-between mb-3">
           <label class="text-xs font-bold text-[#18392B] dark:text-cyan-300 uppercase tracking-wider flex items-center gap-2">
@@ -2127,14 +2583,14 @@
               <line x1="8" y1="21" x2="16" y2="21"></line>
               <line x1="12" y1="17" x2="12" y2="21"></line>
             </svg>
-            AC Sensor & Aircon Information <span class="text-rose-500">*</span>
+            ${maintenanceDeviceLabel()} & Aircon Information <span class="text-rose-500">*</span>
           </label>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
           <div class="relative">
             <label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1.5 uppercase tracking-wider">
-              AC Sensor Name
+              ${maintenanceDeviceLabel()} Name
               ${staffBuildingName ? `
                 <span class="text-[10px] font-semibold text-[#10b981] dark:text-emerald-400 normal-case ml-1.5 font-sans tracking-normal bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-500/20">📍 ${staffBuildingName.toLowerCase().includes('all') ? 'All Buildings (Campus-Wide)' : staffBuildingName.replace(/\b([a-z])/g, c => c.toUpperCase())}</span>
               ` : ''}
@@ -2143,9 +2599,9 @@
             <button type="button" id="modalAirconDropdownTrigger"
               class="w-full bg-white dark:bg-[#0c1328] border-2 border-gray-300 dark:border-[#10b981]/50 text-gray-800 dark:text-white rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-[#10b981] dark:focus:border-cyan-400 cursor-pointer shadow-sm flex items-center justify-between hover:border-[#10b981] transition-all"
               aria-haspopup="listbox" aria-expanded="false">
-              <div class="flex items-center gap-2 truncate min-w-0" title="${selectedAc.id} — ${selectedAcFullLoc}">
-                <span class="w-2 h-2 rounded-full ${selectedAc.state === 'Needs Repair' ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.7)]' : 'bg-emerald-400 ring-2 ring-emerald-400/20'} shrink-0"></span>
-                <span class="truncate font-bold text-xs">${selectedAc.id} — ${selectedAcLoc}</span>
+              <div class="flex items-center gap-2 truncate min-w-0" title="${maintenanceDisplayText(maintenanceControllerName(selectedAc))} — ${selectedAcFullLoc}">
+                <span class="w-2 h-2 rounded-full ${selectedAc.state === 'Needs Repair' ? 'bg-rose-500' : selectedAc.state === 'Online' ? 'bg-emerald-400' : 'bg-slate-400'} shrink-0"></span>
+                <span class="truncate font-bold text-xs">${maintenanceDisplayText(maintenanceControllerName(selectedAc))} — ${selectedAcLoc}</span>
               </div>
               <svg class="w-4 h-4 text-gray-400 dark:text-[#10b981] transition-transform duration-200 shrink-0 ml-1.5" id="modalAirconDropdownArrow" viewBox="0 0 20 20" fill="currentColor">
                 <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
@@ -2155,7 +2611,7 @@
             <select id="modalCreateAirconSelect" class="sr-only hidden" tabindex="-1" aria-hidden="true">
               ${aircons.map(ac => `
                 <option value="${ac.id}" ${ac.id === selectedAc.id ? 'selected' : ''}>
-                  ${ac.id} — ${formatAcLocation(ac, false)} (${ac.brand})
+                  ${maintenanceDisplayText(maintenanceControllerName(ac))} — ${formatAcLocation(ac, false)} (${ac.brand})
                 </option>
               `).join('')}
             </select>
@@ -2165,7 +2621,7 @@
               ${aircons.length > 0 ? aircons.map(ac => {
       const isSelected = ac.id === selectedAc.id;
       const isWarning = ac.state === 'Needs Repair';
-      const acActive = findActiveUnverifiedReportForAircon(ac.id, ac.nodeId);
+      const acActive = findActiveUnverifiedReportForAircon(ac.id, ac.nodeId, editingReportId);
       const acLoc = formatAcLocation(ac, true);
       const acFull = formatAcLocation(ac, false);
       return `
@@ -2173,8 +2629,8 @@
                        data-aircon-id="${ac.id}">
                     <div class="min-w-0 flex-1 mr-2">
                       <div class="flex items-center gap-1.5">
-                        <span class="w-1.5 h-1.5 rounded-full ${isWarning ? 'bg-rose-500' : (acActive ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400')} shrink-0"></span>
-                        <span class="text-xs font-bold truncate">${ac.id}</span>
+                        <span class="w-1.5 h-1.5 rounded-full ${isWarning ? 'bg-rose-500' : (acActive ? 'bg-amber-400 animate-pulse' : ac.state === 'Online' ? 'bg-emerald-400' : 'bg-slate-400')} shrink-0"></span>
+                        <span class="text-xs font-bold truncate">${maintenanceDisplayText(maintenanceControllerName(ac))}</span>
                         ${acActive ? `<span class="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 shrink-0">Active: ${acActive.status}</span>` : ''}
                       </div>
                       <div class="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 truncate mt-0.5" title="${acFull}">
@@ -2185,8 +2641,8 @@
                       </div>
                     </div>
                     <div class="flex items-center gap-1.5 shrink-0">
-                      <span class="px-2 py-0.5 text-[9px] font-extrabold rounded-full ${isWarning ? 'bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-400/40' : 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-400/40'}">
-                        ${ac.state || 'Operational'}
+                      <span class="px-2 py-0.5 text-[9px] font-extrabold rounded-full border ${isWarning ? 'bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border-rose-400/40' : maintenanceStateClasses(ac.state)}">
+                        ${ac.state || 'Unavailable'}
                       </span>
                       ${isSelected ? `
                         <svg class="w-3.5 h-3.5 text-[#10b981] dark:text-emerald-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
@@ -2200,7 +2656,7 @@
       <div class="px-3 py-4 text-center">
         <p class="text-xs font-bold text-amber-500 dark:text-amber-400 mb-1">⚠️ No Assigned AC Units Found</p>
         <p class="text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
-          ${selectedStaff?.name || 'Technician'} is assigned to <strong class="text-gray-700 dark:text-gray-200">${staffLocationDisplay}</strong>, which currently has no AC sensors installed.
+          ${selectedStaff?.name || 'Technician'} is assigned to <strong class="text-gray-700 dark:text-gray-200">${staffLocationDisplay}</strong>, which currently has no AC controls installed.
         </p>
       </div>
     `}
@@ -2208,15 +2664,15 @@
           </div>
 
           <div class="md:col-span-2">
-            <label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1.5 uppercase tracking-wider">AC Sensor & Aircon Details</label>
+            <label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1.5 uppercase tracking-wider">${maintenanceDeviceLabel()} & Aircon Details</label>
             <div class="bg-emerald-50/70 dark:bg-[#081a14] border border-emerald-500/30 dark:border-[#10b981]/40 rounded-xl p-3 flex flex-col gap-2 shadow-sm">
               <div class="flex items-center justify-between border-b border-gray-200 dark:border-white/10 pb-1.5">
                 <div class="min-w-0 flex-1 mr-2">
-                  <span class="text-xs font-bold text-[#18392B] dark:text-cyan-300">Sensor: ${selectedAc.id}</span>
+                  <span class="text-xs font-bold text-[#18392B] dark:text-cyan-300">${maintenanceDeviceLabel()}: ${maintenanceDisplayText(maintenanceControllerName(selectedAc))}</span>
                   <span class="text-xs text-gray-600 dark:text-gray-400 ml-2 font-medium truncate" title="${selectedAcFullLoc}">• 📍 ${selectedAcLoc}</span>
                 </div>
-                <span class="px-2 py-0.5 text-[10px] font-extrabold rounded-full bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-400/40">
-                  ${selectedAc.state || 'Operational'}
+                <span class="px-2 py-0.5 text-[10px] font-extrabold rounded-full border ${maintenanceStateClasses(selectedAc.state)}">
+                  ${selectedAc.state || 'Unavailable'}
                 </span>
               </div>
               <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
@@ -2225,24 +2681,13 @@
                   <span class="font-semibold text-gray-800 dark:text-gray-200 text-[11px]">${selectedAc.brand || 'Split Type (Inverter)'}</span>
                 </div>
                 <div>
-                  <span class="text-[10px] text-gray-500 dark:text-gray-400 block uppercase">AC Sensor Name</span>
-                  <span class="font-semibold text-gray-800 dark:text-gray-200 text-[11px]">${selectedAc.id}</span>
+                  <span class="text-[10px] text-gray-500 dark:text-gray-400 block uppercase">${maintenanceDeviceLabel()} Name</span>
+                  <span data-maintenance-controller-name class="font-semibold text-gray-800 dark:text-gray-200 text-[11px] break-words">${maintenanceDisplayText(maintenanceControllerName(selectedAc))}</span>
                 </div>
                 <div>
-                  <span class="text-[10px] text-gray-500 dark:text-gray-400 block uppercase mb-1">Sensor Diagnostics</span>
-                  <div class="flex flex-wrap gap-1.5">
-                    <span class="px-2 py-0.5 rounded bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 text-[10px] text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
-                      <span class="w-1.5 h-1.5 rounded-full ${selectedAc.sensors?.temp?.code === 'offline' ? 'bg-rose-500' : 'bg-emerald-500'}"></span>
-                      ${selectedAc.sensors?.temp?.val || 'Connected'}
-                    </span>
-                    <span class="px-2 py-0.5 rounded bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 text-[10px] text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
-                      <span class="w-1.5 h-1.5 rounded-full ${selectedAc.sensors?.pressure?.code === 'offline' ? 'bg-rose-500' : 'bg-emerald-500'}"></span>
-                      ${selectedAc.sensors?.pressure?.val || 'Connected'}
-                    </span>
-                    <span class="px-2 py-0.5 rounded bg-white dark:bg-slate-900 border border-gray-200 dark:border-white/10 text-[10px] text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
-                      <span class="w-1.5 h-1.5 rounded-full ${selectedAc.sensors?.battery?.code === 'warning' ? 'bg-amber-500' : (selectedAc.sensors?.battery?.code === 'offline' ? 'bg-rose-500' : 'bg-emerald-500')}"></span>
-                      ${formatBatteryDisplay(selectedAc.sensors?.battery?.val ?? selectedAc.sensors?.battery?.status, selectedAc.state !== 'Offline').val}
-                    </span>
+                  <span class="text-[10px] text-gray-500 dark:text-gray-400 block uppercase mb-1">${maintenanceDeviceLabel()} Diagnostics</span>
+                  <div class="flex flex-wrap gap-1.5" aria-label="${maintenanceDeviceLabel()} diagnostic readings">
+                    ${renderMaintenanceDiagnostics(selectedAc)}
                   </div>
                 </div>
               </div>
@@ -2352,7 +2797,7 @@
             class="w-full bg-white dark:bg-[#0c1328] border-2 border-gray-300 dark:border-[#10b981]/50 text-gray-800 dark:text-white rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-[#10b981] dark:focus:border-cyan-400 cursor-pointer shadow-sm flex items-center justify-between hover:border-[#10b981] transition-all"
             aria-haspopup="listbox" aria-expanded="false">
             <div class="flex items-center gap-2 truncate">
-              <span class="w-2 h-2 rounded-full ${createFormState.priority === 'Critical' ? 'bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.6)]' : (createFormState.priority === 'High' ? 'bg-amber-500' : (createFormState.priority === 'Medium' ? 'bg-sky-500' : 'bg-emerald-500'))} shrink-0"></span>
+              <span class="maintenance-priority-dot" data-priority="${createFormState.priority || 'Low'}" aria-hidden="true"></span>
               <span>${createFormState.priority || 'Low'}</span>
             </div>
             <svg class="w-4 h-4 text-gray-400 dark:text-[#10b981] transition-transform duration-200 shrink-0 ml-1.5" id="modalPriorityDropdownArrow" viewBox="0 0 20 20" fill="currentColor">
@@ -2365,7 +2810,7 @@
             <option value="High" ${createFormState.priority === 'High' ? 'selected' : ''}>High</option>
             <option value="Critical" ${createFormState.priority === 'Critical' ? 'selected' : ''}>Critical</option>
           </select>
-          <div id="modalPriorityDropdownMenu"
+          <div id="modalPriorityDropdownMenu" role="listbox" aria-label="Priority"
             class="hidden absolute left-3 right-3 top-full mt-1.5 z-50 bg-white dark:bg-[#0c1328] border-2 border-gray-200 dark:border-[#10b981]/60 rounded-xl shadow-2xl dark:shadow-[0_12px_32px_rgba(0,0,0,0.85)] max-h-56 overflow-y-auto p-1.5 space-y-1 custom-dropdown-menu">
             ${[
         { val: 'Low', color: 'bg-emerald-500', sub: 'Standard / Routine' },
@@ -2376,19 +2821,17 @@
         const isSel = createFormState.priority === p.val;
         return `
                 <div class="custom-priority-item flex items-center justify-between px-2.5 py-1.5 rounded-lg cursor-pointer transition-all duration-150 ${isSel ? 'bg-emerald-50 dark:bg-[#10b981]/25 text-[#18392B] dark:text-emerald-300 font-bold border border-emerald-500/30' : 'text-gray-700 dark:text-gray-200 hover:bg-emerald-50 dark:hover:bg-[#10b981]/15 hover:text-[#10b981] dark:hover:text-emerald-300'}"
-                     data-priority-val="${p.val}">
+                     data-priority-val="${p.val}" role="option" aria-selected="${isSel}">
                   <div class="flex items-center gap-2">
-                    <span class="w-2 h-2 rounded-full ${p.color} shrink-0"></span>
+                    <span class="maintenance-priority-dot" data-priority="${p.val}" aria-hidden="true"></span>
                     <div>
                       <span class="text-xs font-bold">${p.val}</span>
                       <span class="text-[10px] text-gray-500 dark:text-gray-400 block">${p.sub}</span>
                     </div>
                   </div>
-                  ${isSel ? `
-                    <svg class="w-3.5 h-3.5 text-[#10b981] dark:text-emerald-400" viewBox="0 0 20 20" fill="currentColor">
-                      <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-                    </svg>
-                  ` : ''}
+                  <svg class="maintenance-priority-check" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ${isSel ? '' : 'hidden'}>
+                    <path d="m5 12 4 4L19 6" />
+                  </svg>
                 </div>
               `;
       }).join('')}
@@ -2417,35 +2860,33 @@
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
           <div class="relative">
-            <label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1.5 uppercase tracking-wider">Technician <span class="text-rose-500">*</span></label>
+            <label id="modalStaffPickerLabel" class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1.5 uppercase tracking-wider">Technician <span class="text-rose-500">*</span></label>
             <button type="button" id="modalStaffDropdownTrigger"
-              class="w-full bg-white dark:bg-[#0c1328] border-2 border-gray-300 dark:border-[#10b981]/50 text-gray-800 dark:text-white rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-[#10b981] dark:focus:border-cyan-400 cursor-pointer shadow-sm flex items-center justify-between hover:border-[#10b981] transition-all"
-              aria-haspopup="listbox" aria-expanded="false">
-              <div class="flex items-center gap-2 truncate">
-                <span class="w-2 h-2 rounded-full ${selectedStaff && (selectedStaff.status === 'Active' || selectedStaff.status === 'Online' || selectedStaff.is_online) ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : 'bg-gray-400'} shrink-0"></span>
-                <span class="truncate">${selectedStaff ? `${selectedStaff.name} (${selectedStaff.status || (selectedStaff.is_online ? 'Active' : 'Offline')})` : 'No technicians registered'}</span>
-              </div>
-              <svg class="w-4 h-4 text-gray-400 dark:text-[#10b981] transition-transform duration-200 shrink-0 ml-1.5" id="modalStaffDropdownArrow" viewBox="0 0 20 20" fill="currentColor">
+              class="eco-maintenance-staff-trigger"
+              aria-haspopup="listbox" aria-expanded="false" aria-controls="modalStaffDropdownMenu" aria-labelledby="modalStaffPickerLabel modalStaffSelectedName">
+              <span id="modalStaffSelectedName" class="eco-maintenance-staff-name" title="${maintenanceDisplayText(selectedStaff?.name || '')}">${maintenanceDisplayText(selectedStaff?.name || 'No technicians registered')}</span>
+              ${selectedStaff ? maintenanceStaffStatusBadge(selectedStaff) : ''}
+              <svg class="eco-maintenance-staff-arrow" id="modalStaffDropdownArrow" viewBox="0 0 20 20" width="16" height="16" fill="currentColor" aria-hidden="true">
                 <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
               </svg>
             </button>
             <select id="modalCreateStaffSelect" class="sr-only hidden" tabindex="-1" aria-hidden="true">
               ${staffList.length > 0 ? staffList.map(s => `
-                <option value="${s.name}" ${selectedStaff && s.name === selectedStaff.name ? 'selected' : ''}>
-                  ${s.name} (${s.status || 'Active'})
+                <option value="${s.id}" ${selectedStaff && s.id === selectedStaff.id ? 'selected' : ''}>
+                  ${maintenanceDisplayText(s.name)} (${maintenanceDisplayText(maintenanceStaffPresence(s).label)})
                 </option>
               `).join('') : '<option value="">No technicians registered</option>'}
             </select>
             <div id="modalStaffDropdownMenu"
+              role="listbox" aria-labelledby="modalStaffPickerLabel"
               class="hidden absolute left-0 right-0 top-full mt-1.5 z-50 bg-white dark:bg-[#0c1328] border-2 border-gray-200 dark:border-[#10b981]/60 rounded-xl shadow-2xl dark:shadow-[0_12px_32px_rgba(0,0,0,0.85)] max-h-56 overflow-y-auto p-1.5 space-y-1 custom-dropdown-menu">
               ${staffList.length > 0 ? staffList.map(s => {
-        const isSelected = selectedStaff && s.name === selectedStaff.name;
-        const isOnline = s.status === 'Active' || s.status === 'Online' || s.is_online;
+        const isSelected = selectedStaff && s.id === selectedStaff.id;
         const photoSrc = resolveStaffAvatar(s);
         const initials = (s.name || 'ST').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
         return `
-                  <div class="custom-staff-item flex items-center justify-between px-2.5 py-2 rounded-lg cursor-pointer transition-all duration-150 ${isSelected ? 'bg-emerald-50 dark:bg-[#10b981]/25 text-[#18392B] dark:text-emerald-300 font-bold border border-emerald-500/30' : 'text-gray-700 dark:text-gray-200 hover:bg-emerald-50 dark:hover:bg-[#10b981]/15 hover:text-[#10b981] dark:hover:text-emerald-300'}"
-                       data-staff-name="${s.name}">
+                  <button type="button" class="custom-staff-item eco-maintenance-staff-option"
+                       data-staff-name="${maintenanceDisplayText(s.name)}" data-staff-id="${maintenanceDisplayText(s.id)}" role="option" aria-selected="${Boolean(isSelected)}" tabindex="-1">
                     <div class="flex items-center gap-2.5 min-w-0">
                       <div class="w-7 h-7 rounded-full overflow-hidden border border-[#10b981]/50 bg-emerald-100 dark:bg-emerald-950 flex items-center justify-center font-bold text-[10px] text-[#10b981] shrink-0 shadow-sm">
                         ${photoSrc ? `
@@ -2456,7 +2897,7 @@
                         `}
                       </div>
                       <div class="min-w-0">
-                        <div class="text-xs font-bold truncate leading-tight">${s.name}</div>
+                        <div class="text-xs font-bold truncate leading-tight">${maintenanceDisplayText(s.name)}</div>
                         <div class="text-[10px] text-gray-500 dark:text-gray-400 truncate leading-tight">${s.role || 'HVAC / Aircon Technician'}</div>
                         ${(() => {
             const sLoc = resolveStaffLocation(s);
@@ -2465,16 +2906,14 @@
                       </div>
                     </div>
                     <div class="flex items-center gap-1.5 shrink-0 ml-2">
-                      <span class="px-2 py-0.5 text-[9px] font-bold rounded-full ${isOnline ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-400/30' : 'bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-gray-400 border border-gray-300 dark:border-white/10'}">
-                        ${s.status || (isOnline ? 'Active' : 'Offline')}
-                      </span>
+                      ${maintenanceStaffStatusBadge(s)}
                       ${isSelected ? `
                         <svg class="w-3.5 h-3.5 text-[#10b981] dark:text-emerald-400" viewBox="0 0 20 20" fill="currentColor">
                           <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
                         </svg>
                       ` : ''}
                     </div>
-                  </div>
+                  </button>
                 `;
       }).join('') : `
                 <div class="p-3 text-center text-xs text-gray-400 italic">No technicians registered</div>
@@ -2725,13 +3164,9 @@
 
       <!-- FOOTER -->
       <div class="flex items-center justify-end gap-2.5 pt-3 border-t border-gray-200 dark:border-white/10">
-        <button id="modalBtnCancelCreate"
+        <button id="modalBtnCancelCreate" type="button"
           class="px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 dark:bg-white/10 dark:hover:bg-white/20 text-gray-700 dark:text-gray-200 text-xs font-bold transition-all border border-gray-200 dark:border-white/10 cursor-pointer shadow-sm">
           Cancel
-        </button>
-        <button id="modalBtnSaveDraft"
-          class="px-4 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-500/20 dark:hover:bg-emerald-500/30 text-emerald-800 dark:text-emerald-300 text-xs font-bold transition-all border border-emerald-500/30 cursor-pointer shadow-sm">
-          Save Draft
         </button>
         <button id="modalBtnSubmitReport"
           class="px-5 py-2 rounded-xl bg-[#10b981] hover:bg-emerald-400 text-slate-950 text-xs font-extrabold transition-all border-0 shadow-lg shadow-emerald-500/20 cursor-pointer flex items-center gap-1.5">
@@ -2746,6 +3181,7 @@
     // ─────────────────────────────────────────────────────────────
     // CUSTOM DROPDOWN ENGINE & EVENT BINDINGS
     // ─────────────────────────────────────────────────────────────
+    document.getElementById('modalBtnCancelCreate')?.addEventListener('click', closeCreateReportModal);
     const dropdownPrefixes = ['modalStaff', 'modalAircon', 'modalType', 'modalPriority', 'modalDescPreset'];
 
     function closeAllDropdowns() {
@@ -2784,6 +3220,29 @@
           }
         }
       });
+      if (prefix === 'modalStaff') {
+        trigger.addEventListener('keydown', event => {
+          if (!['ArrowDown','ArrowUp'].includes(event.key)) return;
+          event.preventDefault();
+          if (menu.classList.contains('hidden')) trigger.click();
+          const options = [...menu.querySelectorAll('[role="option"]')];
+          (options.find(option => option.getAttribute('aria-selected') === 'true') ||
+            options[event.key === 'ArrowUp' ? options.length - 1 : 0])?.focus();
+        });
+        menu.addEventListener('keydown', event => {
+          if (event.key === 'Escape') {
+            event.preventDefault(); closeAllDropdowns(); trigger.focus(); return;
+          }
+          if (!['ArrowDown','ArrowUp','Home','End'].includes(event.key)) return;
+          event.preventDefault();
+          const options = [...menu.querySelectorAll('[role="option"]')];
+          if (!options.length) return;
+          const current = options.indexOf(document.activeElement);
+          const index = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1 :
+            (current + (event.key === 'ArrowUp' ? -1 : 1) + options.length) % options.length;
+          options[index].focus();
+        });
+      }
     });
 
     // 1. Aircon Selection Event
@@ -2811,11 +3270,12 @@
         const sName = item.getAttribute('data-staff-name');
         if (sName) {
           createFormState.staffName = sName;
+          createFormState.staffId = item.getAttribute('data-staff-id') || '';
           const sel = document.getElementById('modalCreateStaffSelect');
-          if (sel) sel.value = sName;
+          if (sel) sel.value = createFormState.staffId;
 
           // When technician changes, check if the currently selected AC is in the new technician's assigned area
-          const newStaff = staffList.find(s => s.name === sName);
+          const newStaff = staffList.find(s => s.id === createFormState.staffId);
           const newStaffAircons = getAirconsForStaff(newStaff, allAircons);
           if (!newStaffAircons.some(a => a.id === createFormState.airconId)) {
             createFormState.airconId = newStaffAircons.length > 0 ? newStaffAircons[0].id : 'None';
@@ -2824,6 +3284,7 @@
           renderCreateModalContent();
         }
         closeAllDropdowns();
+        document.getElementById('modalStaffDropdownTrigger')?.focus();
       });
     });
 
@@ -2865,7 +3326,7 @@
 
         if (createFormState.type.toLowerCase() === typeToDelete.toLowerCase()) {
           const remaining = getAllMaintenanceTypes();
-          createFormState.type = remaining[0] || 'Sensor Maintenance';
+          createFormState.type = remaining[0] || 'Control Maintenance';
           const trigText = document.getElementById('modalTypeDropdownTrigger')?.querySelector('span');
           if (trigText) trigText.textContent = createFormState.type;
         }
@@ -2965,12 +3426,14 @@
           if (sel) sel.value = pVal;
           const trigDiv = document.getElementById('modalPriorityDropdownTrigger')?.firstElementChild;
           if (trigDiv) {
-            const dotColor = pVal === 'Critical' ? 'bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.6)]' : (pVal === 'High' ? 'bg-amber-500' : (pVal === 'Medium' ? 'bg-sky-500' : 'bg-emerald-500'));
-            trigDiv.innerHTML = `<span class="w-2 h-2 rounded-full ${dotColor} shrink-0"></span><span>${pVal}</span>`;
+            trigDiv.innerHTML = `<span class="maintenance-priority-dot" data-priority="${pVal}" aria-hidden="true"></span><span>${pVal}</span>`;
           }
           document.querySelectorAll('.custom-priority-item').forEach(i => {
             const isMatch = i.getAttribute('data-priority-val') === pVal;
             i.className = `custom-priority-item flex items-center justify-between px-2.5 py-1.5 rounded-lg cursor-pointer transition-all duration-150 ${isMatch ? 'bg-emerald-50 dark:bg-[#10b981]/25 text-[#18392B] dark:text-emerald-300 font-bold border border-emerald-500/30' : 'text-gray-700 dark:text-gray-200 hover:bg-emerald-50 dark:hover:bg-[#10b981]/15 hover:text-[#10b981] dark:hover:text-emerald-300'}`;
+            i.setAttribute('aria-selected', String(isMatch));
+            const check = i.querySelector('.maintenance-priority-check');
+            if (check) check.toggleAttribute('hidden', !isMatch);
           });
         }
         closeAllDropdowns();
@@ -3282,12 +3745,16 @@
         return false;
       }
 
-      const selectedAc = AIRCONS_DATABASE.find(a => a.id === createFormState.airconId) || AIRCONS_DATABASE[0];
+      const selectedAc = AIRCONS_DATABASE.find(a => a.id === createFormState.airconId);
+      if (!selectedAc) {
+        showFormError('AC Unit Unavailable', 'The original AC unit could not be loaded. Select an available unit explicitly before saving.');
+        return false;
+      }
       const activeReport = findActiveUnverifiedReportForAircon(createFormState.airconId, selectedAc?.nodeId, editingReportId);
       if (activeReport) {
         showFormError(
           'Duplicate Report Rejected',
-          `Aircon unit "${selectedAc.model || selectedAc.id}" already has an ongoing maintenance report (${activeReport.id}) with status "${activeReport.status}". Duplicate reporting is halted until the active report is verified and completed.`,
+          `${selectedAc.model || selectedAc.id} already has report ${activeReport.id} (${activeReport.status}). Complete and verify it before creating another.`,
           document.getElementById('modalAirconDropdownTrigger'),
           6
         );
@@ -3300,9 +3767,11 @@
         return false;
       }
 
-      const assignedStaff = staffList.find(s => s.name === createFormState.staffName);
+      const assignedStaff = staffList.find(s => s.id === createFormState.staffId);
       const staffAllowedAircons = getAirconsForStaff(assignedStaff, AIRCONS_DATABASE);
-      if (!staffAllowedAircons.some(a => a.id === createFormState.airconId)) {
+      const originalReport = editingReportId ? getReports().find(r => r.id === editingReportId) : null;
+      const preservesAssignment = originalReport && originalReport.airconId === createFormState.airconId && originalReport.staffName === createFormState.staffName;
+      if (!preservesAssignment && !staffAllowedAircons.some(a => a.id === createFormState.airconId)) {
         const staffLoc = resolveStaffLocation(assignedStaff) || 'assigned area';
         showFormError(
           'Unassigned Aircon Unit',
@@ -3318,6 +3787,12 @@
         showFormError('Due Date Required', 'Please select a scheduled due date.', document.getElementById('modalCreateDueDate'));
         return false;
       }
+      const dueDateVal = createFormState.dueDate;
+      const todayStr = new Date().toISOString().split('T')[0];
+      if (dueDateVal < todayStr) {
+        showFormError('Invalid Due Date', 'Scheduled due date cannot be in the past.', document.getElementById('modalCreateDueDate'));
+        return false;
+      }
 
       // 4. Description Validation
       const descVal = (createFormState.description || '').trim();
@@ -3327,7 +3802,8 @@
       }
 
       // 5. Checklist Task Selection Validation
-      if (createFormState.checklist.filter(c => c.selected).length === 0) {
+      const selectedTasksCount = (createFormState.checklist || []).filter(c => c.selected).length;
+      if (selectedTasksCount === 0) {
         showFormError('Checklist Tasks Required', 'Please select at least one maintenance task.');
         return false;
       }
@@ -3356,16 +3832,16 @@
 
       try {
         const reports = getReports();
-        const selectedAc = AIRCONS_DATABASE.find(a => a.id === createFormState.airconId) || AIRCONS_DATABASE[0];
+        const selectedAc = AIRCONS_DATABASE.find(a => a.id === createFormState.airconId);
 
         // Direct database-level pre-check
         const sb = getSb();
-        if (sb && !editingReportId) {
+        if (sb) {
           try {
             const { data: dbActiveReports, error: dbErr } = await sb
               .from('maintenance_reports')
               .select('id, aircon_id, aircon_name, status')
-              .in('status', ['Pending', 'Assigned', 'In Progress', 'For Verification', 'Needs Repair']);
+              .in('status', ['Pending', 'Assigned', 'In Progress', 'For Verification', 'Pending Verification', 'Awaiting Admin Verification', 'Needs Repair', 'Under Repair']);
 
             if (!dbErr && Array.isArray(dbActiveReports) && dbActiveReports.length > 0) {
               const lowerTarget = String(createFormState.airconId || '').toLowerCase().trim();
@@ -3394,12 +3870,19 @@
         if (editingReportId) {
           const report = reports.find(r => r.id === editingReportId);
           if (report) {
+            const assignedStaff = staffList.find(s => s.id === createFormState.staffId);
             report.airconId = selectedAc.id;
+            report.aircon_id = selectedAc.nodeId || selectedAc.id;
+            report.nodeId = selectedAc.nodeId || selectedAc.id;
             report.airconType = createFormState.airconType || selectedAc.brand || 'Split Type (Inverter)';
             report.room = selectedAc.room;
+            report.room_id = selectedAc.roomId || null;
+            report.roomId = selectedAc.roomId || null;
             report.type = createFormState.type;
             report.priority = createFormState.priority;
             report.staffName = createFormState.staffName;
+            report.staff_id = assignedStaff ? assignedStaff.id : null;
+            report.staffId = assignedStaff ? assignedStaff.id : null;
             report.dueDate = createFormState.dueDate;
             report.description = createFormState.description;
 
@@ -3409,17 +3892,18 @@
               .filter(c => c.selected)
               .map((c, i) => {
                 if (existingTasksMap[c.name]) return existingTasksMap[c.name];
-                return { id: i + 1, name: c.name, status: 'Not Started', notes: '', updated: 'Today' };
+                return { id: 'task-' + Date.now().toString(36) + '-' + i, name: c.name, status: 'Not Started', notes: '', updated: 'Today' };
               });
 
             if (!report.timeline) report.timeline = [];
             report.timeline.unshift({ title: 'Report Updated by Admin', time: 'Just now', done: true, by: 'Admin' });
 
+            const updatedReportId = editingReportId;
             await saveReports(reports, report, false);
             closeCreateReportModal();
-            showToast('Report Updated', `Maintenance Report ${editingReportId} has been updated successfully!`, 'success');
+            showToast('Report Updated', `Maintenance Report ${updatedReportId} has been updated successfully!`, 'success');
             refreshPageReportsView();
-            openDetailModal(editingReportId);
+            openDetailModal(updatedReportId);
             return;
           }
         }
@@ -3430,14 +3914,21 @@
           .filter(c => c.selected)
           .map((c, i) => ({ id: i + 1, name: c.name, status: 'Not Started', notes: '', updated: 'Today' }));
 
+        const assignedStaff = staffList.find(s => s.id === createFormState.staffId);
         const newReport = {
           id: newId,
           airconId: selectedAc.id,
+          aircon_id: selectedAc.nodeId || selectedAc.id,
+          nodeId: selectedAc.nodeId || selectedAc.id,
           airconType: createFormState.airconType || selectedAc.brand || 'Split Type (Inverter)',
           room: selectedAc.room,
+          room_id: selectedAc.roomId || null,
+          roomId: selectedAc.roomId || null,
           type: createFormState.type,
           priority: createFormState.priority,
           staffName: createFormState.staffName,
+          staff_id: assignedStaff ? assignedStaff.id : null,
+          staffId: assignedStaff ? assignedStaff.id : null,
           dueDate: createFormState.dueDate,
           createdDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
           created: new Date().toISOString(),
@@ -3452,15 +3943,10 @@
         };
 
         reports.unshift(newReport);
-        _reportsCache = reports;
-        try {
-          localStorage.setItem('ecoTrack_maintenance_reports', JSON.stringify(_reportsCache));
-          window.dispatchEvent(new Event('storage'));
-          window.dispatchEvent(new CustomEvent('ecotrack:reports-updated', { detail: _reportsCache }));
-        } catch (_) { }
+        await saveReports(reports, newReport, true);
 
         closeCreateReportModal();
-        showToast('Report Created', `Maintenance Report ${newId} has been created and queued!`, 'success');
+        showToast('Report Created', `Maintenance Report ${newId} has been saved successfully!`, 'success');
 
         if (typeof window.resetPageReportFilters === 'function') {
           window.resetPageReportFilters(true);
@@ -3470,10 +3956,7 @@
 
         try { openDetailModal(newId); } catch (_) { }
 
-        // Background sync to Supabase without blocking UI
-        saveReports(reports, newReport, true).catch(syncErr => {
-          console.warn('[Background Supabase Sync Warning]:', syncErr.message);
-        });
+
         return;
       } catch (err) {
         if (err.message !== 'Duplicate entry') {
@@ -3504,6 +3987,11 @@
         stopActiveModalPolling();
         return;
       }
+      // If user is actively typing in an input, do not re-render modal and interrupt typing
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')) {
+        return;
+      }
       const sb = getSb();
       if (!sb) return;
       try {
@@ -3511,9 +3999,16 @@
         if (!error && data) {
           const fresh = normalizeReport(data);
           if (fresh) {
+            // Apply in-memory synchronization first to compare synced states accurately
+            const tempCache = _reportsCache.map(r => String(r.id) === String(currentDetailId) ? fresh : r);
+            if (!tempCache.some(r => String(r.id) === String(currentDetailId))) tempCache.unshift(fresh);
+            const syncedCache = syncReportsWithLinkedRepairs(tempCache);
+            const syncedFresh = syncedCache.find(r => String(r.id) === String(currentDetailId));
+
             const cur = _reportsCache.find(r => String(r.id) === String(currentDetailId));
-            const curKey = cur ? `${cur.status}_${cur.updated}_${JSON.stringify(cur.tasks)}_${JSON.stringify(cur.issue)}` : '';
-            const freshKey = `${fresh.status}_${fresh.updated}_${JSON.stringify(fresh.tasks)}_${JSON.stringify(fresh.issue)}`;
+            const curKey = cur ? `${cur.status}_${cur.updated || ''}_${JSON.stringify(cur.tasks)}_${JSON.stringify(cur.issue)}` : '';
+            const freshKey = syncedFresh ? `${syncedFresh.status}_${syncedFresh.updated || ''}_${JSON.stringify(syncedFresh.tasks)}_${JSON.stringify(syncedFresh.issue)}` : '';
+
             if (curKey !== freshKey) {
               console.log('[Active Modal Live Sync] Database record changed, live re-rendering modal...');
               const idx = _reportsCache.findIndex(r => String(r.id) === String(currentDetailId));
@@ -3532,7 +4027,7 @@
           }
         }
       } catch (_) { }
-    }, 1500);
+    }, 6000);
   }
 
   function stopActiveModalPolling() {
@@ -3607,11 +4102,11 @@
   const TASK_DESCRIPTIONS = {
     'Aircon Cleaning': 'Deep clean the evaporator and condenser coils, drain pan, blower wheel, and outer housing to ensure optimal airflow and hygienic operation.',
     'Filter Cleaning': 'Inspect and thoroughly clean air filter meshes, remove accumulated dust, and check for tears, blockage, or frame deformities.',
-    'Temperature Sensor Inspection': 'Inspect thermal sensor probe, check calibration against ambient standards, and verify telemetry reading stability.',
-    'Air Pressure Sensor Inspection': 'Inspect differential pressure tubes, clear dust obstructions, and test airflow pressure sensor response.',
-    'Energy Sensor Inspection': 'Verify CT clamps, voltage input terminals, and power telemetry logging for real-time energy calculation.',
-    'Sensor Calibration': 'Zero-offset calibration and multi-point test verification against ambient laboratory references.',
-    'Sensor Wiring Inspection': 'Check physical cable integrity, crimp connections, signal shielding, and terminal screw torque.'
+    'Temperature Control Inspection': 'Inspect thermal control probe, check calibration against ambient standards, and verify telemetry reading stability.',
+    'Rotation Monitoring Inspection': 'Check free rotation, clean the disc and optical gap, and verify the Airflow Indicator RPM against the expected wheel rotation.',
+    'Energy Control Inspection': 'Verify CT clamps, voltage input terminals, and power telemetry logging for real-time energy calculation.',
+    'Control Calibration': 'Zero-offset calibration and multi-point test verification against ambient laboratory references.',
+    'Control Wiring Inspection': 'Check physical cable integrity, crimp connections, signal shielding, and terminal screw torque.'
   };
 
   let activeChecklistReportId = null;
@@ -3943,9 +4438,10 @@
 
     let photos = [];
     if (Array.isArray(photoUrlOrPhotos)) {
-      photos = photoUrlOrPhotos.filter(Boolean);
+      photos = photoUrlOrPhotos.map(resolvePhotoUrl).filter(Boolean);
     } else if (typeof photoUrlOrPhotos === 'string') {
-      photos = [photoUrlOrPhotos];
+      const resolved = resolvePhotoUrl(photoUrlOrPhotos);
+      photos = resolved ? [resolved] : [];
     }
     if (photos.length === 0) return;
 
@@ -4083,9 +4579,9 @@
       report.tasks = [
         { id: 1, name: 'Aircon Cleaning', status: 'Not Started', notes: '', updated: 'Today' },
         { id: 2, name: 'Filter Cleaning', status: 'Not Started', notes: '', updated: 'Today' },
-        { id: 3, name: 'Temperature Sensor Inspection', status: 'Not Started', notes: '', updated: 'Today' },
-        { id: 4, name: 'Air Pressure Sensor Inspection', status: 'Not Started', notes: '', updated: 'Today' },
-        { id: 5, name: 'Energy Sensor Inspection', status: 'Not Started', notes: '', updated: 'Today' }
+        { id: 3, name: 'Temperature Control Inspection', status: 'Not Started', notes: '', updated: 'Today' },
+        { id: 4, name: 'Rotation Monitoring Inspection', status: 'Not Started', notes: '', updated: 'Today' },
+        { id: 5, name: 'Energy Control Inspection', status: 'Not Started', notes: '', updated: 'Today' }
       ];
     }
 
@@ -4163,7 +4659,7 @@
       (repairReport && Array.isArray(repairReport.tasks) && repairReport.tasks.some(rt => isComponentInIssue(task.name, { component: rt.name })))
     );
 
-    const isRepReport = String(report.id || '').trim().toUpperCase().startsWith('REP') || report.type === 'Corrective Repair' || report.type === 'Repair Task' || String(report.type || '').trim().toLowerCase().includes('corrective') || String(report.type || '').trim().toLowerCase().includes('repair');
+    const isRepReport = isActualRepairTask(report);
     const isUnderRepair = !isRepReport && Boolean(
       !isRepairDone && !task.repaired && task.status !== 'Completed' && (
         (task.linkedRepairId && !task.repaired) ||
@@ -4263,8 +4759,8 @@
             <h3 class="text-xl font-bold text-[#18392B] dark:text-white tracking-tight">
               ${task.name}
             </h3>
-            <span class="px-2.5 py-0.5 text-[10px] font-bold rounded-full ${task.verified ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-400/40' : (task.status === 'Completed' || task.repaired ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-400/40' : (task.status === 'In Progress' ? 'bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-400/40' : 'bg-rose-100 dark:bg-rose-500/20 text-rose-800 dark:text-rose-300 border border-rose-400/40'))} shrink-0">
-              ${task.verified ? 'VERIFIED ✓' : (task.status || 'Not Started')}
+            <span class="px-2.5 py-0.5 text-[10px] font-bold rounded-full ${(task.verified || task.status === 'Completed' || task.repaired) ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-400/40' : (task.status === 'In Progress' ? 'bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-400/40' : 'bg-rose-100 dark:bg-rose-500/20 text-rose-800 dark:text-rose-300 border border-rose-400/40')} shrink-0">
+              ${(task.verified || task.status === 'Completed' || task.repaired) ? 'COMPLETED' : (task.status || 'Not Started')}
             </span>
             <span class="px-2 py-0.5 text-[10px] font-mono font-bold rounded-full bg-rose-600 text-white shadow-xs">
               ${report.id}
@@ -4285,10 +4781,10 @@
             <h3 class="text-xl font-bold text-[#18392B] dark:text-white tracking-tight">
               ${task.name}
             </h3>
-            ${task.verified ? `
+            ${(task.verified || task.status === 'Completed') ? `
               <span class="inline-flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-400/40 shrink-0 shadow-xs">
                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
-                Verified
+                Completed
               </span>
             ` : ''}
           </div>
@@ -4302,28 +4798,28 @@
 
     // Status Output Configuration
     let statusBorderClass = 'border-gray-200 dark:border-white/10';
-    let statusBgClass = 'bg-gray-50 dark:bg-slate-900/60';
+    let statusBgClass = 'eco-status-neutral bg-gray-50 dark:bg-slate-900/60';
     let statusTextClass = 'text-gray-700 dark:text-gray-300';
     let statusDot = '<span class="w-3 h-3 rounded-full bg-gray-400 dark:bg-gray-500 shrink-0"></span>';
 
     if (task.status === 'Completed' || (task.repaired && isRepairDone)) {
       statusBorderClass = 'border-emerald-400/60 dark:border-emerald-500/50';
-      statusBgClass = 'bg-emerald-50/70 dark:bg-emerald-950/40';
+      statusBgClass = 'eco-status-success bg-emerald-50/70 dark:bg-emerald-950/40';
       statusTextClass = 'text-emerald-800 dark:text-emerald-300';
       statusDot = '<span class="w-3 h-3 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/50 shrink-0"></span>';
     } else if (isUnderRepair || task.status === 'Under Repair') {
       statusBorderClass = 'border-cyan-400/60 dark:border-cyan-500/50';
-      statusBgClass = 'bg-cyan-50/70 dark:bg-cyan-950/40';
+      statusBgClass = 'eco-status-info bg-cyan-50/70 dark:bg-cyan-950/40';
       statusTextClass = 'text-cyan-800 dark:text-cyan-300';
       statusDot = '<span class="w-3 h-3 rounded-full bg-cyan-500 animate-pulse shrink-0"></span>';
     } else if (task.status === 'Needs Repair' || isNeedsRepair) {
       statusBorderClass = 'border-rose-400/60 dark:border-rose-500/50';
-      statusBgClass = 'bg-rose-50/70 dark:bg-rose-950/40';
+      statusBgClass = 'eco-status-danger bg-rose-50/70 dark:bg-rose-950/40';
       statusTextClass = 'text-rose-800 dark:text-rose-300';
       statusDot = '<span class="w-3 h-3 rounded-full bg-rose-600 animate-pulse shrink-0"></span>';
     } else if (task.status === 'In Progress') {
       statusBorderClass = 'border-cyan-400/60 dark:border-cyan-500/50';
-      statusBgClass = 'bg-cyan-50/70 dark:bg-cyan-950/40';
+      statusBgClass = 'eco-status-info bg-cyan-50/70 dark:bg-cyan-950/40';
       statusTextClass = 'text-cyan-800 dark:text-cyan-300';
       statusDot = '<span class="w-3 h-3 rounded-full bg-cyan-500 shrink-0"></span>';
     }
@@ -4434,7 +4930,8 @@
 
     // Helper: build photo carousel HTML
     const buildPhotoCarousel = (photos, label) => {
-      if (photos.length === 0) return `
+      const resolvedList = (photos || []).map(resolvePhotoUrl).filter(Boolean);
+      if (resolvedList.length === 0) return `
         <div class="border border-dashed border-gray-200 dark:border-white/10 rounded-2xl p-6 text-center bg-gray-50/50 dark:bg-slate-950/40">
           <div class="w-10 h-10 rounded-full bg-gray-100 dark:bg-white/5 text-gray-400 dark:text-gray-500 flex items-center justify-center mx-auto mb-2">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
@@ -4444,26 +4941,26 @@
         </div>`;
 
       const carouselId = `photoCarousel_${Date.now()}`;
-      const dots = photos.length > 1 ? photos.map((_, i) => `
+      const dots = resolvedList.length > 1 ? resolvedList.map((_, i) => `
         <button data-carousel-id="${carouselId}" data-idx="${i}" class="carousel-dot w-2 h-2 rounded-full transition-all ${i === 0 ? 'bg-emerald-500 w-4' : 'bg-white/40 hover:bg-white/70'}" onclick="window._carouselGoTo && window._carouselGoTo('${carouselId}',${i})"></button>
       `).join('') : '';
 
-      const slides = photos.map((photo, i) => `
+      const slides = resolvedList.map((photo, i) => `
         <div class="carousel-slide shrink-0 w-full" data-slide="${i}">
-          <div class="maintenance-photo-preview cursor-pointer relative overflow-hidden flex items-center justify-center bg-gray-100/90 dark:bg-[#040914] min-h-[160px] p-2 select-none" title="Click to view fullscreen" onclick="window._carouselOpen && window._carouselOpen('${carouselId}',${i})">
-            <img src="${photo}" alt="Photo ${i + 1}" class="w-full max-h-80 object-contain rounded-xl pointer-events-none select-none" onerror="this.onerror=null;this.parentElement.innerHTML='<div class=\\'p-4 text-center text-xs text-rose-400 font-medium\\'>Unable to display image preview</div>';">
+          <div class="maintenance-photo-preview cursor-pointer relative overflow-hidden flex items-center justify-center bg-gray-100/90 dark:bg-[#040914] min-h-[140px] p-2 select-none" title="Click to view fullscreen" onclick="window._carouselOpen && window._carouselOpen('${carouselId}',${i})">
+            <img src="${photo}" data-raw="${photo}" alt="Photo ${i + 1}" class="w-full max-h-56 sm:max-h-60 object-contain rounded-xl pointer-events-none select-none" onerror="window.handleCarouselPhotoError ? window.handleCarouselPhotoError(this, ${i + 1}) : (this.onerror=null, this.parentElement.innerHTML='<div class=\\'p-4 text-center text-xs text-rose-400 font-medium\\'>Unable to display image preview</div>');">
             <div class="maintenance-photo-overlay">
               <span class="px-3.5 py-2 bg-black/85 backdrop-blur-md rounded-xl text-white text-xs font-bold shadow-lg flex items-center gap-1.5 border border-white/20 select-none pointer-events-none">
                 <svg class="w-4 h-4 text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"/></svg>
                 <span>View Fullscreen</span>
               </span>
             </div>
-            ${photos.length > 1 ? `<span class="absolute top-2 right-2 px-2 py-0.5 text-[10px] font-mono font-bold rounded-full bg-black/60 text-white backdrop-blur-sm border border-white/20 pointer-events-none z-10">${i + 1}/${photos.length}</span>` : ''}
+            ${resolvedList.length > 1 ? `<span class="absolute top-2 right-2 px-2 py-0.5 text-[10px] font-mono font-bold rounded-full bg-black/60 text-white backdrop-blur-sm border border-white/20 pointer-events-none z-10">${i + 1}/${resolvedList.length}</span>` : ''}
           </div>
         </div>
       `).join('');
 
-      const prevBtn = photos.length > 1 ? `
+      const prevBtn = resolvedList.length > 1 ? `
         <button class="carousel-prev absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/50 hover:bg-black/75 backdrop-blur-sm border border-white/20 text-white flex items-center justify-center z-10 transition-all cursor-pointer shadow-md" onclick="window._carouselPrev && window._carouselPrev('${carouselId}')">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"/></svg>
         </button>
@@ -4541,13 +5038,13 @@
         <!-- Status Output -->
         <div class="space-y-1.5">
           <label class="block text-xs font-bold text-gray-700 dark:text-gray-300">Status:</label>
-          <div class="p-3 sm:p-3.5 rounded-2xl border ${statusBorderClass} ${statusBgClass} flex items-center justify-between shadow-xs">
-            <div class="flex items-center gap-2.5">
+          <div class="p-3 sm:p-3.5 rounded-2xl border ${statusBorderClass} ${statusBgClass} flex flex-wrap items-center justify-between gap-2 shadow-xs">
+            <div class="flex items-center gap-2 flex-wrap min-w-0">
               ${statusDot}
-              <span class="text-sm font-black ${statusTextClass}">Under Repair</span>
-              ${rId ? `<span class="px-2 py-0.5 text-[10px] font-mono font-bold rounded-full bg-cyan-100 dark:bg-cyan-900/60 text-cyan-800 dark:text-cyan-200 border border-cyan-400/50">Task: ${rId}</span>` : ''}
+              <span class="eco-status-info text-sm font-black ${statusTextClass} whitespace-nowrap">Under Repair</span>
+              ${rId ? `<span class="px-2 py-0.5 text-[10px] font-mono font-bold rounded-full bg-cyan-100 dark:bg-cyan-900/60 text-cyan-800 dark:text-cyan-200 border border-cyan-400/50 shrink-0">Task: ${rId}</span>` : ''}
             </div>
-            <span class="text-[11px] font-mono text-gray-500 dark:text-gray-400 font-medium">Updated: ${task.updated || 'Just now'}</span>
+            <span class="text-[11px] font-mono text-gray-500 dark:text-gray-400 font-medium shrink-0 ml-auto">Updated: ${task.updated || 'Just now'}</span>
           </div>
         </div>
 
@@ -4631,7 +5128,7 @@
     const activeRepairId = (repairReport && repairReport.id) || task.linkedRepairId || null;
 
     if (isRepReport) {
-      const isReadyForVerificationOrRework = task.verified || task.status === 'Completed' || task.repaired || isRepairDone;
+      const isReadyForVerificationOrRework = task.verified || isReportSubmittedForVerification(report) || report.status === 'Completed';
       if (!isReadyForVerificationOrRework) {
         footer.innerHTML = `
           <div class="flex items-center justify-between gap-3 w-full">
@@ -4653,10 +5150,6 @@
               Close
             </button>
             <div class="flex items-center gap-2 flex-1 justify-end">
-              <button type="button" id="btnChecklistRework" class="px-4 py-2.5 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-300 font-bold text-xs rounded-2xl border border-amber-500/40 cursor-pointer transition-all shadow-xs flex items-center gap-1.5">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-                <span>Request Rework</span>
-              </button>
               <button type="button" id="btnVerifyChecklistItem" class="px-5 py-2.5 ${task.verified ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md' : 'bg-[#10b981] hover:bg-emerald-400 text-white shadow-md'} font-bold text-xs rounded-2xl cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm">
                 <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
                 <span>${task.verified ? 'Verified (Click to Unverify)' : 'Verify Step'}</span>
@@ -4672,9 +5165,9 @@
             Close
           </button>
           <div class="flex items-center gap-2 flex-1 justify-end">
-            <button type="button" id="btnChecklistViewRepair" class="px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-2xl border-0 cursor-pointer transition-all shadow-md flex items-center gap-1.5" data-repair-id="${activeRepairId}">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-              <span>Open Repair Task ${activeRepairId}</span>
+            <button type="button" id="btnChecklistViewRepair" style="background-color: #0891b2 !important; color: #ffffff !important;" class="px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-2xl border-0 cursor-pointer transition-all shadow-md flex items-center gap-1.5" data-repair-id="${activeRepairId}">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color: #ffffff !important; stroke: #ffffff !important;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              <span style="color: #ffffff !important;">Open Repair Task ${activeRepairId}</span>
             </button>
           </div>
         </div>
@@ -4694,7 +5187,7 @@
         </div>
       `;
     } else {
-      const isItemReadyForReview = task.verified || task.status === 'Completed' || task.repaired || isRepairDone || report.status === 'For Verification' || report.status === 'Completed';
+      const isItemReadyForReview = task.verified || isReportSubmittedForVerification(report) || report.status === 'Completed';
       if (!isItemReadyForReview) {
         footer.innerHTML = `
           <div class="flex items-center justify-between gap-3 w-full">
@@ -4716,12 +5209,6 @@
               Close
             </button>
             <div class="flex items-center gap-2 flex-1 justify-end">
-              ${!task.verified ? `
-                <button type="button" id="btnChecklistRework" class="px-4 py-2.5 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-300 font-bold text-xs rounded-2xl border border-amber-500/40 cursor-pointer transition-all shadow-xs flex items-center gap-1.5">
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-                  <span>Request Rework</span>
-                </button>
-              ` : ''}
               <button type="button" id="btnVerifyChecklistItem" class="px-5 py-2.5 ${task.verified ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md' : 'bg-[#10b981] hover:bg-emerald-400 text-white shadow-md'} font-bold text-xs rounded-2xl cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm">
                 <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
                 <span>${task.verified ? 'Verified (Click to Unverify)' : 'Verify Checklist Item'}</span>
@@ -4734,11 +5221,7 @@
 
     document.getElementById('btnCancelChecklistItem')?.addEventListener('click', closeChecklistItemModal);
 
-    // Wire up actions for Needs Repair items (Matching First Image)
-    const triggerRework = () => {
-      closeChecklistItemModal();
-      openReworkModal(report.id, task.id);
-    };
+    // Wire up actions for Needs Repair items
 
     const triggerRepair = () => {
       if (!report.issue) report.issue = {};
@@ -4757,7 +5240,7 @@
       openRepairTaskModal(report.id, task.id, task.name);
     };
 
-    document.getElementById('btnChecklistRework')?.addEventListener('click', triggerRework);
+
     document.getElementById('btnChecklistCreateRepair')?.addEventListener('click', triggerRepair);
 
     document.getElementById('btnChecklistViewRepair')?.addEventListener('click', (e) => {
@@ -4813,7 +5296,7 @@
 
       // If child repairReport exists, synchronize its verification status
       if (repairReport && task.verified) {
-        repairReport.status = 'Verified';
+        repairReport.status = 'Completed';
         repairReport.verified = true;
         if (Array.isArray(repairReport.tasks)) {
           repairReport.tasks.forEach(rt => {
@@ -4836,8 +5319,7 @@
       if (isRepReport) {
         const repAllDone = report.tasks.every(t => t.status === 'Completed' || t.repaired);
         const repAllVerified = report.tasks.every(t => (t.status === 'Completed' || t.repaired) && t.verified);
-        if (repAllVerified) report.status = 'Verified';
-        else if (repAllDone) report.status = 'Completed';
+        if (repAllVerified || repAllDone) report.status = 'Completed';
         else if (report.tasks.some(t => t.status === 'In Progress' || t.status === 'Completed')) report.status = 'In Progress';
         else report.status = 'Pending';
 
@@ -4869,8 +5351,8 @@
             report.issue.repaired = true;
             report.issue.status = 'Repaired';
           }
-          if (allVerified) report.status = 'Verified';
-          else if (allDone) report.status = 'For Verification';
+          if (allVerified) report.status = 'Completed';
+          else if (allDone) report.status = isReportSubmittedForVerification(report) ? 'For Verification' : 'In Progress';
           else if (report.tasks.some(t => t.status === 'In Progress' || t.status === 'Completed')) report.status = 'In Progress';
           else report.status = 'Pending';
         }
@@ -4879,808 +5361,22 @@
       await saveReports(getReports(), report);
       renderDetailModalContent();
       renderChecklistItemModalContent(report, task);
-      showToast(task.verified ? 'Task Verified' : 'Task Unverified', `"${task.name}" is now marked as ${task.verified ? 'Verified ✓' : 'Unverified'}.`, task.verified ? 'success' : 'info');
+      showToast(task.verified ? 'Task Completed' : 'Task Incomplete', `"${task.name}" is now marked as ${task.verified ? 'Completed' : 'Incomplete'}.`, task.verified ? 'success' : 'info');
     });
   }
 
   // ===================================================================
-  // 3B. REWORK MODAL CONTROLLER (ecoReworkModal)
+  // 3B. REWORK CONTROLLERS REMOVED (STANDARDIZED TO REPAIR & MAINTENANCE)
   // ===================================================================
-
-  let activeReworkReportId = null;
-  let activeReworkInitialTaskId = null;
-  let activeReworkPriority = 'High';
-  let selectedReworkTaskIds = new Set();
-  let isSubmittingRework = false;
-
-  function injectReworkModalHTML() {
-    if (document.getElementById('ecoReworkModal')) return;
-
-    const modalHTML = `
-      <div id="ecoReworkModal" class="hidden fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-[9999] flex items-center justify-center p-3 sm:p-4 transition-all">
-        <div class="bg-white dark:bg-[#0c1328] border-2 border-amber-500/50 dark:border-amber-400/50 rounded-3xl w-full max-w-lg shadow-2xl flex flex-col overflow-hidden text-gray-800 dark:text-gray-100 transition-all max-h-[92vh]">
-          <div id="ecoReworkModalHeader" class="px-5 pt-5 pb-3 flex items-start justify-between border-b border-gray-100 dark:border-white/10 shrink-0">
-            <!-- Injected by renderReworkModalContent -->
-          </div>
-          <div id="ecoReworkModalBody" class="p-5 overflow-y-auto eco-slim-scrollbar space-y-4 flex-1">
-            <!-- Injected by renderReworkModalContent -->
-          </div>
-          <div id="ecoReworkModalFooter" class="px-5 py-3.5 bg-gray-50 dark:bg-slate-950/80 border-t border-gray-100 dark:border-white/10 flex items-center justify-between gap-2 shrink-0 relative z-20">
-            <!-- Injected by renderReworkModalContent -->
-          </div>
-        </div>
-      </div>
-    `;
-
-    document.body.insertAdjacentHTML('beforeend', modalHTML);
-
-    const modal = document.getElementById('ecoReworkModal');
-    modal?.addEventListener('click', (e) => {
-      if (e.target === modal) closeReworkModal();
-    });
-
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && modal && !modal.classList.contains('hidden')) {
-        closeReworkModal();
-      }
-    });
-  }
-
-  function closeReworkModal() {
-    const modal = document.getElementById('ecoReworkModal');
-    if (modal) {
-      modal.classList.add('hidden');
-      modal.style.display = 'none';
-    }
-    activeReworkReportId = null;
-    activeReworkInitialTaskId = null;
-    selectedReworkTaskIds.clear();
-    if (!isSubmittingRework) {
-      isSubmittingRework = false;
-    }
-    refreshPageReportsView();
-  }
-
-  function openReworkModal(reportId, initialTaskId = null) {
-    activeReworkReportId = reportId;
-    activeReworkInitialTaskId = initialTaskId;
-    let modal = document.getElementById('ecoReworkModal');
-    if (!modal) {
-      injectReworkModalHTML();
-      modal = document.getElementById('ecoReworkModal');
-    }
-    if (!modal) return;
-
-    const reports = getReports();
-    let report = findReportById(reports, reportId) || findReportById(reports, currentDetailId) || reports[0];
-    if (!report) return;
-
-    activeReworkPriority = report.priority === 'Critical' ? 'Critical' : 'High';
-    selectedReworkTaskIds = new Set();
-
-    if (initialTaskId) {
-      selectedReworkTaskIds.add(initialTaskId);
-    }
-
-    renderReworkModalContent(report);
-
-    modal.classList.remove('hidden');
-    modal.style.display = 'flex';
-    modal.style.zIndex = '100000';
-    document.body.style.overflow = 'hidden';
-  }
-
-  function renderReworkModalContent(report) {
-    const header = document.getElementById('ecoReworkModalHeader');
-    const body = document.getElementById('ecoReworkModalBody');
-    const footer = document.getElementById('ecoReworkModalFooter');
-    if (!header || !body || !footer) return;
-
-    header.innerHTML = `
-      <div class="flex-1 pr-3">
-        <div class="text-[11px] font-extrabold text-amber-600 dark:text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-          QUALITY CONTROL & REWORK
-        </div>
-        <div class="flex items-center flex-wrap gap-2 mt-0.5">
-          <h3 class="text-xl font-bold text-[#18392B] dark:text-white tracking-tight">
-            Request Maintenance Rework
-          </h3>
-          <span class="px-2.5 py-0.5 text-[10px] font-mono font-bold rounded-full bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-400/40 shrink-0">
-            ${report.id}
-          </span>
-        </div>
-      </div>
-      <button type="button" id="btnCloseReworkModal" class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/20 text-gray-500 dark:text-gray-300 flex items-center justify-center font-bold text-sm cursor-pointer transition-colors shrink-0">
-        ✕
-      </button>
-    `;
-    document.getElementById('btnCloseReworkModal')?.addEventListener('click', closeReworkModal);
-
-    // Locate the chosen checklist item if opened specifically for that item
-    let chosenTask = null;
-    if (activeReworkInitialTaskId && Array.isArray(report.tasks)) {
-      chosenTask = report.tasks.find(
-        t => String(t.id) === String(activeReworkInitialTaskId) || t.id == activeReworkInitialTaskId
-      );
-      if (!chosenTask && !isNaN(parseInt(activeReworkInitialTaskId, 10))) {
-        chosenTask = report.tasks[parseInt(activeReworkInitialTaskId, 10) - 1];
-      }
-    }
-
-    const defaultNotes = (chosenTask && chosenTask.notes)
-      ? `Defect detected on "${chosenTask.name}": ${chosenTask.notes}. Please correct and upload fresh photo verification.`
-      : (report.issue?.notes
-        ? `Defect detected during inspection: "${report.issue.notes}". Please re-inspect, correct issues, and upload fresh photo verification.`
-        : `Checklist items require rework and re-inspection. Please review the flagged items and re-submit verification.`);
-
-    const defaultDueDate = report.dueDate || new Date(Date.now() + 86400000).toISOString().split('T')[0];
-
-    // Build the Target Checklist Item Output Card (Chosen Item only - no checkboxes, no toggle all)
-    let targetTaskHtml = '';
-    if (chosenTask) {
-      const taskPhoto = chosenTask.photo || chosenTask.photoUri || (Array.isArray(chosenTask.photoUris) && chosenTask.photoUris[0]) || null;
-      targetTaskHtml = `
-        <!-- Target Checklist Item Output Card (Strictly output chosen item only) -->
-        <div class="space-y-1.5">
-          <label class="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
-            <span class="w-2 h-2 rounded-full bg-amber-500"></span>
-            Target Checklist Item for Rework:
-          </label>
-          <div class="p-3.5 rounded-2xl bg-amber-50/60 dark:bg-amber-950/20 border-2 border-amber-500/40 shadow-xs space-y-2.5">
-            <div class="flex items-center justify-between gap-2">
-              <div class="flex items-center gap-2.5 min-w-0">
-                <span class="checklist-step-badge w-6 h-6 rounded-md bg-amber-500 text-slate-950 font-black text-xs flex items-center justify-center shrink-0">
-                  !
-                </span>
-                <span class="text-sm font-bold text-gray-900 dark:text-white truncate">${chosenTask.name}</span>
-              </div>
-              <span class="text-[10px] px-2.5 py-0.5 rounded-full font-bold shrink-0 ${chosenTask.status === 'Needs Repair' ? 'bg-rose-100 dark:bg-rose-500/20 text-rose-700 dark:text-rose-400 border border-rose-400/30' : 'bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-400/30'}">
-                ${chosenTask.status || 'Needs Rework'}
-              </span>
-            </div>
-            ${chosenTask.notes ? `
-              <div class="text-xs text-gray-700 dark:text-gray-300 bg-white/80 dark:bg-slate-900/60 p-2.5 rounded-xl border border-amber-500/20 leading-relaxed">
-                <span class="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase block mb-0.5">Defect / Inspection Notes:</span>
-                "${chosenTask.notes}"
-              </div>
-            ` : ''}
-            ${taskPhoto ? `
-              <div class="flex items-center gap-3 pt-1">
-                <img src="${taskPhoto}" alt="${chosenTask.name}" class="w-14 h-14 object-cover rounded-xl border border-amber-500/40 shadow-xs shrink-0 cursor-pointer hover:opacity-90 transition-opacity" onclick="window.EcoTrackMaintenance.openImageLightbox(['${taskPhoto}'], '${chosenTask.name} Defect', 0)">
-                <div class="min-w-0 text-xs">
-                  <span class="font-semibold text-gray-800 dark:text-gray-200 block">Defect Photo Attached</span>
-                  <span class="text-[10px] text-gray-500 dark:text-gray-400 block">Click image to view full resolution lightbox</span>
-                </div>
-              </div>
-            ` : ''}
-          </div>
-        </div>
-      `;
-    } else {
-      // General Report Rework Scope (Clean output without checklist selection or toggle-all)
-      const defectiveTasks = (Array.isArray(report.tasks) ? report.tasks : []).filter(t => t.status === 'Needs Repair' || !t.verified);
-      targetTaskHtml = `
-        <!-- General Report Rework Scope (Read-only scope banner) -->
-        <div class="space-y-1.5">
-          <label class="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
-            <span class="w-2 h-2 rounded-full bg-amber-500"></span>
-            Rework Scope:
-          </label>
-          <div class="p-3.5 rounded-2xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-500/40 shadow-xs flex items-center justify-between gap-3 text-xs">
-            <div class="min-w-0">
-              <span class="font-bold text-gray-900 dark:text-white block">Full Maintenance Rework Mandate</span>
-              <span class="text-[11px] text-gray-600 dark:text-gray-400 block">
-                ${defectiveTasks.length > 0 ? `${defectiveTasks.length} unverified/defective task(s) flagged for re-inspection` : 'Comprehensive rework mandate for unit'}
-              </span>
-            </div>
-            <span class="px-2.5 py-1 text-[10px] font-bold rounded-full bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-400/40 shrink-0">
-              ${report.id}
-            </span>
-          </div>
-        </div>
-      `;
-    }
-
-    body.innerHTML = `
-      <!-- Report Context Card -->
-      <div class="bg-amber-50/60 dark:bg-amber-950/30 border border-amber-400/40 rounded-2xl p-3 flex items-center justify-between gap-3 text-xs">
-        <div class="min-w-0">
-          <span class="text-[10px] font-bold text-amber-800 dark:text-amber-300 uppercase block">Target Equipment</span>
-          <span class="font-bold text-gray-800 dark:text-white truncate block">${report.airconId} — ${report.room}</span>
-          <span class="text-[11px] text-gray-500 dark:text-gray-400 truncate block">👤 Assigned: <strong class="text-gray-700 dark:text-gray-300">${report.staffName}</strong></span>
-        </div>
-        <div class="text-right shrink-0">
-          <span class="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase block">Status</span>
-          <span class="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-400/40">
-            ${report.status}
-          </span>
-        </div>
-      </div>
-
-      ${targetTaskHtml}
-
-      <!-- Supervisor Instructions -->
-      <div class="space-y-1.5">
-        <label class="block text-xs font-bold text-gray-800 dark:text-gray-200">
-          Supervisor Rework Instructions <span class="text-rose-500">*</span>:
-        </label>
-        <textarea id="reworkInstructionsInput" rows="3" class="w-full bg-white dark:bg-[#081326] border border-gray-200 dark:border-white/15 rounded-2xl p-3 text-xs text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-amber-500 resize-none shadow-sm transition-colors" placeholder="Explain what the technician needs to fix, re-inspect, or re-test...">${defaultNotes}</textarea>
-      </div>
-
-      <!-- Priority & Due Date -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <label class="block text-[11px] font-bold text-gray-600 dark:text-gray-300 mb-1.5 uppercase">Rework Priority</label>
-          <div class="grid grid-cols-3 gap-1.5" id="reworkPriorityGrid">
-            ${['Medium', 'High', 'Critical'].map(p => `
-              <button type="button" class="btn-rework-priority py-2 text-xs rounded-xl font-bold cursor-pointer transition-all text-center ${activeReworkPriority === p ? (p === 'Critical' ? 'bg-rose-600 text-white shadow-sm' : (p === 'High' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'bg-sky-600 text-white shadow-sm')) : 'bg-gray-100 dark:bg-slate-900 border border-gray-200 dark:border-white/10 text-gray-600 dark:text-gray-300'}" data-priority="${p}">
-                ${p}
-              </button>
-            `).join('')}
-          </div>
-        </div>
-        <div>
-          <label class="block text-[11px] font-bold text-gray-600 dark:text-gray-300 mb-1.5 uppercase">Target Completion Date</label>
-          <input type="date" id="reworkDueDateInput" value="${defaultDueDate}" class="w-full bg-white dark:bg-[#081326] border border-gray-200 dark:border-white/15 rounded-xl px-3 py-2 text-xs text-gray-800 dark:text-gray-100 focus:outline-none focus:border-amber-500 shadow-sm">
-        </div>
-      </div>
-    `;
-
-    // Priority selector logic
-    body.querySelectorAll('.btn-rework-priority').forEach(btn => {
-      btn.addEventListener('click', () => {
-        activeReworkPriority = btn.getAttribute('data-priority');
-        body.querySelectorAll('.btn-rework-priority').forEach(b => {
-          const p = b.getAttribute('data-priority');
-          b.className = `btn-rework-priority py-2 text-xs rounded-xl font-bold cursor-pointer transition-all text-center ${activeReworkPriority === p ? (p === 'Critical' ? 'bg-rose-600 text-white shadow-sm' : (p === 'High' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'bg-sky-600 text-white shadow-sm')) : 'bg-gray-100 dark:bg-slate-900 border border-gray-200 dark:border-white/10 text-gray-600 dark:text-gray-300'}`;
-        });
-      });
-    });
-
-    // Footer actions
-    footer.innerHTML = `
-      <button type="button" id="btnCancelRework" class="px-5 py-2.5 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300 font-bold text-xs rounded-2xl cursor-pointer transition-colors shrink-0">
-        Cancel
-      </button>
-      <button type="button" id="btnSubmitRework" class="px-6 py-2.5 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-bold text-xs rounded-2xl cursor-pointer transition-all shadow-md flex items-center gap-1.5 shrink-0 relative z-30 select-none">
-        <svg class="w-4 h-4 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-        <span class="pointer-events-none">Submit Rework Request</span>
-      </button>
-    `;
-
-    document.getElementById('btnCancelRework')?.addEventListener('click', closeReworkModal);
-    document.getElementById('btnSubmitRework')?.addEventListener('click', submitRework);
-  }
-
-  async function submitRework(e) {
-    if (e && typeof e.preventDefault === 'function') e.preventDefault();
-    if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
-
-    if (isSubmittingRework) {
-      console.warn('[submitRework] Blocked duplicate submission: Rework request already in progress...');
-      return;
-    }
-    isSubmittingRework = true;
-
-    const btnSubmit = document.getElementById('btnSubmitRework');
-    if (btnSubmit) {
-      btnSubmit.disabled = true;
-      btnSubmit.style.pointerEvents = 'none';
-      btnSubmit.classList.add('opacity-75', 'cursor-not-allowed');
-      btnSubmit.innerHTML = `
-        <svg class="w-4 h-4 animate-spin pointer-events-none" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
-        </svg>
-        <span class="pointer-events-none">Submitting Rework...</span>
-      `;
-    }
-
-    const reports = getReports();
-    const report = findReportById(reports, activeReworkReportId) || findReportById(reports, currentDetailId);
-    if (!report) {
-      isSubmittingRework = false;
-      if (btnSubmit) {
-        btnSubmit.disabled = false;
-        btnSubmit.style.pointerEvents = 'auto';
-        btnSubmit.classList.remove('opacity-75', 'cursor-not-allowed');
-        btnSubmit.innerHTML = `
-          <svg class="w-4 h-4 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-          <span class="pointer-events-none">Submit Rework Request</span>
-        `;
-      }
-      showToast('Error', 'Maintenance report not found.', 'error');
-      return;
-    }
-
-    const instructionsInput = document.getElementById('reworkInstructionsInput');
-    const instructions = instructionsInput ? instructionsInput.value.trim() : '';
-    if (!instructions) {
-      isSubmittingRework = false;
-      if (btnSubmit) {
-        btnSubmit.disabled = false;
-        btnSubmit.style.pointerEvents = 'auto';
-        btnSubmit.classList.remove('opacity-75', 'cursor-not-allowed');
-        btnSubmit.innerHTML = `
-          <svg class="w-4 h-4 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-          <span class="pointer-events-none">Submit Rework Request</span>
-        `;
-      }
-      showToast('Required Field', 'Please provide instructions for the rework request.', 'error');
-      instructionsInput?.focus();
-      return;
-    }
-
-    const dueDateInput = document.getElementById('reworkDueDateInput');
-    const chosenDueDate = (dueDateInput && dueDateInput.value) ? dueDateInput.value : report.dueDate;
-
-    try {
-      const newReportId = `RWK-${Math.floor(1000 + Math.random() * 9000)}`;
-      const defectPhoto = (report.issue && (report.issue.photoUri || report.issue.photo || report.issue.photo_url)) ||
-        report.photo_url ||
-        (Array.isArray(report.photos) && report.photos[0]) || null;
-
-      // Extract tasks that require rework: strictly the chosen task if specified
-      let reworkTasks = [];
-      if (activeReworkInitialTaskId && Array.isArray(report.tasks)) {
-        const chosen = report.tasks.find(
-          t => String(t.id) === String(activeReworkInitialTaskId) || t.id == activeReworkInitialTaskId
-        ) || (isNaN(parseInt(activeReworkInitialTaskId, 10)) ? null : report.tasks[parseInt(activeReworkInitialTaskId, 10) - 1]);
-        if (chosen) {
-          reworkTasks = [{
-            id: 1,
-            name: chosen.name,
-            status: 'In Progress',
-            notes: instructions,
-            photo: chosen.photo || chosen.photoUri || defectPhoto,
-            photoUri: chosen.photoUri || chosen.photo || defectPhoto,
-            photoUris: chosen.photoUris || (chosen.photoUri ? [chosen.photoUri] : (defectPhoto ? [defectPhoto] : [])),
-            verified: false,
-            updated: 'Pending Rework'
-          }];
-        }
-      }
-
-      if (reworkTasks.length === 0) {
-        // Fallback for general report rework: include any defective or unverified tasks
-        const targetTasks = (Array.isArray(report.tasks) ? report.tasks : []).filter(t => t.status === 'Needs Repair' || !t.verified);
-        if (targetTasks.length > 0) {
-          reworkTasks = targetTasks.map((t, idx) => ({
-            id: idx + 1,
-            name: t.name,
-            status: 'In Progress',
-            notes: instructions,
-            photo: t.photo || t.photoUri || defectPhoto,
-            photoUri: t.photoUri || t.photo || defectPhoto,
-            photoUris: t.photoUris || (t.photoUri ? [t.photoUri] : (defectPhoto ? [defectPhoto] : [])),
-            verified: false,
-            updated: 'Pending Rework'
-          }));
-        } else {
-          reworkTasks = [{
-            id: 1,
-            name: `${report.type || 'Maintenance'} — Corrective Rework`,
-            status: 'In Progress',
-            notes: instructions,
-            photo: defectPhoto,
-            photoUri: defectPhoto,
-            verified: false,
-            updated: 'Pending Rework'
-          }];
-        }
-      }
-
-      // 1. Create the brand new spawned Rework Report
-      const newReworkReport = {
-        id: newReportId,
-        airconId: report.airconId,
-        aircon_id: report.aircon_id,
-        aircon_name: report.aircon_name || report.airconId,
-        airconType: report.airconType,
-        aircon_type: report.aircon_type,
-        room: report.room,
-        room_name: report.room_name,
-        type: 'Maintenance Rework',
-        priority: activeReworkPriority || 'Critical',
-        staffName: report.staffName || 'HVAC Technician',
-        staff_name: report.staff_name || report.staffName,
-        staff_id: report.staff_id,
-        dueDate: chosenDueDate,
-        due_date: chosenDueDate,
-        createdDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-        created_date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-        status: 'Need Rework',
-        description: `Supervisor Rework Order: ${instructions}`,
-        issue: report.issue || null,
-        photo_url: defectPhoto,
-        tasks: reworkTasks,
-        verificationRemarks: '',
-        timeline: [
-          { title: `Maintenance rework order dispatched from Report ${report.id}`, time: 'Just now', done: true, by: 'Supervisor' },
-          { title: `Assigned to ${report.staffName || 'Staff'}`, time: 'Just now', done: true, by: 'Supervisor' },
-          { title: `Supervisor instructions: "${instructions.length > 50 ? instructions.slice(0, 47) + '...' : instructions}"`, time: 'Just now', done: false, by: 'Supervisor' }
-        ],
-        parentReportId: report.id,
-        parent_report_id: report.id,
-        created: new Date().toISOString()
-      };
-
-      // 2. Also update parent report status to 'Need Rework' and link the spawned rework order
-      report.status = 'Need Rework';
-      report.linkedReworkId = newReportId;
-      if (chosenDueDate) report.dueDate = chosenDueDate;
-
-      if (Array.isArray(report.tasks)) {
-        report.tasks.forEach(t => {
-          if (activeReworkInitialTaskId) {
-            if (String(t.id) === String(activeReworkInitialTaskId) || t.id == activeReworkInitialTaskId) {
-              t.status = 'In Progress';
-              t.verified = false;
-              t.notes = instructions;
-              t.updated = 'Just now';
-            }
-          } else {
-            if (t.status === 'Needs Repair' || !t.verified) {
-              t.status = 'In Progress';
-              t.verified = false;
-              t.notes = instructions;
-              t.updated = 'Just now';
-            }
-          }
-        });
-      }
-
-      if (!report.timeline) report.timeline = [];
-      const parentTimelineTitle = `Supervisor dispatched Rework Order ${newReportId}: "${instructions.length > 50 ? instructions.slice(0, 47) + '...' : instructions}"`;
-      const existingParentRwkIdx = report.timeline.findIndex(
-        tl => typeof tl?.title === 'string' && (tl.title.includes('Rework Order') || tl.title.includes('Supervisor requested rework'))
-      );
-      if (existingParentRwkIdx !== -1) {
-        report.timeline[existingParentRwkIdx] = { title: parentTimelineTitle, time: 'Just now', done: false, by: 'Supervisor' };
-      } else {
-        report.timeline.unshift({ title: parentTimelineTitle, time: 'Just now', done: false, by: 'Supervisor' });
-      }
-
-      // 3. Spawn directly into reports array at the top!
-      reports.unshift(newReworkReport);
-
-      // Fast local save & optimistic UI update
-      _reportsCache = syncReportsWithLinkedRepairs(deduplicateReports(reports.map(normalizeReport).filter(Boolean)));
-      try {
-        localStorage.setItem('ecoTrack_maintenance_reports', JSON.stringify(_reportsCache));
-        window.dispatchEvent(new Event('storage'));
-        if (typeof window.resetPageReportFilters === 'function') {
-          window.resetPageReportFilters(true);
-        } else {
-          refreshPageReportsView();
-        }
-        window.dispatchEvent(new CustomEvent('ecotrack:reports-updated', { detail: _reportsCache }));
-        broadcastMaintenanceChange('REWORK_SPAWNED');
-      } catch (e) {
-        console.error('Error saving maintenance reports locally:', e);
-      }
-
-      // Close modal and refresh detail view immediately
-      closeReworkModal();
-      renderDetailModalContent();
-      showToast('Rework Order Spawned', `Rework order ${newReportId} spawned and dispatched for ${report.airconId}!`, 'warning');
-
-      // Sync both to Supabase safely in the background
-      (async () => {
-        try {
-          await saveReports(reports, newReworkReport, true);
-          await saveReports(reports, report, false);
-          console.log(`[EcoTrack Rework Spawn] Synced ${newReportId} and parent ${report.id} to Supabase.`);
-        } catch (err) {
-          console.warn('[EcoTrack Rework Spawn] Background sync warning:', err);
-        } finally {
-          isSubmittingRework = false;
-        }
-      })();
-    } catch (err) {
-      console.error('[submitRework] Error submitting rework:', err);
-      showToast('Error', 'Failed to submit rework request.', 'error');
-      isSubmittingRework = false;
-      if (btnSubmit) {
-        btnSubmit.disabled = false;
-        btnSubmit.style.pointerEvents = 'auto';
-        btnSubmit.classList.remove('opacity-75', 'cursor-not-allowed');
-        btnSubmit.innerHTML = `
-          <svg class="w-4 h-4 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-          <span class="pointer-events-none">Submit Rework Request</span>
-        `;
-      }
-    }
-  }
-
-  // ===================================================================
-  // 3B.2. DEDICATED REWORK TASK MODAL CONTROLLER (ecoReworkTaskModal)
-  // Strictly isolated for Rework Reports (RWK-xxxx) only
-  // ===================================================================
-
-  let activeReworkTaskReportId = null;
-  let activeReworkTaskId = null;
-  let isSubmittingReworkTask = false;
-
-  function injectReworkTaskModalHTML() {
-    if (document.getElementById('ecoReworkTaskModal')) return;
-
-    const modalHTML = `
-      <div id="ecoReworkTaskModal" class="hidden fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-[9999] flex items-center justify-center p-3 sm:p-4 transition-all">
-        <div class="bg-white dark:bg-[#0c1328] border-2 border-amber-500/50 dark:border-amber-400/50 rounded-3xl w-full max-w-xl shadow-2xl flex flex-col overflow-hidden text-gray-800 dark:text-gray-100 transition-all max-h-[92vh]">
-          <div id="ecoReworkTaskModalHeader" class="px-5 pt-5 pb-3 flex items-start justify-between border-b border-gray-100 dark:border-white/10 shrink-0">
-            <!-- Injected by renderReworkTaskModalContent -->
-          </div>
-          <div id="ecoReworkTaskModalBody" class="p-5 overflow-y-auto eco-slim-scrollbar space-y-4 flex-1">
-            <!-- Injected by renderReworkTaskModalContent -->
-          </div>
-          <div id="ecoReworkTaskModalFooter" class="px-5 py-3.5 bg-gray-50 dark:bg-slate-950/80 border-t border-gray-100 dark:border-white/10 flex items-center justify-between gap-2 shrink-0 relative z-20">
-            <!-- Injected by renderReworkTaskModalContent -->
-          </div>
-        </div>
-      </div>
-    `;
-
-    document.body.insertAdjacentHTML('beforeend', modalHTML);
-
-    const modal = document.getElementById('ecoReworkTaskModal');
-    modal?.addEventListener('click', (e) => {
-      if (e.target === modal) closeReworkTaskModal();
-    });
-
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && modal && !modal.classList.contains('hidden')) {
-        closeReworkTaskModal();
-      }
-    });
-  }
-
-  function closeReworkTaskModal() {
-    const modal = document.getElementById('ecoReworkTaskModal');
-    if (modal) {
-      modal.classList.add('hidden');
-      modal.style.display = 'none';
-    }
-    activeReworkTaskReportId = null;
-    activeReworkTaskId = null;
-    isSubmittingReworkTask = false;
-    document.body.style.overflow = '';
-    refreshPageReportsView();
-  }
-
-  function openReworkTaskModal(reportId, taskId) {
-    activeReworkTaskReportId = reportId;
-    activeReworkTaskId = taskId;
-
-    let modal = document.getElementById('ecoReworkTaskModal');
-    if (!modal) {
-      injectReworkTaskModalHTML();
-      modal = document.getElementById('ecoReworkTaskModal');
-    }
-    if (!modal) return;
-
-    const reports = getReports();
-    let report = findReportById(reports, reportId) || findReportById(reports, currentDetailId);
-    if (!report) {
-      console.warn('[openReworkTaskModal] No rework report found for ID:', reportId);
-      return;
-    }
-
-    if (!Array.isArray(report.tasks) || report.tasks.length === 0) {
-      report.tasks = [
-        {
-          id: 1,
-          name: report.description ? report.description.replace(/^Supervisor Rework Order:\s*/i, '') : 'Quality Correction Task',
-          status: 'In Progress',
-          notes: report.description || 'Quality rework task',
-          updated: 'Pending Rework'
-        }
-      ];
-    }
-
-    let task = report.tasks.find(t => String(t.id) === String(taskId) || t.id == taskId);
-    if (!task && !isNaN(parseInt(taskId, 10))) {
-      task = report.tasks[parseInt(taskId, 10) - 1];
-    }
-    if (!task) {
-      task = report.tasks[0];
-    }
-
-    renderReworkTaskModalContent(report, task);
-
-    modal.classList.remove('hidden');
-    modal.style.display = 'flex';
-    modal.style.zIndex = '100002';
-    document.body.style.overflow = 'hidden';
-  }
-
-  function renderReworkTaskModalContent(report, task) {
-    const header = document.getElementById('ecoReworkTaskModalHeader');
-    const body = document.getElementById('ecoReworkTaskModalBody');
-    const footer = document.getElementById('ecoReworkTaskModalFooter');
-    if (!header || !body || !footer) return;
-
-    const isDone = task.status === 'Completed';
-    const parentId = report.parentReportId || report.parent_report_id || null;
-
-    header.innerHTML = `
-      <div class="flex-1 pr-3">
-        <div class="text-[11px] font-extrabold text-amber-600 dark:text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-          QUALITY CONTROL & REWORK TASK
-        </div>
-        <div class="flex items-center flex-wrap gap-2 mt-0.5">
-          <h3 class="text-xl font-bold text-[#18392B] dark:text-white tracking-tight">
-            ${task.name}
-          </h3>
-          <span class="px-2.5 py-0.5 text-[10px] font-mono font-bold rounded-full bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-400/40 shrink-0">
-            ${report.id}
-          </span>
-          <span class="px-2.5 py-0.5 text-[10px] font-bold rounded-full shrink-0 ${isDone ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-400/30' : 'bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-400/30'}">
-            ${isDone ? 'Corrected ✓' : 'Rework Pending ⏳'}
-          </span>
-        </div>
-      </div>
-      <button type="button" id="btnCloseReworkTaskModal" class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/20 text-gray-500 dark:text-gray-300 flex items-center justify-center font-bold text-sm cursor-pointer transition-colors shrink-0">
-        ✕
-      </button>
-    `;
-    document.getElementById('btnCloseReworkTaskModal')?.addEventListener('click', closeReworkTaskModal);
-
-    const taskPhoto = task.photo || task.photoUri || (Array.isArray(task.photoUris) && task.photoUris[0]) || report.photo_url || null;
-    const supervisorDirective = task.notes || report.description || 'Quality rework mandate: re-inspect, correct defect, and verify.';
-
-    body.innerHTML = `
-      <!-- Supervisor Mandate Banner -->
-      <div class="bg-gradient-to-r from-amber-500/15 via-amber-500/5 to-transparent dark:bg-gradient-to-r dark:from-amber-950/40 dark:to-transparent border-2 border-amber-500/40 rounded-2xl p-3.5 space-y-2">
-        <div class="flex items-center justify-between gap-2">
-          <div class="flex items-center gap-2">
-            <span class="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-amber-500 text-slate-950 shadow-xs">
-              Supervisor Directive
-            </span>
-            <span class="text-xs font-bold text-amber-600 dark:text-amber-400">Action Required</span>
-          </div>
-          ${parentId ? `
-            <span class="text-[10px] font-mono text-gray-500 dark:text-gray-400">Origin: <strong>${parentId}</strong></span>
-          ` : ''}
-        </div>
-        <p class="text-xs font-medium text-gray-800 dark:text-gray-200 bg-white/80 dark:bg-slate-900/70 p-3 rounded-xl border border-amber-500/25 leading-relaxed">
-          "${supervisorDirective}"
-        </p>
-      </div>
-
-      <!-- Unit & Technician Metadata -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-        <div class="bg-gray-50/80 dark:bg-slate-900/60 border border-gray-200 dark:border-white/10 rounded-xl p-3 text-xs">
-          <span class="text-[10px] text-gray-400 font-bold uppercase block">Target Equipment</span>
-          <span class="font-bold text-gray-900 dark:text-white block truncate">${report.airconId} — ${report.room}</span>
-          <span class="text-[11px] text-gray-500 dark:text-gray-400 block truncate">📍 Unit Type: ${report.airconType || 'Split AC'}</span>
-        </div>
-        <div class="bg-gray-50/80 dark:bg-slate-900/60 border border-gray-200 dark:border-white/10 rounded-xl p-3 text-xs">
-          <span class="text-[10px] text-gray-400 font-bold uppercase block">Assigned Technician</span>
-          <span class="font-bold text-amber-600 dark:text-amber-400 block truncate">${report.staffName || 'HVAC Technician'}</span>
-          <span class="text-[11px] text-gray-500 dark:text-gray-400 block truncate">Due Date: ${report.dueDate || 'Expedited'}</span>
-        </div>
-      </div>
-
-      <!-- Defect Photo Evidence -->
-      ${taskPhoto ? `
-        <div class="bg-white dark:bg-[#0c1426] border border-amber-500/30 rounded-2xl p-3.5 space-y-2 shadow-xs">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
-              <svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-              Defect Photo Evidence:
-            </span>
-            <span class="text-[10px] text-gray-400">Click image to enlarge</span>
-          </div>
-          <div class="flex items-center gap-3">
-            <img src="${taskPhoto}" alt="Defect evidence" class="w-20 h-20 object-cover rounded-xl border border-amber-500/40 shadow-xs cursor-pointer hover:opacity-90 transition-opacity shrink-0" onclick="window.EcoTrackMaintenance.openImageLightbox(['${taskPhoto}'], '${task.name} Defect Evidence', 0)">
-            <div class="min-w-0 text-xs text-gray-600 dark:text-gray-400 space-y-1">
-              <span class="font-bold text-gray-800 dark:text-gray-200 block">Inspection photo captured during evaluation</span>
-              <p class="text-[11px] leading-relaxed">Review the defect shown in the photo above and ensure corrective maintenance meets all standards before sign-off.</p>
-            </div>
-          </div>
-        </div>
-      ` : ''}
-
-      <!-- Technician Correction Notes -->
-      <div class="space-y-1.5">
-        <label class="block text-xs font-bold text-gray-800 dark:text-gray-200">
-          Technician Resolution / Correction Notes:
-        </label>
-        <textarea id="rwkTaskResolutionNotes" rows="2" class="w-full bg-white dark:bg-[#081326] border border-gray-200 dark:border-white/15 rounded-2xl p-3 text-xs text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-amber-500 resize-none shadow-sm transition-colors" placeholder="Describe actions taken to correct this defect...">${task.resolutionNotes || ''}</textarea>
-      </div>
-
-      <!-- Quick Status Toggle Card -->
-      <div class="p-3 bg-gray-50/80 dark:bg-slate-900/80 border border-gray-200 dark:border-white/10 rounded-2xl flex items-center justify-between gap-3 text-xs">
-        <div class="min-w-0">
-          <span class="font-bold text-gray-900 dark:text-white block">Current Task Status</span>
-          <span class="text-[11px] text-gray-500 dark:text-gray-400 block">${isDone ? 'Marked as corrected by technician' : 'Pending re-work and verification'}</span>
-        </div>
-        <button type="button" id="btnRwkModalToggleStatus" class="px-3.5 py-1.5 rounded-xl font-bold text-xs cursor-pointer transition-all shadow-xs shrink-0 ${isDone ? 'bg-emerald-500 text-white hover:bg-emerald-600' : 'bg-amber-500 text-slate-950 hover:bg-amber-400'}">
-          ${isDone ? 'Status: Corrected ✓' : 'Status: Rework Pending ⏳'}
-        </button>
-      </div>
-    `;
-
-    let currentIsDone = isDone;
-
-    const toggleBtn = document.getElementById('btnRwkModalToggleStatus');
-    toggleBtn?.addEventListener('click', () => {
-      currentIsDone = !currentIsDone;
-      toggleBtn.className = `px-3.5 py-1.5 rounded-xl font-bold text-xs cursor-pointer transition-all shadow-xs shrink-0 ${currentIsDone ? 'bg-emerald-500 text-white hover:bg-emerald-600' : 'bg-amber-500 text-slate-950 hover:bg-amber-400'}`;
-      toggleBtn.textContent = currentIsDone ? 'Status: Corrected ✓' : 'Status: Rework Pending ⏳';
-      updateSaveButtonText(currentIsDone);
-    });
-
-    const updateSaveButtonText = (done) => {
-      const btnSave = document.getElementById('btnSaveReworkTask');
-      if (!btnSave) return;
-      if (done) {
-        btnSave.className = "px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold text-xs rounded-2xl cursor-pointer transition-all shadow-md flex items-center gap-1.5 shrink-0";
-        btnSave.innerHTML = `
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
-          <span>Mark as Corrected ✓</span>
-        `;
-      } else {
-        btnSave.className = "px-5 py-2.5 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-bold text-xs rounded-2xl cursor-pointer transition-all shadow-md flex items-center gap-1.5 shrink-0";
-        btnSave.innerHTML = `
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-          <span>Save Rework Notes</span>
-        `;
-      }
-    };
-
-    footer.innerHTML = `
-      <button type="button" id="btnCancelReworkTaskModal" class="px-5 py-2.5 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300 font-bold text-xs rounded-2xl cursor-pointer transition-colors shrink-0">
-        Close
-      </button>
-      <button type="button" id="btnSaveReworkTask" class="px-5 py-2.5 ${isDone ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-amber-500 hover:bg-amber-400 text-slate-950'} active:scale-95 font-bold text-xs rounded-2xl cursor-pointer transition-all shadow-md flex items-center gap-1.5 shrink-0">
-        ${isDone ? `
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
-          <span>Mark as Corrected ✓</span>
-        ` : `
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
-          <span>Save & Mark Corrected ✓</span>
-        `}
-      </button>
-    `;
-
-    document.getElementById('btnCancelReworkTaskModal')?.addEventListener('click', closeReworkTaskModal);
-
-    document.getElementById('btnSaveReworkTask')?.addEventListener('click', async () => {
-      const notesInput = document.getElementById('rwkTaskResolutionNotes');
-      const resNotes = notesInput ? notesInput.value.trim() : '';
-
-      task.status = currentIsDone ? 'Completed' : 'In Progress';
-      task.resolutionNotes = resNotes;
-      task.updated = 'Just now';
-
-      const allTasksDone = (report.tasks || []).every(t => t.status === 'Completed');
-      if (allTasksDone) {
-        report.status = 'For Verification';
-      } else {
-        report.status = 'Need Rework';
-      }
-
-      const reports = getReports();
-      await saveReports(reports, report, false);
-
-      showToast(
-        currentIsDone ? 'Task Corrected' : 'Task Updated',
-        `"${task.name}" is now marked as ${currentIsDone ? 'Corrected ✓' : 'Rework Pending ⏳'}.`,
-        'success'
-      );
-
-      closeReworkTaskModal();
-
-      // Refresh rework detail modal if open
-      if (currentDetailId === report.id) {
-        renderDetailModalContent();
-      }
-    });
-  }
+  function injectReworkModalHTML() {}
+  function openReworkModal() {}
+  function closeReworkModal() {}
+  function renderReworkModalContent() {}
+  function submitRework() {}
+  function injectReworkTaskModalHTML() {}
+  function openReworkTaskModal() {}
+  function closeReworkTaskModal() {}
+  function renderReworkTaskModalContent() {}
 
   // ===================================================================
   // 3C. CORRECTIVE REPAIR TASK MODAL CONTROLLER
@@ -5759,32 +5455,32 @@
       ];
     }
 
-    // 2. Temperature Sensor / Thermistor
+    // 2. Temperature Control / Thermistor
     if (raw.includes('temperature') || raw.includes('temp') || raw.includes('thermal') || raw.includes('thermistor')) {
       return [
         'Safety Isolation & Electrical Circuit Lockout',
-        'Access Sensor Terminal & Measure Resistance/Continuity with Multimeter',
-        'Replace Defective Temperature Sensor Probe and Secure Mounting Clip',
-        'Calibrate Sensor Reading and Test Telemetry Response in Dashboard'
+        'Access Control Terminal & Measure Resistance/Continuity with Multimeter',
+        'Replace Defective Temperature Control Probe and Secure Mounting Clip',
+        'Calibrate Control Reading and Test Telemetry Response in Dashboard'
       ];
     }
 
-    // 3. Pressure Sensor / Air Pressure / PS-802 / Pneumatics
-    if (raw.includes('pressure') || raw.includes('ps-') || raw.includes('baro') || raw.includes('pneumatic')) {
+    // 3. Pressure Control / Air Pressure / PS-802 / Pneumatics
+    if (raw.includes('rotation') || raw.includes('rpm') || raw.includes('airflow')) {
       return [
         'Safety Isolation & Lock Out Power Circuit',
-        'Inspect Pressure Sensor Tubing, Pneumatic Ports, and Cable Harness',
-        'Clean Port & Replace Damaged Pressure Sensor Module (PS-802)',
-        'Calibrate Zero-Point Offset & Verify Pressure Telemetry Under Operation'
+        'Inspect the rotating assembly, supports, and sensor connection',
+        'Clean the disc and optical gap; inspect the monitoring device',
+        'Verify pulse detection and the Airflow Indicator RPM during operation'
       ];
     }
 
-    // 4. Energy Sensor / CT / Current / Voltage / Power
-    if (raw.includes('energy') || raw.includes('power') || raw.includes('current') || raw.includes('voltage') || raw.includes('watt') || raw.includes('ct sensor')) {
+    // 4. Energy Control / CT / Current / Voltage / Power
+    if (raw.includes('energy') || raw.includes('power') || raw.includes('current') || raw.includes('voltage') || raw.includes('watt') || raw.includes('ct control')) {
       return [
         'Electrical Lock-Out / Tag-Out (LOTO) & Verify Zero Voltage',
         'Inspect Current Transformer (CT) Clamps, Wiring, and Terminal Block',
-        'Replace Faulty Energy Monitoring Sensor / Metering Transducer',
+        'Replace Faulty Energy Monitoring Control / Metering Transducer',
         'Restore Electrical Supply & Verify Real-Time Current, Voltage, and kWh Telemetry'
       ];
     }
@@ -5835,13 +5531,13 @@
       return `Perform comprehensive air conditioning cleaning service for ${componentName}. Remove and deep clean air filters, pressure wash evaporator coils and blower fan, unclog condensate drainage tray and pipe, sanitize internal housing, and test cooling efficiency.`;
     }
     if (raw.includes('temperature') || raw.includes('temp') || raw.includes('thermal') || raw.includes('thermistor')) {
-      return `Diagnose and repair temperature monitoring malfunction for ${componentName}. Inspect wiring harness, test sensor resistance/continuity, replace defective thermal probe if required, and calibrate sensor telemetry.`;
+      return `Diagnose and repair temperature monitoring malfunction for ${componentName}. Inspect wiring harness, test control resistance/continuity, replace defective thermal probe if required, and calibrate control telemetry.`;
     }
-    if (raw.includes('pressure') || raw.includes('ps-') || raw.includes('baro')) {
-      return `Diagnose and service air pressure sensor system (${componentName}). Clean pneumatic sensing lines, replace damaged pressure transducer, calibrate zero-point offset, and verify live pressure telemetry logs.`;
+    if (raw.includes('rotation') || raw.includes('rpm') || raw.includes('airflow')) {
+      return `Inspect the rotation monitoring assembly (${componentName}). Check that the shaft turns freely, clean the disc and optical gap, inspect the connection, and verify the Airflow Indicator RPM against the expected wheel rotation.`;
     }
     if (raw.includes('energy') || raw.includes('power') || raw.includes('current') || raw.includes('voltage')) {
-      return `Inspect and repair energy monitoring circuitry for ${componentName}. Test current transformer (CT) clamp, check terminal connections, replace faulty metering sensor, and verify electrical telemetry readings.`;
+      return `Inspect and repair energy monitoring circuitry for ${componentName}. Test current transformer (CT) clamp, check terminal connections, replace faulty metering control, and verify electrical telemetry readings.`;
     }
     return `Diagnose and execute corrective repair for defect on ${componentName}. Inspect root cause, perform necessary maintenance or part replacement, reassemble unit, and validate operational performance.`;
   }
@@ -5877,7 +5573,7 @@
       repairTask = report.tasks.find(t => t.status === 'Needs Repair');
     }
 
-    const repairComponentName = repairTask?.name || report.issue?.component || 'Air Pressure Sensor (PS-802)';
+    const repairComponentName = repairTask?.name || report.issue?.component || 'Monitoring device';
     const repairNotes = repairTask?.notes || report.issue?.notes || '';
 
     activeRepairPriority = 'Critical';
@@ -5947,7 +5643,7 @@
     _lastRenderedTaskId = repairTask?.id || null;
 
     const rawIssueComp = typeof report.issue?.component === 'string' ? report.issue.component.split(/[,;/]+/)[0].trim() : '';
-    const repairComponentName = repairTask?.name || rawIssueComp || 'Air Pressure Sensor (PS-802)';
+    const repairComponentName = repairTask?.name || rawIssueComp || 'Monitoring device';
 
     let repairNotes = repairTask?.notes?.trim() || '';
     if (!repairNotes && typeof report.issue?.notes === 'string') {
@@ -6175,7 +5871,7 @@
           <label class="block text-[11px] font-bold text-gray-600 dark:text-gray-300 mb-1.5 uppercase">Assign Specialist / Technician</label>
           <select id="repairStaffSelect" class="w-full bg-white dark:bg-[#081326] border border-gray-200 dark:border-white/15 rounded-xl px-3 py-2 text-xs font-semibold text-gray-800 dark:text-gray-100 focus:outline-none focus:border-rose-500 shadow-sm cursor-pointer">
             ${staffList.length > 0 ? staffList.map(s => `
-              <option value="${s.name}" ${(s.name === (existingStaff || report.staffName)) ? 'selected' : ''}>${s.name} (${s.role || 'Technician'})</option>
+              <option value="${s.id}" ${(s.id === (existingStaff || report.staff_id || report.staffId)) ? 'selected' : ''}>${s.name} (${s.role || 'Technician'})</option>
             `).join('') : `
               <option value="${existingStaff || report.staffName || 'HVAC Technician'}">${existingStaff || report.staffName || 'HVAC Technician'}</option>
             `}
@@ -6485,13 +6181,14 @@
       (report.issue && report.issue.component ? report.tasks.find(t => isComponentInIssue(t.name, report.issue)) : null) ||
       report.tasks.find(t => t.status === 'Needs Repair' || t.status === 'Under Repair')
     ) : null;
-    const repairComponentName = repairTask?.name || report.issue?.component || 'Air Pressure Sensor (PS-802)';
+    const repairComponentName = repairTask?.name || report.issue?.component || 'Monitoring device';
     const repairNotes = repairTask?.notes || report.issue?.notes || 'Component defect detected during inspection requiring repair/replacement.';
 
     const titleInput = document.getElementById('repairTaskTitleInput');
     const title = titleInput ? titleInput.value.trim() : '';
     const staffSelect = document.getElementById('repairStaffSelect');
-    const staffName = (staffSelect && staffSelect.value) ? staffSelect.value : (report.staffName || 'HVAC Technician');
+    const staffId = resolveValidStaffId(staffSelect?.value || report.staff_id || report.staffId, report.staffName);
+    const staffName = getStaffList().find(s => s.id === staffId)?.name || report.staffName || 'HVAC Technician';
     const dueDateInput = document.getElementById('repairDueDateInput');
     const defaultDueDate = new Date(Date.now() + 86400000).toISOString().split('T')[0];
     const dueDate = (dueDateInput && dueDateInput.value) ? dueDateInput.value : defaultDueDate;
@@ -6541,6 +6238,8 @@
         priority: activeRepairPriority || 'Critical',
         staffName: staffName,
         staff_name: staffName,
+        staff_id: staffId,
+        staffId: staffId,
         dueDate: dueDate,
         due_date: dueDate,
         createdDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
@@ -6728,12 +6427,12 @@
     activeEditRepairId = report.id;
     activeEditRepairReport = report;
     activeEditRepairSteps = Array.isArray(report.tasks) && report.tasks.length > 0
-      ? report.tasks.map(t => ({ id: t.id, name: t.name || '', status: t.status || 'Not Started', notes: t.notes || '' }))
+      ? report.tasks.map(t => ({ ...t, id: t.id, name: t.name || '', status: t.status || 'Not Started', notes: t.notes || '' }))
       : [
         { id: 1, name: 'Safety Isolation & Electrical Circuit Lockout', status: 'Not Started' },
         { id: 2, name: 'Diagnose Defect & Test Continuity with Multimeter', status: 'Not Started' },
         { id: 3, name: 'Replace Defective Component & Secure Mountings', status: 'Not Started' },
-        { id: 4, name: 'Calibrate Sensor and Verify Telemetry in Dashboard', status: 'Not Started' }
+        { id: 4, name: 'Calibrate Control and Verify Telemetry in Dashboard', status: 'Not Started' }
       ];
 
     injectEditRepairTaskModalHTML();
@@ -6768,18 +6467,19 @@
     const staffList = getStaffList();
     const activeStaff = staffList.filter(s => s && !s.isArchived && s.status !== 'Archived' && !s.is_archived);
     if (!activeStaff.some(s => s.name === report.staffName) && report.staffName && report.staffName !== 'Unassigned') {
-      activeStaff.unshift({ name: report.staffName, role: 'Technician' });
+      activeStaff.unshift({ id: report.staff_id || report.staffId, name: report.staffName, role: 'Technician' });
     }
 
     const parentId = report.parentReportId || report.parent_report_id || null;
-    const flaggedComp = report.issue?.component || (Array.isArray(report.tasks) && report.tasks[0]?.name) || 'Defective Sensor / Component';
-    const editDefectPhotos = (Array.isArray(report.photos) && report.photos.length > 0)
+    const flaggedComp = report.issue?.component || (Array.isArray(report.tasks) && report.tasks[0]?.name) || 'Defective Control / Component';
+    const rawEditDefectPhotos = (Array.isArray(report.photos) && report.photos.length > 0)
       ? report.photos
       : ((Array.isArray(report.issue?.photos) && report.issue.photos.length > 0)
         ? report.issue.photos
         : ((Array.isArray(report.issue?.photoUris) && report.issue.photoUris.length > 0)
           ? report.issue.photoUris
           : (report.photo_url ? [report.photo_url] : (report.issue?.photo ? [report.issue.photo] : []))));
+    const editDefectPhotos = rawEditDefectPhotos.map(resolvePhotoUrl).filter(Boolean);
 
     header.innerHTML = `
       <div class="flex items-center gap-3">
@@ -6811,8 +6511,8 @@
             </svg>
           </div>
           <div class="truncate">
-            <span class="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider block">Target Aircon & Sensor Unit</span>
-            <span class="text-xs font-bold text-gray-800 dark:text-white truncate block">Sensor: ${report.airconId} • ${report.room}</span>
+            <span class="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider block">Target Aircon & Control Unit</span>
+            <span class="text-xs font-bold text-gray-800 dark:text-white truncate block">${maintenanceDeviceLabel()}: ${maintenanceDisplayText(maintenanceReportEquipment(report).controllerName)} • ${maintenanceDisplayText(maintenanceReportEquipment(report).location)}</span>
           </div>
         </div>
         ${parentId ? `
@@ -6826,7 +6526,7 @@
       <div class="space-y-3">
         <div>
           <label class="block text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-1">Flagged Defective Component</label>
-          <input type="text" id="editRepComponentInput" value="${flaggedComp}" class="w-full bg-white dark:bg-[#0c1328] border border-gray-200 dark:border-rose-500/40 rounded-xl px-3.5 py-2 text-xs font-bold text-gray-800 dark:text-white focus:outline-none focus:border-rose-500 transition-colors shadow-xs" placeholder="e.g. Temperature Sensor Inspection">
+          <input type="text" id="editRepComponentInput" value="${flaggedComp}" class="w-full bg-white dark:bg-[#0c1328] border border-gray-200 dark:border-rose-500/40 rounded-xl px-3.5 py-2 text-xs font-bold text-gray-800 dark:text-white focus:outline-none focus:border-rose-500 transition-colors shadow-xs" placeholder="e.g. Temperature Control Inspection">
         </div>
 
         <div>
@@ -6835,17 +6535,55 @@
         </div>
 
         ${editDefectPhotos.length > 0 ? `
-          <div class="p-3 bg-white dark:bg-[#0c162d] border border-rose-500/30 rounded-2xl space-y-1.5 shadow-xs">
+          <div class="p-3 bg-white dark:bg-[#0c162d] border border-rose-500/30 rounded-2xl space-y-2 shadow-xs">
             <div class="flex items-center justify-between">
-              <span class="text-[10px] uppercase font-bold text-gray-500 dark:text-gray-400">Attached Defect Proof Evidence</span>
-              <span class="px-2 py-0.5 text-[10px] font-mono font-bold rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-300 border border-rose-500/30">
-                ${editDefectPhotos.length} ${editDefectPhotos.length === 1 ? 'Photo' : 'Photos'}
-              </span>
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] uppercase font-bold text-gray-700 dark:text-gray-300">Attached Defect Proof Evidence</span>
+                <span class="px-2 py-0.5 text-[10px] font-mono font-bold rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-300 border border-rose-500/30">
+                  ${editDefectPhotos.length} ${editDefectPhotos.length === 1 ? 'Photo' : 'Photos'}
+                </span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                ${editDefectPhotos.length > 4 ? `
+                  <button type="button" id="btnToggleEditDefectPhotosView" class="px-2 py-0.5 text-[10px] font-bold rounded-md bg-white dark:bg-slate-900 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-300 border border-rose-400/40 transition-all flex items-center gap-1 cursor-pointer shadow-2xs" title="Toggle between compact row and full grid">
+                    <span id="txtToggleEditDefectPhotos">${window._editDefectEvidenceExpanded ? 'Minimize ▴' : 'Expand All ▾'}</span>
+                  </button>
+                ` : ''}
+                <button type="button" id="btnOpenEditDefectGallery" class="px-2 py-0.5 text-[10px] font-bold rounded-md bg-rose-600 hover:bg-rose-500 text-white transition-all flex items-center gap-1 cursor-pointer shadow-xs" title="Open Fullscreen Gallery">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"/></svg>
+                  <span>Gallery</span>
+                </button>
+              </div>
             </div>
-            <div class="grid grid-cols-3 sm:grid-cols-6 gap-2">
+
+            <!-- Minimized Strip View (Default when > 4 photos) -->
+            <div id="editDefectPhotosCompactContainer" class="${(editDefectPhotos.length > 4 && !window._editDefectEvidenceExpanded) ? 'flex' : 'hidden'} items-center gap-2 overflow-x-auto eco-slim-scrollbar py-1 pb-1.5">
+              ${editDefectPhotos.slice(0, 8).map((url, i) => `
+                <div class="edit-defect-thumbnail w-14 h-14 sm:w-16 sm:h-16 rounded-xl overflow-hidden border-2 border-rose-400/50 shadow-xs cursor-pointer hover:scale-105 hover:border-rose-500 transition-all relative group bg-black/20 shrink-0" data-idx="${i}" title="View proof evidence ${i + 1} of ${editDefectPhotos.length}">
+                  <img src="${url}" class="w-full h-full object-cover" alt="Defect Photo ${i + 1}" loading="lazy" onerror="window.handlePhotoLoadError ? window.handlePhotoLoadError(this, ${i + 1}) : (this.onerror=null, this.parentElement.innerHTML='<div class=\\'w-full h-full flex items-center justify-center text-[9px] text-rose-400\\'>Photo</div>');">
+                  <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-bold gap-1">
+                    <span>🔍</span>
+                  </div>
+                  <span class="absolute bottom-1 right-1 px-1 py-0.2 text-[8px] font-mono font-bold rounded bg-black/70 text-white backdrop-blur-xs">${i + 1}</span>
+                </div>
+              `).join('')}
+              ${editDefectPhotos.length > 8 ? `
+                <div id="btnEditDefectPhotosMorePill" class="w-14 h-14 sm:w-16 sm:h-16 rounded-xl border-2 border-dashed border-rose-400/60 hover:border-rose-500 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-300 flex flex-col items-center justify-center cursor-pointer transition-all shrink-0 p-1 text-center shadow-xs" title="View all ${editDefectPhotos.length} photos">
+                  <span class="text-xs font-black">+${editDefectPhotos.length - 8}</span>
+                  <span class="text-[8px] font-bold">More</span>
+                </div>
+              ` : ''}
+            </div>
+
+            <!-- Expanded Grid View -->
+            <div id="editDefectPhotosGridContainer" class="${(editDefectPhotos.length <= 4 || window._editDefectEvidenceExpanded) ? 'grid' : 'hidden'} grid-cols-4 sm:grid-cols-6 gap-2">
               ${editDefectPhotos.map((url, i) => `
-                <div class="edit-defect-thumbnail w-full aspect-square rounded-xl overflow-hidden border-2 border-rose-400/50 shadow-xs cursor-pointer hover:scale-105 hover:border-rose-500 transition-all bg-black/20" data-idx="${i}" title="View proof evidence ${i + 1} of ${editDefectPhotos.length}">
-                  <img src="${url}" class="w-full h-full object-cover" alt="Defect Photo ${i + 1}" onerror="this.onerror=null;this.parentElement.innerHTML='<div class=\\'w-full h-full flex items-center justify-center text-[10px] text-rose-400\\'>Failed</div>';">
+                <div class="edit-defect-thumbnail w-full aspect-square rounded-xl overflow-hidden border-2 border-rose-400/50 shadow-xs cursor-pointer hover:scale-105 hover:border-rose-500 transition-all relative group bg-black/20" data-idx="${i}" title="View proof evidence ${i + 1} of ${editDefectPhotos.length}">
+                  <img src="${url}" class="w-full h-full object-cover" alt="Defect Photo ${i + 1}" loading="lazy" onerror="window.handlePhotoLoadError ? window.handlePhotoLoadError(this, ${i + 1}) : (this.onerror=null, this.parentElement.innerHTML='<div class=\\'w-full h-full flex items-center justify-center text-[9px] text-rose-400\\'>Photo</div>');">
+                  <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-bold gap-1">
+                    <span>🔍</span>
+                  </div>
+                  <span class="absolute bottom-1 right-1 px-1 py-0.2 text-[8px] font-mono font-bold rounded bg-black/70 text-white backdrop-blur-xs">${i + 1}</span>
                 </div>
               `).join('')}
             </div>
@@ -6868,7 +6606,7 @@
         <!-- Inline Add Step Form (Type Form) -->
         <div id="inlineAddEditRepStepForm" class="hidden items-center gap-2 p-2 bg-white dark:bg-[#0a0f1d] border-2 border-dashed border-rose-400/60 dark:border-rose-500/50 rounded-xl shadow-xs transition-all">
           <span class="checklist-step-badge badge-rose w-6 h-6 rounded-md bg-rose-600 text-white font-black text-xs flex items-center justify-center shrink-0 shadow-xs">+</span>
-          <input type="text" id="inputNewEditRepStep" placeholder="Type new remediation step (e.g. Replace faulty sensor, test pressure)..." class="flex-1 bg-transparent border-none text-xs font-bold text-gray-800 dark:text-gray-100 focus:outline-none placeholder-gray-400">
+          <input type="text" id="inputNewEditRepStep" placeholder="Type new remediation step (e.g. Replace faulty control, test pressure)..." class="flex-1 bg-transparent border-none text-xs font-bold text-gray-800 dark:text-gray-100 focus:outline-none placeholder-gray-400">
           <button type="button" id="btnConfirmAddEditRepStep" class="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-lg cursor-pointer transition-all shadow-xs flex items-center gap-1 shrink-0">
             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
             Add Step
@@ -6888,7 +6626,7 @@
         <div>
           <label class="block text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-1">Assigned Specialist</label>
           <select id="editRepStaffSelect" class="w-full bg-white dark:bg-[#0c1328] border border-gray-200 dark:border-rose-500/40 rounded-xl px-3 py-2 text-xs font-bold text-gray-800 dark:text-gray-200 focus:outline-none focus:border-rose-500 cursor-pointer shadow-xs">
-            ${activeStaff.map(s => `<option value="${s.name}" ${s.name === report.staffName ? 'selected' : ''}>${s.name}</option>`).join('')}
+            ${activeStaff.map(s => `<option value="${s.id}" ${s.id === (report.staff_id || report.staffId) ? 'selected' : ''}>${s.name}</option>`).join('')}
           </select>
         </div>
         <div>
@@ -6926,6 +6664,37 @@
       });
     });
 
+    const btnToggleEdit = body.querySelector('#btnToggleEditDefectPhotosView');
+    if (btnToggleEdit) {
+      btnToggleEdit.addEventListener('click', () => {
+        window._editDefectEvidenceExpanded = !window._editDefectEvidenceExpanded;
+        const compact = body.querySelector('#editDefectPhotosCompactContainer');
+        const grid = body.querySelector('#editDefectPhotosGridContainer');
+        const txt = body.querySelector('#txtToggleEditDefectPhotos');
+        if (window._editDefectEvidenceExpanded) {
+          compact?.classList.add('hidden');
+          compact?.classList.remove('flex');
+          grid?.classList.remove('hidden');
+          grid?.classList.add('grid');
+          if (txt) txt.textContent = 'Minimize ▴';
+        } else {
+          compact?.classList.remove('hidden');
+          compact?.classList.add('flex');
+          grid?.classList.add('hidden');
+          grid?.classList.remove('grid');
+          if (txt) txt.textContent = `Expand All (${editDefectPhotos.length}) ▾`;
+        }
+      });
+    }
+
+    body.querySelector('#btnEditDefectPhotosMorePill')?.addEventListener('click', () => {
+      openImageLightbox(editDefectPhotos, `Defect Evidence Photo 9 of ${editDefectPhotos.length}`, 8);
+    });
+
+    body.querySelector('#btnOpenEditDefectGallery')?.addEventListener('click', () => {
+      openImageLightbox(editDefectPhotos, `Defect Evidence Gallery (1 of ${editDefectPhotos.length})`, 0);
+    });
+
     const btnAddEditStep = document.getElementById('btnAddEditRepStep');
     const inlineAddEditForm = document.getElementById('inlineAddEditRepStepForm');
     const inputNewEditStep = document.getElementById('inputNewEditRepStep');
@@ -6952,7 +6721,7 @@
         return;
       }
       activeEditRepairSteps.push({
-        id: activeEditRepairSteps.length + 1,
+        id: 'task-' + Date.now().toString(36) + '-' + activeEditRepairSteps.length,
         name: val,
         status: 'Not Started'
       });
@@ -7008,7 +6777,7 @@
     }
   }
 
-  function saveEditRepairTaskModal() {
+  async function saveEditRepairTaskModal() {
     const reports = getReports();
     const report = findReportById(reports, activeEditRepairId);
     if (!report) return;
@@ -7021,7 +6790,8 @@
 
     const newComp = compInput ? compInput.value.trim() : '';
     const newDesc = descInput ? descInput.value.trim() : '';
-    const newStaff = staffSelect ? staffSelect.value.trim() : report.staffName;
+    const newStaffId = resolveValidStaffId(staffSelect?.value || report.staff_id || report.staffId, report.staffName);
+    const newStaff = getStaffList().find(s => s.id === newStaffId)?.name || report.staffName;
     const newPriority = prioritySelect ? prioritySelect.value.trim() : report.priority;
     const newDueDate = dueDateInput ? dueDateInput.value.trim() : report.dueDate;
 
@@ -7029,10 +6799,13 @@
     report.priority = newPriority || report.priority;
     report.staffName = newStaff;
     report.staff_name = newStaff;
+    report.staff_id = newStaffId;
+    report.staffId = newStaffId;
     report.dueDate = newDueDate || report.dueDate;
     report.due_date = newDueDate || report.due_date;
     report.tasks = activeEditRepairSteps.map((s, i) => ({
-      id: i + 1,
+      ...s,
+      id: s.id || 'task-' + Date.now().toString(36) + '-' + i,
       name: s.name || `Step #${i + 1}`,
       status: s.status || 'Not Started',
       notes: s.notes || '',
@@ -7051,7 +6824,8 @@
       by: 'Supervisor'
     });
 
-    saveReports(reports, report, false);
+    try { await saveReports(reports, report, false); }
+    catch { return; }
     closeEditRepairTaskModal();
     showToast('Repair Order Updated', `Repair order ${report.id} updated successfully!`, 'success');
     refreshPageReportsView();
@@ -7074,222 +6848,37 @@
     task.updated = 'Just now';
     const allDone = report.tasks.every(t => t.status === 'Completed');
     if (allDone) {
-      report.status = 'Completed';
+      report.status = isReportSubmittedForVerification(report) ? 'For Verification' : 'In Progress';
+      report.verified = false;
     } else if (report.tasks.some(t => t.status === 'In Progress' || t.status === 'Completed')) {
       report.status = 'In Progress';
+      report.verified = false;
     } else {
       report.status = 'Pending';
+      report.verified = false;
     }
 
-    saveReports(reports, report, false);
+    saveReports(reports, report, false, true).catch(() => {});
     renderDetailModalContent();
-  }
-
-  // ===================================================================
-  // 3.9. DEDICATED SUPERVISOR REWORK ORDER (RWK) EDIT & VIEW CONTROLLER
-  // ===================================================================
-
-  let activeEditReworkId = null;
-  let activeEditReworkReport = null;
-
-  function injectEditReworkModalHTML() {
-    if (document.getElementById('ecoEditReworkModal')) return;
-    const modalHTML = `
-      <div id="ecoEditReworkModal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-3 sm:p-5 transition-all">
-        <div class="bg-white dark:bg-[#0c1328] border-2 border-amber-500/50 dark:border-amber-400/50 rounded-3xl w-full max-w-xl shadow-2xl flex flex-col overflow-hidden text-gray-800 dark:text-gray-100 max-h-[92vh]">
-          <div id="ecoEditReworkModalHeader" class="px-6 py-4 bg-gradient-to-r from-amber-50 to-gray-50 dark:from-[#2d1b06] dark:to-[#0c1328] border-b border-amber-500/30 flex items-center justify-between shrink-0">
-            <!-- Injected by renderEditReworkModalContent -->
-          </div>
-          <div id="ecoEditReworkModalBody" class="p-6 overflow-y-auto space-y-4 flex-1 eco-slim-scrollbar bg-gray-50/50 dark:bg-[#080e1d]/80">
-            <!-- Injected by renderEditReworkModalContent -->
-          </div>
-          <div id="ecoEditReworkModalFooter" class="px-6 py-3.5 bg-gray-50 dark:bg-slate-950/90 border-t border-gray-200 dark:border-white/10 flex items-center justify-end gap-3 shrink-0">
-            <!-- Injected by renderEditReworkModalContent -->
-          </div>
-        </div>
-      </div>
-    `;
-    document.body.insertAdjacentHTML('beforeend', modalHTML);
-
-    const modal = document.getElementById('ecoEditReworkModal');
-    modal?.addEventListener('click', (e) => {
-      if (e.target === modal) closeEditReworkModal();
-    });
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && modal && !modal.classList.contains('hidden')) {
-        closeEditReworkModal();
-      }
-    });
-  }
-
-  function openEditReworkModal(reportId) {
-    if (!reportId) return;
-    const reports = getReports();
-    const report = findReportById(reports, reportId);
-    if (!report) {
-      showToast('Error', `Rework order ${reportId} not found.`, 'error');
-      return;
-    }
-
-    activeEditReworkId = report.id;
-    activeEditReworkReport = report;
-
-    injectEditReworkModalHTML();
-    renderEditReworkModalContent(report);
-
-    const modal = document.getElementById('ecoEditReworkModal');
-    if (modal) {
-      modal.classList.remove('hidden');
-      modal.style.display = 'flex';
-      document.body.style.overflow = 'hidden';
-    }
-  }
-
-  function closeEditReworkModal() {
-    const modal = document.getElementById('ecoEditReworkModal');
-    if (modal) {
-      modal.classList.add('hidden');
-      modal.style.display = 'none';
-      document.body.style.overflow = '';
-    }
-    activeEditReworkId = null;
-    activeEditReworkReport = null;
-  }
-
-  function renderEditReworkModalContent(report) {
-    const header = document.getElementById('ecoEditReworkModalHeader');
-    const body = document.getElementById('ecoEditReworkModalBody');
-    const footer = document.getElementById('ecoEditReworkModalFooter');
-    if (!header || !body || !footer) return;
-
-    const staffList = getStaffList();
-    const activeStaff = staffList.filter(s => s && !s.isArchived && s.status !== 'Archived' && !s.is_archived);
-    if (!activeStaff.some(s => s.name === report.staffName) && report.staffName && report.staffName !== 'Unassigned') {
-      activeStaff.unshift({ name: report.staffName, role: 'Technician' });
-    }
-
-    header.innerHTML = `
-      <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-500/20 border border-amber-500/40 text-amber-600 dark:text-amber-400 flex items-center justify-center shadow-sm shrink-0">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.3">
-            <polyline points="23 4 23 10 17 10"></polyline>
-            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
-          </svg>
-        </div>
-        <div>
-          <div class="flex items-center gap-2">
-            <h2 class="text-base font-bold text-gray-900 dark:text-white">Edit Supervisor Rework Order</h2>
-            <span class="px-2 py-0.5 text-xs font-mono font-black rounded-md bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-400/40">${report.id}</span>
-          </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 font-medium">Update supervisor directives & correction parameters</p>
-        </div>
-      </div>
-      <button type="button" onclick="window.EcoTrackMaintenance.closeEditReworkModal()" class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/20 text-gray-500 dark:text-gray-300 flex items-center justify-center font-bold text-sm cursor-pointer transition-colors">✕</button>
-    `;
-
-    body.innerHTML = `
-      <!-- Fixed Unit Context Badge -->
-      <div class="p-3.5 bg-white dark:bg-[#161208] border border-amber-500/30 rounded-2xl flex items-center justify-between gap-3 shadow-xs">
-        <div class="truncate">
-          <span class="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider block">Target Aircon & Location</span>
-          <span class="text-xs font-bold text-gray-800 dark:text-white truncate block">Sensor: ${report.airconId} • ${report.room}</span>
-        </div>
-        <span class="px-2.5 py-1 text-xs font-bold rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 shrink-0">Need Rework</span>
-      </div>
-
-      <!-- Supervisor Rejection Directives Textarea -->
-      <div>
-        <label class="block text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-1">Supervisor Rejection Directives</label>
-        <textarea id="editReworkDirectivesInput" rows="4" class="w-full bg-white dark:bg-[#0c1328] border border-gray-200 dark:border-amber-500/40 rounded-xl p-3 text-xs text-gray-800 dark:text-white focus:outline-none focus:border-amber-500 shadow-xs" placeholder="Specify the required rework instructions and corrections...">${report.description || ''}</textarea>
-      </div>
-
-      <!-- Assigned Technician & Due Date -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-        <div>
-          <label class="block text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-1">Assigned Technician</label>
-          <select id="editReworkStaffSelect" class="w-full bg-white dark:bg-[#0c1328] border border-gray-200 dark:border-amber-500/40 rounded-xl px-3 py-2 text-xs font-bold text-gray-800 dark:text-gray-200 focus:outline-none focus:border-amber-500 cursor-pointer shadow-xs">
-            ${activeStaff.map(s => `<option value="${s.name}" ${s.name === report.staffName ? 'selected' : ''}>${s.name}</option>`).join('')}
-          </select>
-        </div>
-        <div>
-          <label class="block text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-1">Expedited Due Date</label>
-          <input type="date" id="editReworkDueDateInput" value="${report.dueDate || ''}" class="w-full bg-white dark:bg-[#0c1328] border border-gray-200 dark:border-amber-500/40 rounded-xl px-3 py-2 text-xs font-bold text-gray-800 dark:text-gray-200 focus:outline-none focus:border-amber-500 shadow-xs">
-        </div>
-      </div>
-    `;
-
-    footer.innerHTML = `
-      <button type="button" onclick="window.EcoTrackMaintenance.closeEditReworkModal()" class="px-4 py-2 rounded-xl bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300 text-xs font-bold cursor-pointer transition-colors">
-        Cancel
-      </button>
-      <button type="button" id="btnSaveEditReworkModal" class="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-md shadow-amber-500/30 border border-amber-400 cursor-pointer transition-all flex items-center gap-1.5">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-        Save Rework Order
-      </button>
-    `;
-
-    document.getElementById('btnSaveEditReworkModal')?.addEventListener('click', saveEditReworkModal);
-  }
-
-  function saveEditReworkModal() {
-    const reports = getReports();
-    const report = findReportById(reports, activeEditReworkId);
-    if (!report) return;
-
-    const dirInput = document.getElementById('editReworkDirectivesInput');
-    const staffSelect = document.getElementById('editReworkStaffSelect');
-    const dueDateInput = document.getElementById('editReworkDueDateInput');
-
-    report.description = dirInput ? dirInput.value.trim() : report.description;
-    report.staffName = staffSelect ? staffSelect.value.trim() : report.staffName;
-    report.staff_name = report.staffName;
-    report.dueDate = dueDateInput ? dueDateInput.value.trim() : report.dueDate;
-    report.due_date = report.dueDate;
-
-    safeTimelineUnshift(report.timeline, {
-      title: 'Rework order updated by supervisor',
-      time: 'Just now',
-      done: true,
-      by: 'Supervisor'
-    });
-
-    saveReports(reports, report, false);
-    closeEditReworkModal();
-    showToast('Rework Order Updated', `Rework order ${report.id} updated successfully!`, 'success');
     refreshPageReportsView();
-    if (currentDetailId === report.id) {
-      renderDetailModalContent();
-    }
   }
 
-  function cycleReworkTaskStatus(reportId, taskId) {
-    const reports = getReports();
-    const report = findReportById(reports, reportId);
-    if (!report || !Array.isArray(report.tasks)) return;
-    const task = report.tasks.find(t => String(t.id) === String(taskId) || t.id == taskId);
-    if (!task) return;
-
-    if (task.status === 'Not Started' || task.status === 'Pending Rework') task.status = 'In Progress';
-    else if (task.status === 'In Progress') task.status = 'Completed';
-    else task.status = 'In Progress';
-
-    task.updated = 'Just now';
-    const allDone = report.tasks.every(t => t.status === 'Completed');
-    if (allDone) {
-      report.status = 'For Verification';
-    } else {
-      report.status = 'Need Rework';
-    }
-
-    saveReports(reports, report, false);
-    renderDetailModalContent();
-  }
+  // ===================================================================
+  // 3.9. EDIT REWORK ORDER REMOVED
+  // ===================================================================
+  function openEditReworkModal() {}
+  function closeEditReworkModal() {}
+  function injectEditReworkModalHTML() {}
+  function renderEditReworkModalContent() {}
+  function saveEditReworkModal() {}
+  function cycleReworkTaskStatus() {}
 
   // ===================================================================
   // 3.10. DEDICATED CORRECTIVE REPAIR DETAIL MODAL VIEW (REP)
   // ===================================================================
 
   function renderRepDetailModalContent(report, aircon) {
+    const equipment = maintenanceReportEquipment(report, aircon);
     const header = document.getElementById('ecoDetailModalHeader');
     const body = document.getElementById('ecoDetailModalBody');
     if (!header || !body) return;
@@ -7303,17 +6892,17 @@
     const defectComp = report.issue?.component || (report.tasks && report.tasks[0]?.name) || 'Defective AC Component';
     const defectNotes = report.description || report.issue?.notes || 'Hardware defect diagnosed during inspection.';
 
-    let statusBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-cyan-100 dark:bg-cyan-950/80 text-cyan-900 dark:text-cyan-300 border border-cyan-400 dark:border-cyan-400/60 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse shrink-0"></span>In Progress</span>`;
-    if (report.status === 'Completed' || allDone) {
-      statusBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-900 dark:text-emerald-300 border border-emerald-400 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>Completed</span>`;
-    } else if (report.status === 'Verified') {
-      statusBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-purple-100 dark:bg-purple-950/80 text-purple-900 dark:text-purple-300 border border-purple-400 whitespace-nowrap shadow-sm">Verified</span>`;
+    let statusBadge = `<span class="eco-status-info inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-cyan-100 dark:bg-cyan-950/80 text-cyan-900 dark:text-cyan-300 border border-cyan-400 dark:border-cyan-400/60 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse shrink-0"></span>In Progress</span>`;
+    if (report.status === 'Completed' || report.status === 'Verified' || report.verified) {
+      statusBadge = `<span class="eco-status-success inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-900 dark:text-emerald-300 border border-emerald-400 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>Completed ✓</span>`;
+    } else if (isReportSubmittedForVerification(report)) {
+      statusBadge = `<span class="eco-status-warning inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-purple-100 dark:bg-purple-950/80 text-purple-900 dark:text-purple-200 border border-purple-400 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-purple-600 animate-pulse shrink-0"></span>For Verification</span>`;
     }
 
     if (header.parentElement) {
       header.parentElement.className = "bg-white dark:bg-[#0c1328] border-2 border-rose-500/50 rounded-3xl w-full max-w-[980px] max-h-[90vh] shadow-2xl flex flex-col overflow-hidden text-gray-800 dark:text-gray-100 transition-colors";
     }
-    header.className = "bg-white dark:bg-gradient-to-r dark:from-[#2d0f18] dark:to-[#0c1328] px-6 py-4 border-b border-rose-500/30 flex items-center justify-between shrink-0 transition-colors";
+    header.className = "bg-white dark:bg-gradient-to-r dark:from-[#2d0f18] dark:to-[#0c1328] px-6 py-4 border-b border-rose-500/30 flex items-center justify-between flex-wrap gap-3 shrink-0 transition-colors";
     header.innerHTML = `
       <div class="flex items-center gap-3">
         <div class="w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-500 dark:text-rose-400 shadow-sm shrink-0">
@@ -7327,20 +6916,27 @@
             <span class="font-mono font-black text-rose-500 dark:text-rose-400">${report.id}</span>
             ${statusBadge}
             ${parentId ? `
-              <button type="button" class="btn-goto-parent px-2.5 py-0.5 text-xs font-mono font-bold rounded-full bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 cursor-pointer transition-colors" data-id="${parentId}" title="View origin report">
-                Dispatched from ${parentId} ↗
+              <button type="button" class="btn-goto-parent group inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-full cursor-pointer transition-all shadow-xs" data-id="${parentId}" title="View origin report ${parentId}">
+                <span class="opacity-80 font-normal">Dispatched from</span>
+                <span class="font-mono font-bold tracking-tight">${parentId}</span>
+                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" class="shrink-0 opacity-80 group-hover:opacity-100 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform">
+                  <path d="M7 17L17 7"></path>
+                  <polyline points="7 7 17 7 17 17"></polyline>
+                </svg>
               </button>
             ` : ''}
           </div>
-          <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Target: ${report.airconId} — ${report.room} • Created: ${report.createdDate}</p>
+          <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Target: ${maintenanceDisplayText(equipment.controllerName)} — ${maintenanceDisplayText(equipment.location)} • Created: ${report.createdDate}</p>
         </div>
       </div>
       <div class="flex items-center gap-2">
+        ${!((String(report.status || '').toLowerCase().includes('complete') || String(report.status || '').toLowerCase().includes('verif') || report.verified)) ? `
         <button type="button" onclick="window.EcoTrackMaintenance.openEditRepairTaskModal('${report.id}')"
           class="px-3.5 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-500/15 hover:bg-rose-500 hover:text-white dark:hover:bg-rose-500 dark:hover:text-white text-rose-700 dark:text-rose-300 border border-rose-400/50 flex items-center gap-1.5 text-xs font-bold transition-all cursor-pointer shadow-xs">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
           Edit Repair Order
         </button>
+        ` : ''}
         <button id="btnCloseDetailModal"
           class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/15 hover:bg-rose-50 dark:hover:bg-rose-500/30 text-gray-600 dark:text-white hover:text-rose-600 border border-gray-200 dark:border-white/25 flex items-center justify-center text-sm font-bold transition-all cursor-pointer shadow-sm">
           ✕
@@ -7362,18 +6958,28 @@
       if (!arrOrItem) return;
       if (Array.isArray(arrOrItem)) {
         arrOrItem.forEach(p => {
-          if (typeof p === 'string' && p.trim()) _defectPhotoSet.add(p.trim());
+          if (typeof p === 'string' && p.trim()) {
+            const r = resolvePhotoUrl(p.trim());
+            if (r) _defectPhotoSet.add(r);
+          }
         });
       } else if (typeof arrOrItem === 'string' && arrOrItem.trim()) {
         if (arrOrItem.trim().startsWith('[')) {
           try {
             const parsed = JSON.parse(arrOrItem);
-            if (Array.isArray(parsed)) parsed.forEach(p => p && _defectPhotoSet.add(String(p).trim()));
+            if (Array.isArray(parsed)) parsed.forEach(p => {
+              if (p) {
+                const r = resolvePhotoUrl(String(p).trim());
+                if (r) _defectPhotoSet.add(r);
+              }
+            });
           } catch (_) {
-            _defectPhotoSet.add(arrOrItem.trim());
+            const r = resolvePhotoUrl(arrOrItem.trim());
+            if (r) _defectPhotoSet.add(r);
           }
         } else {
-          _defectPhotoSet.add(arrOrItem.trim());
+          const r = resolvePhotoUrl(arrOrItem.trim());
+          if (r) _defectPhotoSet.add(r);
         }
       }
     };
@@ -7426,21 +7032,60 @@
         </div>
 
         ${defectPhotos.length > 0 ? `
-          <div>
-            <div class="flex items-center justify-between mb-1.5">
-              <span class="text-[10px] uppercase font-bold text-gray-500 dark:text-gray-400">Defect Proof Evidence</span>
-              <span class="px-2 py-0.5 text-[10px] font-mono font-bold rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-300 border border-rose-500/30">
-                ${defectPhotos.length} ${defectPhotos.length === 1 ? 'Photo' : 'Photos'}
-              </span>
+          <div class="bg-rose-500/5 dark:bg-rose-950/20 border border-rose-500/30 rounded-2xl p-3 space-y-2">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] uppercase font-bold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                  <svg class="w-3.5 h-3.5 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                  Defect Proof Evidence
+                </span>
+                <span class="px-2 py-0.5 text-[10px] font-mono font-bold rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-300 border border-rose-500/30">
+                  ${defectPhotos.length} ${defectPhotos.length === 1 ? 'Photo' : 'Photos'}
+                </span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                ${defectPhotos.length > 4 ? `
+                  <button type="button" id="btnToggleDefectPhotosView" class="px-2 py-0.5 text-[10px] font-bold rounded-md bg-white dark:bg-slate-900 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-300 border border-rose-400/40 transition-all flex items-center gap-1 cursor-pointer shadow-2xs" title="Toggle between compact row and full grid">
+                    <span id="txtToggleDefectPhotos">${window._defectEvidenceExpanded ? 'Minimize ▴' : 'Expand All ▾'}</span>
+                  </button>
+                ` : ''}
+                <button type="button" id="btnOpenDefectGallery" class="px-2 py-0.5 text-[10px] font-bold rounded-md bg-rose-600 hover:bg-rose-500 text-white transition-all flex items-center gap-1 cursor-pointer shadow-xs" title="Open Fullscreen Gallery">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"/></svg>
+                  <span>Gallery</span>
+                </button>
+              </div>
             </div>
-            <div class="grid grid-cols-3 sm:grid-cols-6 gap-2.5">
-              ${defectPhotos.map((url, i) => `
-                <div class="defect-evidence-thumbnail w-full aspect-square rounded-xl overflow-hidden border-2 border-rose-400/60 shadow-sm cursor-pointer hover:scale-105 hover:border-rose-500 transition-all relative group bg-black/20" data-idx="${i}" title="View proof evidence ${i + 1} of ${defectPhotos.length}">
-                  <img src="${url}" class="w-full h-full object-cover" alt="Defect Photo ${i + 1}" onerror="this.onerror=null;this.parentElement.innerHTML='<div class=\\'w-full h-full flex items-center justify-center text-[10px] text-rose-400\\'>Failed</div>';">
+
+            <!-- Minimized Strip View (Default when > 4 photos, saves ~140px vertical space) -->
+            <div id="defectPhotosCompactContainer" class="${(defectPhotos.length > 4 && !window._defectEvidenceExpanded) ? 'flex' : 'hidden'} items-center gap-2 overflow-x-auto eco-slim-scrollbar py-1 pb-1.5">
+              ${defectPhotos.slice(0, 8).map((url, i) => `
+                <div class="defect-evidence-thumbnail w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden border-2 border-rose-400/60 shadow-xs cursor-pointer hover:scale-105 hover:border-rose-500 transition-all relative group bg-black/20 shrink-0" data-idx="${i}" title="View proof evidence ${i + 1} of ${defectPhotos.length}">
+                  <img src="${url}" class="w-full h-full object-cover" alt="Defect Photo ${i + 1}" loading="lazy" onerror="window.handlePhotoLoadError ? window.handlePhotoLoadError(this, ${i + 1}) : (this.onerror=null, this.parentElement.innerHTML='<div class=\\'w-full h-full flex items-center justify-center text-[9px] text-rose-400\\'>Photo</div>');">
                   <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-bold gap-1">
                     <span>🔍</span>
-                    <span class="text-[10px]">${i + 1}/${defectPhotos.length}</span>
+                    <span class="text-[9px]">${i + 1}</span>
                   </div>
+                  <span class="absolute bottom-1 right-1 px-1 py-0.2 text-[8px] font-mono font-bold rounded bg-black/70 text-white backdrop-blur-xs">${i + 1}</span>
+                </div>
+              `).join('')}
+              ${defectPhotos.length > 8 ? `
+                <div id="btnDefectPhotosMorePill" class="w-16 h-16 sm:w-20 sm:h-20 rounded-xl border-2 border-dashed border-rose-400/60 hover:border-rose-500 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-300 flex flex-col items-center justify-center cursor-pointer transition-all shrink-0 p-1 text-center shadow-xs" title="View all ${defectPhotos.length} photos">
+                  <span class="text-xs font-black">+${defectPhotos.length - 8}</span>
+                  <span class="text-[9px] font-bold">More</span>
+                </div>
+              ` : ''}
+            </div>
+
+            <!-- Expanded Grid View -->
+            <div id="defectPhotosGridContainer" class="${(defectPhotos.length <= 4 || window._defectEvidenceExpanded) ? 'grid' : 'hidden'} grid-cols-4 sm:grid-cols-6 gap-2">
+              ${defectPhotos.map((url, i) => `
+                <div class="defect-evidence-thumbnail w-full aspect-square rounded-xl overflow-hidden border-2 border-rose-400/60 shadow-xs cursor-pointer hover:scale-105 hover:border-rose-500 transition-all relative group bg-black/20" data-idx="${i}" title="View proof evidence ${i + 1} of ${defectPhotos.length}">
+                  <img src="${url}" class="w-full h-full object-cover" alt="Defect Photo ${i + 1}" loading="lazy" onerror="window.handlePhotoLoadError ? window.handlePhotoLoadError(this, ${i + 1}) : (this.onerror=null, this.parentElement.innerHTML='<div class=\\'w-full h-full flex items-center justify-center text-[9px] text-rose-400\\'>Photo</div>');">
+                  <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-bold gap-1">
+                    <span>🔍</span>
+                    <span class="text-[9px]">${i + 1}</span>
+                  </div>
+                  <span class="absolute bottom-1 right-1 px-1 py-0.2 text-[8px] font-mono font-bold rounded bg-black/70 text-white backdrop-blur-xs">${i + 1}</span>
                 </div>
               `).join('')}
             </div>
@@ -7452,13 +7097,13 @@
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
         <div class="bg-white dark:bg-slate-900/80 border border-gray-200 dark:border-white/10 rounded-xl p-3 shadow-xs">
           <span class="text-[10px] text-gray-400 font-bold uppercase block">Unit</span>
-          <span class="text-xs font-bold text-gray-900 dark:text-white truncate block">${report.airconId}</span>
-          <span class="text-[10px] text-gray-500 dark:text-gray-400 block truncate">📍 ${report.room}</span>
+          <span class="text-xs font-bold text-gray-900 dark:text-white truncate block">${maintenanceDisplayText(equipment.controllerName)}</span>
+          <span class="text-[10px] text-gray-500 dark:text-gray-400 block truncate">📍 ${maintenanceDisplayText(equipment.location)}</span>
         </div>
         <div class="bg-white dark:bg-slate-900/80 border border-gray-200 dark:border-white/10 rounded-xl p-3 shadow-xs">
           <span class="text-[10px] text-gray-400 font-bold uppercase block">Aircon Type</span>
-          <span class="text-xs font-bold text-rose-600 dark:text-rose-400 truncate block">${report.airconType || aircon.brand || 'Split Type'}</span>
-          <span class="text-[10px] text-gray-500 dark:text-gray-400 block truncate">${aircon.state || 'Operational'}</span>
+          <span class="text-xs font-bold text-rose-600 dark:text-rose-400 truncate block">${maintenanceDisplayText(equipment.airconType)}</span>
+          <span class="text-[10px] text-gray-500 dark:text-gray-400 block truncate">${aircon.state || 'Unavailable'}</span>
         </div>
         <div class="bg-white dark:bg-slate-900/80 border border-gray-200 dark:border-white/10 rounded-xl p-3 shadow-xs">
           <span class="text-[10px] text-gray-400 font-bold uppercase block">Assigned Specialist</span>
@@ -7521,10 +7166,15 @@
       <!-- 4. ACTION BAR & VERIFICATION -->
       <div class="flex items-center justify-between pt-2">
         <span class="text-xs font-medium text-gray-500 dark:text-gray-400">
-          ${allDone ? '🎉 All repair steps completed! Ready to verify and close order.' : 'Work in progress. Update steps as repairs conclude.'}
+          ${allDone ? (isReportSubmittedForVerification(report) ? 'All repair steps submitted. Ready for administrator verification.' : 'Checklist complete. Awaiting technician submission.') : 'Work in progress. Update steps as repairs conclude.'}
         </span>
         <div class="flex items-center gap-2">
-          ${!allDone ? `
+          ${(report.status === 'Completed' || report.status === 'Verified' || report.verified) ? `
+            <div class="px-4 py-2 rounded-xl bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-400 font-bold text-xs flex items-center gap-2 select-none shadow-xs">
+              <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+              <span>Completed</span>
+            </div>
+          ` : (!allDone || !isReportSubmittedForVerification(report) ? `
             <button type="button" disabled class="px-5 py-2 rounded-xl bg-cyan-50 dark:bg-cyan-950/50 text-cyan-700 dark:text-cyan-300 border border-cyan-400/50 font-bold text-xs cursor-default flex items-center gap-2 select-none shadow-xs">
               <span class="w-2 h-2 rounded-full bg-cyan-500 animate-pulse"></span>
               <span>In Progress</span>
@@ -7534,12 +7184,12 @@
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
               <span>Verify Report</span>
             </button>
-          `}
+          `)}
         </div>
       </div>
     `;
 
-    // Click step row to open detail modal with verify & rework
+    // Click step row to open detail modal
     body.querySelectorAll('.remediation-step-item').forEach((item, idx) => {
       item.addEventListener('click', (e) => {
         if (e.target.closest('.btn-rep-cycle-step')) return;
@@ -7565,190 +7215,164 @@
       });
     });
 
-    document.getElementById('btnVerifyRepOrder')?.addEventListener('click', () => {
-      const reports = getReports();
-      const r = findReportById(reports, report.id);
-      if (r) {
-        r.status = 'Verified';
-        r.verified = true;
-        safeTimelineUnshift(r.timeline, { title: 'Repair report verified and signed off by supervisor', time: 'Just now', done: true, by: 'Supervisor' });
-        saveReports(reports, r, false);
-        closeDetailModal();
-        showToast('Report Verified', `Repair order ${r.id} successfully verified!`, 'success');
-      }
-    });
-  }
-
-  // ===================================================================
-  // 3.11. DEDICATED SUPERVISOR REWORK DETAIL MODAL VIEW (RWK)
-  // ===================================================================
-
-  function renderReworkDetailModalContent(report, aircon) {
-    const header = document.getElementById('ecoDetailModalHeader');
-    const body = document.getElementById('ecoDetailModalBody');
-    if (!header || !body) return;
-
-    const parentId = report.parentReportId || report.parent_report_id || null;
-
-    if (header.parentElement) {
-      header.parentElement.className = "bg-white dark:bg-[#0c1328] border-2 border-amber-500/50 rounded-3xl w-full max-w-[980px] max-h-[90vh] shadow-2xl flex flex-col overflow-hidden text-gray-800 dark:text-gray-100 transition-colors";
+    const btnToggle = body.querySelector('#btnToggleDefectPhotosView');
+    if (btnToggle) {
+      btnToggle.addEventListener('click', () => {
+        window._defectEvidenceExpanded = !window._defectEvidenceExpanded;
+        const compact = body.querySelector('#defectPhotosCompactContainer');
+        const grid = body.querySelector('#defectPhotosGridContainer');
+        const txt = body.querySelector('#txtToggleDefectPhotos');
+        if (window._defectEvidenceExpanded) {
+          compact?.classList.add('hidden');
+          compact?.classList.remove('flex');
+          grid?.classList.remove('hidden');
+          grid?.classList.add('grid');
+          if (txt) txt.textContent = 'Minimize ▴';
+        } else {
+          compact?.classList.remove('hidden');
+          compact?.classList.add('flex');
+          grid?.classList.add('hidden');
+          grid?.classList.remove('grid');
+          if (txt) txt.textContent = `Expand All (${defectPhotos.length}) ▾`;
+        }
+      });
     }
-    header.className = "bg-white dark:bg-gradient-to-r dark:from-[#2d1b06] dark:to-[#0c1328] px-6 py-4 border-b border-amber-500/30 flex items-center justify-between shrink-0 transition-colors";
-    header.innerHTML = `
-      <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-500 dark:text-amber-400 shadow-sm shrink-0">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.3">
-            <polyline points="23 4 23 10 17 10"></polyline>
-            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
-          </svg>
-        </div>
-        <div>
-          <div class="flex items-center flex-wrap gap-2">
-            <h2 class="text-lg font-bold text-gray-900 dark:text-white tracking-tight">Supervisor Rework Order</h2>
-            <span class="font-mono font-black text-amber-500 dark:text-amber-400">${report.id}</span>
-            <span class="px-3 py-1 text-xs font-bold rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">Need Rework</span>
-            ${parentId ? `
-              <button type="button" class="btn-goto-parent px-2.5 py-0.5 text-xs font-mono font-bold rounded-full bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 cursor-pointer transition-colors" data-id="${parentId}">
-                Rejected from ${parentId} ↗
-              </button>
-            ` : ''}
-          </div>
-          <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Target: ${report.airconId} — ${report.room} • Created: ${report.createdDate}</p>
-        </div>
-      </div>
-      <div class="flex items-center gap-2">
-        <button type="button" onclick="window.EcoTrackMaintenance.openEditReworkModal('${report.id}')"
-          class="px-3.5 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-500/15 hover:bg-amber-500 hover:text-slate-950 dark:hover:bg-amber-500 dark:hover:text-slate-950 text-amber-700 dark:text-amber-300 border border-amber-400/50 flex items-center gap-1.5 text-xs font-bold transition-all cursor-pointer shadow-xs">
-          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-          Edit Rework Order
-        </button>
-        <button id="btnCloseDetailModal"
-          class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/15 hover:bg-rose-50 dark:hover:bg-rose-500/30 text-gray-600 dark:text-white hover:text-rose-600 border border-gray-200 dark:border-white/25 flex items-center justify-center text-sm font-bold transition-all cursor-pointer shadow-sm">
-          ✕
-        </button>
-      </div>
-    `;
 
-    document.getElementById('btnCloseDetailModal')?.addEventListener('click', closeDetailModal);
-    header.querySelectorAll('.btn-goto-parent').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const pid = btn.getAttribute('data-id');
-        if (pid) openDetailModal(pid);
-      });
+    body.querySelector('#btnDefectPhotosMorePill')?.addEventListener('click', () => {
+      openImageLightbox(defectPhotos, `Defect Evidence Photo 9 of ${defectPhotos.length}`, 8);
     });
 
-    body.innerHTML = `
-      <!-- SUPERVISOR REJECTION DIRECTIVES BANNER -->
-      <div class="bg-gradient-to-r from-amber-500/15 via-amber-500/5 to-transparent dark:bg-gradient-to-r dark:from-amber-950/40 dark:to-transparent border-2 border-amber-500/50 rounded-2xl p-4 shadow-sm space-y-2">
-        <div class="flex items-center gap-2">
-          <span class="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded bg-amber-500 text-slate-950 shadow-xs">Quality Rejection</span>
-          <span class="text-xs font-bold text-amber-600 dark:text-amber-400">Supervisor Correction Mandate</span>
-        </div>
-        <p class="text-xs font-medium text-gray-800 dark:text-gray-200 bg-white/70 dark:bg-slate-900/60 p-3.5 rounded-xl border border-amber-500/30 leading-relaxed">
-          ${report.description || 'Routine maintenance failed quality inspection. Specific tasks must be re-executed according to standards.'}
-        </p>
-      </div>
-
-      <!-- UNIT & TECHNICIAN CONTEXT -->
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-        <div class="bg-white dark:bg-slate-900/80 border border-gray-200 dark:border-white/10 rounded-xl p-3 shadow-xs">
-          <span class="text-[10px] text-gray-400 font-bold uppercase block">Unit</span>
-          <span class="text-xs font-bold text-gray-900 dark:text-white truncate block">${report.airconId}</span>
-          <span class="text-[10px] text-gray-500 dark:text-gray-400 block truncate">📍 ${report.room}</span>
-        </div>
-        <div class="bg-white dark:bg-slate-900/80 border border-gray-200 dark:border-white/10 rounded-xl p-3 shadow-xs">
-          <span class="text-[10px] text-gray-400 font-bold uppercase block">Assigned Technician</span>
-          <span class="text-xs font-bold text-amber-600 dark:text-amber-400 truncate block">${report.staffName || 'Unassigned'}</span>
-          <span class="text-[10px] text-gray-500 dark:text-gray-400 block truncate">Due: ${report.dueDate || 'Expedited'}</span>
-        </div>
-        <div class="bg-white dark:bg-slate-900/80 border border-gray-200 dark:border-white/10 rounded-xl p-3 shadow-xs">
-          <span class="text-[10px] text-gray-400 font-bold uppercase block">Priority</span>
-          <span class="text-xs font-bold text-rose-600 dark:text-rose-400 block">${report.priority || 'Critical'}</span>
-          <span class="text-[10px] text-amber-500 font-semibold block">Expedited Turnaround</span>
-        </div>
-      </div>
-
-      <!-- FLAGGED TASKS TO REDO -->
-      <div class="bg-white dark:bg-[#0c1426] border-2 border-amber-500/30 rounded-2xl p-4 shadow-sm space-y-3">
-        <h3 class="text-xs font-black uppercase tracking-wider text-gray-800 dark:text-gray-200 flex items-center gap-2">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" class="text-amber-500"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
-          Tasks Flagged for Rework
-        </h3>
-        <div class="space-y-2">
-          ${(report.tasks || []).map((t, idx) => {
-            const isDone = t.status === 'Completed';
-            return `
-              <div class="rework-task-row flex items-center justify-between gap-3 p-3 bg-gray-50 dark:bg-slate-900/90 border border-gray-200 dark:border-white/10 rounded-xl hover:border-amber-500/50 hover:bg-amber-50/20 dark:hover:bg-amber-950/20 transition-all cursor-pointer shadow-xs select-none" data-task-id="${t.id}">
-                <div class="flex items-center gap-2.5 min-w-0 pointer-events-none">
-                  <span class="checklist-step-badge w-6 h-6 rounded-md ${isDone ? 'badge-emerald bg-emerald-500 text-white shadow-xs' : 'badge-amber bg-amber-500 text-slate-950 font-black shadow-xs'} text-xs flex items-center justify-center shrink-0">
-                    ${isDone ? '✓' : (idx + 1)}
-                  </span>
-                  <div class="min-w-0">
-                    <span class="text-xs font-bold text-gray-800 dark:text-white truncate block ${isDone ? 'line-through text-gray-400' : ''}">${t.name}</span>
-                    <span class="text-[10px] text-gray-500 dark:text-gray-400 block truncate">${t.notes ? (t.notes.length > 45 ? t.notes.slice(0, 42) + '...' : t.notes) : 'Tap row to view details & evidence'}</span>
-                  </div>
-                </div>
-                <div class="flex items-center gap-2 shrink-0">
-                  <button type="button" class="btn-rwk-cycle-task px-3 py-1 rounded-full text-xs font-bold shrink-0 cursor-pointer transition-all shadow-xs ${isDone ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'}" data-task-id="${t.id}">
-                    ${isDone ? 'Corrected ✓' : 'Rework Pending ⏳'}
-                  </button>
-                  <button type="button" class="btn-open-rwk-task p-1.5 rounded-lg bg-gray-200/60 dark:bg-white/10 hover:bg-amber-500 hover:text-slate-950 text-gray-600 dark:text-gray-300 text-xs font-bold transition-colors cursor-pointer" data-task-id="${t.id}" title="Open Rework Task Details">
-                    <svg class="w-4 h-4 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                  </button>
-                </div>
-              </div>
-            `;
-          }).join('')}
-        </div>
-      </div>
-
-      <!-- ACTION BAR -->
-      <div class="flex items-center justify-between pt-2">
-        <span class="text-xs text-gray-400">Once corrections are complete, resubmit for supervisor sign-off.</span>
-        <button type="button" id="btnResubmitRework" class="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow-md shadow-amber-500/30 border border-amber-400 transition-all cursor-pointer flex items-center gap-1.5">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-          Resubmit for Verification
-        </button>
-      </div>
-    `;
-
-    body.querySelectorAll('.rework-task-row').forEach(row => {
-      row.addEventListener('click', (e) => {
-        if (e.target.closest('.btn-rwk-cycle-task')) return;
-        const tid = row.getAttribute('data-task-id');
-        openReworkTaskModal(report.id, tid);
-      });
+    body.querySelector('#btnOpenDefectGallery')?.addEventListener('click', () => {
+      openImageLightbox(defectPhotos, `Defect Evidence Gallery (1 of ${defectPhotos.length})`, 0);
     });
 
-    body.querySelectorAll('.btn-open-rwk-task').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const tid = btn.getAttribute('data-task-id');
-        openReworkTaskModal(report.id, tid);
-      });
-    });
-
-    body.querySelectorAll('.btn-rwk-cycle-task').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const tid = btn.getAttribute('data-task-id');
-        cycleReworkTaskStatus(report.id, tid);
-      });
-    });
-
-    document.getElementById('btnResubmitRework')?.addEventListener('click', () => {
+    document.getElementById('btnVerifyRepOrder')?.addEventListener('click', async () => {
       const reports = getReports();
       const r = findReportById(reports, report.id);
       if (r) {
-        r.status = 'For Verification';
-        if (Array.isArray(r.tasks)) r.tasks.forEach(t => { t.status = 'Completed'; });
-        safeTimelineUnshift(r.timeline, { title: 'Rework completed by technician, resubmitted for verification', time: 'Just now', done: true, by: 'Technician' });
-        saveReports(reports, r, false);
+        r.status = 'Completed';
+        r.verified = true;
+        if (Array.isArray(r.tasks)) {
+          r.tasks.forEach(t => {
+            t.status = 'Completed';
+            t.verified = true;
+            if (!t.verifiedAt) t.verifiedAt = new Date().toISOString();
+          });
+        }
+        safeTimelineUnshift(r.timeline, {
+          title: 'Repair report verified and signed off by supervisor',
+          time: 'Just now',
+          done: true,
+          by: 'Supervisor'
+        });
+
+        try { await saveReports(reports, r, false); }
+        catch { return; }
+
+        // Synchronize and update the linked parent maintenance report
+        const pId = r.parentReportId || r.parent_report_id || r.linkedParentId;
+        let parentRep = pId ? findReportById(reports, pId) : null;
+        if (!parentRep && r.airconId) {
+          parentRep = reports.find(pr => pr && pr.id !== r.id && (pr.id === pId || pr.linkedRepairId === r.id || (Array.isArray(pr.tasks) && pr.tasks.some(t => t.linkedRepairId === r.id))));
+        }
+
+        if (parentRep) {
+          if (Array.isArray(parentRep.tasks)) {
+            // Strictly target ONLY the parent task linked to this specific repair order
+            let targetParentTask = parentRep.tasks.find(pt => pt.linkedRepairId && String(pt.linkedRepairId).trim().toLowerCase() === String(r.id).trim().toLowerCase());
+            if (!targetParentTask && (r.parentTaskId !== undefined && r.parentTaskId !== null)) {
+              targetParentTask = parentRep.tasks.find(pt => String(pt.id) === String(r.parentTaskId));
+            }
+            if (!targetParentTask && r.parentTaskName) {
+              targetParentTask = parentRep.tasks.find(pt => String(pt.name || '').trim().toLowerCase() === String(r.parentTaskName).trim().toLowerCase());
+            }
+            if (!targetParentTask && r.issue?.component) {
+              targetParentTask = parentRep.tasks.find(pt => String(pt.name || '').trim().toLowerCase() === String(r.issue.component).trim().toLowerCase());
+            }
+
+            if (targetParentTask) {
+              targetParentTask.status = 'Completed';
+              targetParentTask.repaired = true;
+              targetParentTask.verified = true;
+              targetParentTask.linkedRepairId = r.id;
+              targetParentTask.updated = 'Just now';
+              if (!targetParentTask.verifiedAt) targetParentTask.verifiedAt = new Date().toISOString();
+            }
+          }
+
+          // Check if there are remaining unfinished tasks or child repairs
+          const hasRemainingNeedsRepair = Array.isArray(parentRep.tasks) && parentRep.tasks.some(pt => pt.status === 'Needs Repair' && !pt.repaired);
+          const hasRemainingUnderRepair = Array.isArray(parentRep.tasks) && parentRep.tasks.some(pt => {
+            const cr = getRepairReportForTask(parentRep, pt, reports);
+            if (cr && String(cr.id).toLowerCase() !== String(r.id).toLowerCase() && !isRepairReportDone(cr)) return true;
+            return pt.status === 'Under Repair' && !pt.repaired;
+          });
+          const allParentDone = Array.isArray(parentRep.tasks) && parentRep.tasks.length > 0 && parentRep.tasks.every(pt => {
+            const cr = getRepairReportForTask(parentRep, pt, reports);
+            if (cr && String(cr.id).toLowerCase() !== String(r.id).toLowerCase() && !isRepairReportDone(cr)) return false;
+            return pt.status === 'Completed' || pt.repaired;
+          });
+          const allParentVerified = allParentDone && parentRep.tasks.every(pt => pt.verified);
+
+          if (hasRemainingNeedsRepair) {
+            parentRep.status = 'Needs Repair';
+            parentRep.verified = false;
+            if (parentRep.issue) {
+              parentRep.issue.repaired = false;
+              parentRep.issue.status = 'Needs Repair';
+            }
+          } else if (hasRemainingUnderRepair) {
+            parentRep.status = 'Under Repair';
+            parentRep.verified = false;
+            if (parentRep.issue) {
+              parentRep.issue.repaired = false;
+              parentRep.issue.status = 'Under Repair';
+            }
+          } else if (allParentVerified) {
+            parentRep.status = 'Completed';
+            parentRep.verified = true;
+            if (parentRep.issue) {
+              parentRep.issue.repaired = true;
+              parentRep.issue.status = 'Repaired';
+            }
+          } else if (allParentDone) {
+            parentRep.status = isReportSubmittedForVerification(parentRep) ? 'For Verification' : 'In Progress';
+            if (parentRep.issue) {
+              parentRep.issue.repaired = true;
+              parentRep.issue.status = 'Repaired';
+            }
+          }
+
+          safeTimelineUnshift(parentRep.timeline, {
+            title: `Repair ${r.id} verified by Supervisor${hasRemainingUnderRepair ? ' (other repairs still in progress)' : ''}`,
+            time: 'Just now',
+            done: true,
+            by: 'Supervisor'
+          });
+
+          try {
+            await saveReports(reports, parentRep, false);
+          } catch (pErr) {
+            console.warn('[btnVerifyRepOrder] Parent report save notice:', pErr);
+            return;
+          }
+        }
+
+
         closeDetailModal();
-        showToast('Resubmitted', `Rework order ${r.id} resubmitted for admin verification!`, 'success');
+        showToast('Report Verified', `Repair order ${r.id} verified and maintenance marked Completed!`, 'success');
+        refreshPageReportsView();
+        window.dispatchEvent(new Event('storage'));
+        window.dispatchEvent(new CustomEvent('ecotrack:reports-updated', { detail: _reportsCache }));
+        broadcastMaintenanceChange('REPAIR_VERIFIED');
       }
     });
   }
+
+  // ===================================================================
+  // 3.11. REWORK DETAIL VIEW REMOVED
+  // ===================================================================
+  function renderReworkDetailModalContent() {}
 
   function injectDetailModalHTML() {
     if (document.getElementById('ecoReportDetailModal')) return;
@@ -7788,29 +7412,18 @@
       return;
     }
 
-    const aircons = getAirconsDatabase();
-    const aircon = (aircons && aircons.length > 0)
-      ? (aircons.find(a => a.id === report.airconId || a.id === report.aircon_name || a.id === report.aircon_id) || aircons[0])
-      : {
-        id: report.airconId || 'node-1',
-        room: report.room || 'Main Campus',
-        brand: 'Split Type (Inverter)',
-        model: report.airconId || 'AC Unit',
-        state: 'Operational'
-      };
+    const aircon = findMaintenanceAircon(report) || {};
+    const equipment = maintenanceReportEquipment(report, aircon);
 
-    const isRepReport = String(report.id || '').trim().toUpperCase().startsWith('REP') || report.type === 'Corrective Repair' || report.type === 'Repair Task' || String(report.type || '').trim().toLowerCase().includes('corrective') || String(report.type || '').trim().toLowerCase().includes('repair');
-    const isReworkReport = String(report.id || '').trim().toUpperCase().startsWith('RWK') || report.type === 'Maintenance Rework' || report.type === 'Rework' || report.status === 'Need Rework' || report.status === 'Needs Rework';
+    const isRepReport = isActualRepairTask(report);
+    
 
     if (isRepReport) {
       renderRepDetailModalContent(report, aircon);
       return;
     }
 
-    if (isReworkReport) {
-      renderReworkDetailModalContent(report, aircon);
-      return;
-    }
+
 
     // Locate child corrective repair reports
     const childRepairs = getChildRepairReportsFor(report, reports);
@@ -7829,8 +7442,11 @@
           } else if (tDone) {
             t.status = 'Completed';
             t.repaired = true;
+            t.verified = false;
           } else {
-            if (!t.repaired) t.status = 'Under Repair';
+            t.status = 'Under Repair';
+            t.repaired = false;
+            t.verified = false;
           }
           if (!t.photo && Array.isArray(tRepair.tasks)) {
             const rPhotoTask = tRepair.tasks.find(rt => rt.photo || rt.photoUri);
@@ -7845,36 +7461,37 @@
       });
     }
 
-    const completedChildRepair = childRepairs.find(cr => isRepairReportDone(cr));
-    const activeChildRepair = childRepairs.find(cr => !isRepairReportDone(cr));
-    const repairReport = completedChildRepair || activeChildRepair || getRepairReportFor(report, reports);
-    const isRepairDone = Boolean(repairReport && isRepairReportDone(repairReport));
-    const isRepairVerified = Boolean(repairReport && isRepairReportVerified(repairReport));
+    const completedChildRepairs = childRepairs.filter(cr => isRepairReportDone(cr));
+    const activeChildRepairs = childRepairs.filter(cr => !isRepairReportDone(cr));
+    const isAllRepairsDone = childRepairs.length > 0 ? (activeChildRepairs.length === 0) : Boolean(report.issue?.repaired);
+    const isAllRepairsVerified = childRepairs.length > 0 ? (childRepairs.length === completedChildRepairs.filter(cr => isRepairReportVerified(cr)).length) : Boolean(report.verified);
+
+    const repairReport = activeChildRepairs[0] || completedChildRepairs[0] || getRepairReportFor(report, reports);
+    const isRepairDone = isAllRepairsDone;
+    const isRepairVerified = isAllRepairsVerified;
 
     const totalTasks = report.tasks ? report.tasks.length : 0;
     const completedTasks = report.tasks ? report.tasks.filter(t => t.status === 'Completed' || t.repaired).length : 0;
     const inProgressTasks = report.tasks ? report.tasks.filter(t => t.status === 'In Progress').length : 0;
     const notStartedTasks = report.tasks ? report.tasks.filter(t => t.status === 'Not Started').length : 0;
     const needsRepairTasks = isRepReport ? 0 : (report.tasks ? report.tasks.filter(t => t.status === 'Needs Repair' && !t.repaired).length : 0);
-    const underRepairTasks = isRepReport ? 0 : (report.tasks ? report.tasks.filter(t => (t.status === 'Under Repair' || Boolean(t.linkedRepairId) || Boolean(getRepairReportForTask(report, t, reports))) && !t.repaired).length : 0);
+    const underRepairTasks = isRepReport ? 0 : (report.tasks ? report.tasks.filter(t => (t.status === 'Under Repair' || (t.linkedRepairId && !isRepairReportDone(getRepairReportForTask(report, t, reports)))) && !t.repaired).length : 0);
 
     const hasActiveIssue = !isRepReport && Boolean(report.issue && !report.issue.repaired && !isRepairDone && report.issue.status !== 'Under Repair' && !repairReport);
     const hasNeedsRepair = !isRepReport && (needsRepairTasks > 0 || hasActiveIssue);
     const pct = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
-    const isAllTasksCompleted = totalTasks > 0 && completedTasks === totalTasks && !hasNeedsRepair;
+    const isAllTasksCompleted = totalTasks > 0 && completedTasks === totalTasks && !hasNeedsRepair && underRepairTasks === 0 && activeChildRepairs.length === 0;
 
-    if (report.status === 'Verified' || (report.verified && isAllTasksCompleted)) {
-      report.status = 'Verified';
-      report.verified = true;
-    } else if (report.status === 'Closed') {
-      report.status = 'Closed';
-    } else if (isAllTasksCompleted || report.status === 'For Verification' || report.status === 'Awaiting Admin Verification') {
-      // 100% completed checklist tasks automatically transition from Under Repair / In Progress to For Verification (Awaiting Admin Verification)!
-      report.status = 'For Verification';
-    } else if (isRepReport) {
-      report.status = 'In Progress';
+    if (underRepairTasks > 0 || activeChildRepairs.length > 0) {
+      report.status = 'Under Repair';
+      report.verified = false;
+      if (report.issue) {
+        report.issue.repaired = false;
+        report.issue.status = 'Under Repair';
+      }
     } else if (hasNeedsRepair) {
       report.status = 'Needs Repair';
+      report.verified = false;
       if (!report.issue && needsRepairTasks > 0) {
         const repTasks = report.tasks.filter(t => t.status === 'Needs Repair' && !t.repaired);
         if (repTasks.length > 0) {
@@ -7885,14 +7502,25 @@
           };
         }
       }
-    } else if (underRepairTasks > 0 || (repairReport && !isRepairDone)) {
-      report.status = 'Under Repair';
-    } else if (isRepairDone) {
-      report.status = 'For Verification';
+    } else if (report.status === 'Closed') {
+      report.status = 'Closed';
+    } else if (report.status === 'Completed' || report.status === 'Verified' || (report.verified && isAllTasksCompleted)) {
+      if (isAllTasksCompleted) {
+        report.status = 'Completed';
+        report.verified = true;
+      } else {
+        report.status = 'In Progress';
+      }
+    } else if (isAllTasksCompleted || report.status === 'For Verification' || report.status === 'Awaiting Admin Verification') {
+      report.status = isReportSubmittedForVerification(report) ? 'For Verification' : 'In Progress';
+    } else if (isRepReport) {
+      report.status = 'In Progress';
+    } else {
+      report.status = 'In Progress';
     }
 
-    const isVerified = report.status === 'Verified' || Boolean(report.verified && isAllTasksCompleted);
-    const isReadyForVerification = !isVerified && !hasNeedsRepair && (report.status === 'For Verification' || isAllTasksCompleted);
+    const isVerified = (report.status === 'Completed' || report.status === 'Verified' || Boolean(report.verified && isAllTasksCompleted)) && activeChildRepairs.length === 0 && underRepairTasks === 0;
+    const isReadyForVerification = !isVerified && !hasNeedsRepair && isReportSubmittedForVerification(report);
 
     const repairTask = report.tasks ? (report.tasks.find(t => t.status === 'Needs Repair' && !t.repaired) || report.tasks.find(t => t.status === 'Under Repair') || report.tasks.find(t => t.repaired)) : null;
     const repairComponentName = report.issue?.component || repairTask?.name || (repairReport?.tasks?.[1]?.name ? repairReport.tasks[1].name.replace(/^Component Disassembly & Diagnostic Check:\s*/i, '') : 'Defect Component');
@@ -7909,26 +7537,25 @@
       if (header.parentElement) {
         header.parentElement.className = "bg-white dark:bg-[#0c1328] border-2 border-gray-200 dark:border-[#10b981]/50 rounded-3xl w-full max-w-[980px] max-h-[90vh] shadow-2xl flex flex-col overflow-hidden text-gray-800 dark:text-gray-100 transition-colors";
       }
-      header.className = "bg-white dark:bg-gradient-to-r dark:from-[#0b291d] dark:to-[#081a14] px-6 py-4 border-b border-gray-200 dark:border-[#10b981]/30 flex items-center justify-between shrink-0 transition-colors";
-      let statusBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-gray-100 dark:bg-slate-800 text-gray-800 dark:text-gray-300 border border-gray-300 dark:border-slate-700 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-gray-600 dark:bg-gray-400 shrink-0"></span>${report.status}</span>`;
-      if (report.status === 'Verified' || isVerified) {
-        statusBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-900 dark:text-emerald-300 border border-emerald-400 dark:border-emerald-400/60 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600 dark:bg-emerald-400 shrink-0"></span>Verified ✓</span>`;
+      header.className = "bg-white dark:bg-gradient-to-r dark:from-[#0b291d] dark:to-[#081a14] px-6 py-4 border-b border-gray-200 dark:border-[#10b981]/30 flex items-center justify-between flex-wrap gap-3 shrink-0 transition-colors";
+      let statusBadge = `<span class="eco-status-neutral inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-gray-100 dark:bg-slate-800 text-gray-800 dark:text-gray-300 border border-gray-300 dark:border-slate-700 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-gray-600 dark:bg-gray-400 shrink-0"></span>${report.status}</span>`;
+      if ((report.status === 'Completed' || report.status === 'Verified' || isVerified) && activeChildRepairs.length === 0 && underRepairTasks === 0) {
+        statusBadge = `<span class="eco-status-success inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-900 dark:text-emerald-300 border border-emerald-400 dark:border-emerald-400/60 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600 dark:bg-emerald-400 shrink-0"></span>Completed ✓</span>`;
       } else if (report.status === 'For Verification' || isReadyForVerification || report.status === 'Awaiting Admin Verification') {
-        statusBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-purple-100 dark:bg-purple-950/80 text-purple-900 dark:text-purple-200 border border-purple-400 dark:border-purple-400/60 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-purple-600 dark:bg-purple-400 animate-pulse shrink-0"></span>For Verification</span>`;
+        statusBadge = `<span class="eco-status-warning inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-purple-100 dark:bg-purple-950/80 text-purple-900 dark:text-purple-200 border border-purple-400 dark:border-purple-400/60 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-purple-600 dark:bg-purple-400 animate-pulse shrink-0"></span>For Verification</span>`;
       } else if (report.status === 'In Progress') {
-        statusBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-cyan-100 dark:bg-cyan-950/80 text-cyan-900 dark:text-cyan-300 border border-cyan-400 dark:border-cyan-400/60 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-cyan-600 dark:bg-cyan-400 animate-pulse shrink-0"></span>In Progress</span>`;
+        statusBadge = `<span class="eco-status-info inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-cyan-100 dark:bg-cyan-950/80 text-cyan-900 dark:text-cyan-300 border border-cyan-400 dark:border-cyan-400/60 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-cyan-600 dark:bg-cyan-400 animate-pulse shrink-0"></span>In Progress</span>`;
       } else if (report.status === 'Pending') {
-        statusBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-300 border border-amber-400 dark:border-amber-400/60 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-amber-600 dark:bg-amber-400 shrink-0"></span>Pending</span>`;
-      } else if (report.status === 'Need Rework' || report.status === 'Needs Rework') {
-        statusBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-extrabold rounded-full bg-amber-100 dark:bg-amber-950/90 text-amber-900 dark:text-amber-300 border border-amber-400 dark:border-amber-500/70 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-amber-400 animate-pulse shrink-0"></span>Need Rework</span>`;
+        statusBadge = `<span class="eco-status-neutral inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-300 border border-amber-400 dark:border-amber-400/60 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-amber-600 dark:bg-amber-400 shrink-0"></span>Pending</span>`;
+
       } else if (report.status === 'Completed') {
-        statusBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-900 dark:text-emerald-300 border border-emerald-400 dark:border-emerald-400/60 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600 dark:bg-emerald-400 shrink-0"></span>Completed</span>`;
+        statusBadge = `<span class="eco-status-success inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-900 dark:text-emerald-300 border border-emerald-400 dark:border-emerald-400/60 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600 dark:bg-emerald-400 shrink-0"></span>Completed</span>`;
       } else if (report.status === 'Needs Repair') {
-        statusBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-extrabold rounded-full bg-rose-100 dark:bg-rose-950/90 text-rose-900 dark:text-rose-300 border border-rose-400 dark:border-rose-500/70 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-rose-600 dark:bg-rose-500 shrink-0"></span>Needs Repair</span>`;
+        statusBadge = `<span class="eco-status-danger inline-flex items-center gap-1.5 px-3 py-1 text-xs font-extrabold rounded-full bg-rose-100 dark:bg-rose-950/90 text-rose-900 dark:text-rose-300 border border-rose-400 dark:border-rose-500/70 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-rose-600 dark:bg-rose-500 shrink-0"></span>Needs Repair</span>`;
       } else if (report.status === 'Under Repair') {
-        statusBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-extrabold rounded-full bg-cyan-100 dark:bg-cyan-950/90 text-cyan-900 dark:text-cyan-300 border border-cyan-400 dark:border-cyan-400/70 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse shrink-0"></span>Under Repair</span>`;
+        statusBadge = `<span class="eco-status-info inline-flex items-center gap-1.5 px-3 py-1 text-xs font-extrabold rounded-full bg-cyan-100 dark:bg-cyan-950/90 text-cyan-900 dark:text-cyan-300 border border-cyan-400 dark:border-cyan-400/70 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse shrink-0"></span>Under Repair</span>`;
       } else if (report.status === 'Assigned') {
-        statusBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-sky-100 dark:bg-sky-950/80 text-sky-900 dark:text-sky-300 border border-sky-400 dark:border-sky-400/60 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-sky-600 dark:bg-sky-400 shrink-0"></span>Assigned</span>`;
+        statusBadge = `<span class="eco-status-info inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full bg-sky-100 dark:bg-sky-950/80 text-sky-900 dark:text-sky-300 border border-sky-400 dark:border-sky-400/60 whitespace-nowrap shadow-sm"><span class="w-1.5 h-1.5 rounded-full bg-sky-600 dark:bg-sky-400 shrink-0"></span>Assigned</span>`;
       }
 
       header.innerHTML = `
@@ -7951,15 +7578,46 @@
                 </span>
               ` : ''}
             </div>
-            <p class="text-xs font-medium text-gray-500 dark:text-gray-400">${report.airconId} — ${report.room} • Created on ${report.createdDate} • Last updated ${formatMaintenanceUpdateTime(report.updated || report.updated_at, 'Not updated yet')}</p>
+            <p class="text-xs font-medium text-gray-500 dark:text-gray-400">${maintenanceDisplayText(equipment.controllerName)} — ${maintenanceDisplayText(equipment.location)} • Created on ${report.createdDate} • Last updated ${formatMaintenanceUpdateTime(report.updated || report.updated_at, 'Not updated yet')}</p>
           </div>
         </div>
-        <button id="btnCloseDetailModal"
-          class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/15 hover:bg-rose-50 dark:hover:bg-rose-500/30 text-gray-600 dark:text-white hover:text-rose-600 border border-gray-200 dark:border-white/25 flex items-center justify-center text-sm font-bold transition-all cursor-pointer shadow-sm">
-          ✕
-        </button>
+        <div class="flex items-center gap-2">
+          <button id="btnDetailEditReport" type="button"
+            class="px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-500/15 hover:bg-emerald-600 hover:text-white dark:hover:bg-emerald-500 dark:hover:text-white text-emerald-700 dark:text-emerald-300 border border-emerald-400/50 flex items-center gap-1.5 text-xs font-bold transition-all cursor-pointer shadow-xs"
+            title="Edit Report">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+            Edit
+          </button>
+          <button id="btnDetailDeleteReport" type="button"
+            class="px-3 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-500/15 hover:bg-rose-600 hover:text-white dark:hover:bg-rose-500 dark:hover:text-white text-rose-700 dark:text-rose-300 border border-rose-400/50 flex items-center gap-1.5 text-xs font-bold transition-all cursor-pointer shadow-xs"
+            title="Delete Report">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.3"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            Delete
+          </button>
+          <button id="btnCloseDetailModal"
+            class="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/15 hover:bg-rose-50 dark:hover:bg-rose-500/30 text-gray-600 dark:text-white hover:text-rose-600 border border-gray-200 dark:border-white/25 flex items-center justify-center text-sm font-bold transition-all cursor-pointer shadow-sm">
+            ✕
+          </button>
+        </div>
       `;
       document.getElementById('btnCloseDetailModal')?.addEventListener('click', closeDetailModal);
+      document.getElementById('btnDetailEditReport')?.addEventListener('click', (event) => {
+        const targetId = report.id;
+        closeDetailModal();
+        if (isActualRepairTask(report)) {
+          openEditRepairTaskModal(targetId);
+        } else {
+          openEditReportModal(targetId, event.currentTarget);
+        }
+      });
+      document.getElementById('btnDetailDeleteReport')?.addEventListener('click', async () => {
+        if (await window.EcoModal.confirm({ title: 'Delete Report',
+          message: `Are you sure you want to permanently delete report ${report.id}?`,
+          confirmText: 'Delete Report', danger: true })) {
+          closeDetailModal();
+          deleteReports([report.id]);
+        }
+      });
     }
 
     // Render Body
@@ -7969,14 +7627,14 @@
         <!-- META OVERVIEW -->
         <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
           <div class="bg-white dark:bg-slate-900/80 border border-gray-200 dark:border-white/10 rounded-xl p-3 shadow-sm">
-            <span class="text-[10px] text-gray-500 dark:text-gray-400 font-bold uppercase block">AC Sensor Name</span>
-            <span class="text-xs font-bold text-gray-800 dark:text-white truncate block">${report.airconId}</span>
-            <span class="text-[10px] text-gray-500 dark:text-gray-400 block truncate">📍 ${report.room}</span>
+            <span class="text-[10px] text-gray-500 dark:text-gray-400 font-bold uppercase block">${maintenanceDeviceLabel()} Name</span>
+            <span class="text-xs font-bold text-gray-800 dark:text-white truncate block">${maintenanceDisplayText(equipment.controllerName)}</span>
+            <span class="text-[10px] text-gray-500 dark:text-gray-400 block truncate">📍 ${maintenanceDisplayText(equipment.location)}</span>
           </div>
           <div class="bg-white dark:bg-slate-900/80 border border-gray-200 dark:border-white/10 rounded-xl p-3 shadow-sm">
             <span class="text-[10px] text-gray-500 dark:text-gray-400 font-bold uppercase block">Type of Aircon</span>
-            <span class="text-xs font-bold text-[#18392B] dark:text-cyan-300 truncate block">${report.airconType || report.aircon_type || aircon.brand || 'Split Type (Inverter)'}</span>
-            <span class="text-[10px] text-gray-500 dark:text-gray-400 block truncate">${aircon.model || 'AC Unit'}</span>
+            <span class="text-xs font-bold text-[#18392B] dark:text-cyan-300 truncate block">${maintenanceDisplayText(equipment.airconType)}</span>
+            <span class="text-[10px] text-gray-500 dark:text-gray-400 block truncate">${maintenanceDisplayText(equipment.airconName)}</span>
           </div>
           <div class="bg-white dark:bg-slate-900/80 border border-gray-200 dark:border-white/10 rounded-xl p-3 shadow-sm">
             <span class="text-[10px] text-gray-500 dark:text-gray-400 font-bold uppercase block">Maintenance Type</span>
@@ -8012,6 +7670,11 @@
           </div>
         </div>
 
+        <section aria-label="Scope / Description" class="bg-white dark:bg-slate-900/80 border border-gray-200 dark:border-emerald-500/30 rounded-2xl p-4 shadow-sm">
+          <h4 class="text-xs font-bold text-[#18392B] dark:text-cyan-300 uppercase tracking-wider mb-2">Scope / Description</h4>
+          <p class="text-sm text-gray-800 dark:text-gray-100 leading-relaxed whitespace-pre-wrap break-words">${maintenanceDisplayText(report.description || 'No description provided.')}</p>
+        </section>
+
         <!-- PROGRESS SECTION -->
         <div class="bg-white dark:bg-[#081a14] border-2 border-emerald-500/30 dark:border-[#10b981]/40 rounded-2xl p-4 shadow-sm">
           <div class="flex items-center justify-between mb-2">
@@ -8026,11 +7689,11 @@
           </div>
           <div class="${isRepReport ? 'grid grid-cols-3 gap-2 text-xs' : 'grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs'}">
             <div class="bg-emerald-50 dark:bg-slate-950/80 border border-emerald-500/30 rounded-lg px-2.5 py-1.5 flex items-center justify-between">
-              <span class="text-emerald-700 dark:text-emerald-300 font-semibold">Completed</span>
+              <span class="eco-status-success text-emerald-700 dark:text-emerald-300 font-semibold">Completed</span>
               <span class="font-bold font-mono text-emerald-600 dark:text-emerald-400">${completedTasks}</span>
             </div>
             <div class="bg-cyan-50 dark:bg-slate-950/80 border border-cyan-500/30 rounded-lg px-2.5 py-1.5 flex items-center justify-between">
-              <span class="text-cyan-700 dark:text-cyan-300 font-semibold">In Progress</span>
+              <span class="eco-status-info text-cyan-700 dark:text-cyan-300 font-semibold">In Progress</span>
               <span class="font-bold font-mono text-cyan-600 dark:text-cyan-400">${inProgressTasks}</span>
             </div>
             <div class="bg-gray-100 dark:bg-slate-950/80 border border-gray-300 dark:border-slate-700 rounded-lg px-2.5 py-1.5 flex items-center justify-between">
@@ -8039,7 +7702,7 @@
             </div>
             ${!isRepReport ? `
             <div class="${needsRepairTasks > 0 ? 'bg-rose-50 dark:bg-slate-950/80 border border-rose-500/30' : 'bg-gray-100 dark:bg-slate-950/80 border border-gray-300 dark:border-slate-700'} rounded-lg px-2.5 py-1.5 flex items-center justify-between">
-              <span class="${needsRepairTasks > 0 ? 'text-rose-700 dark:text-rose-400' : 'text-gray-600 dark:text-slate-400'} font-semibold">Needs Repair</span>
+              <span class="eco-status-danger ${needsRepairTasks > 0 ? 'text-rose-700 dark:text-rose-400' : 'text-gray-600 dark:text-slate-400'} font-semibold">Needs Repair</span>
               <span class="font-bold font-mono ${needsRepairTasks > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-gray-600 dark:text-slate-400'}">${needsRepairTasks}</span>
             </div>
             ` : ''}
@@ -8056,11 +7719,11 @@
               </div>
               <div class="flex items-center gap-1.5">
                 <span class="px-2.5 py-0.5 text-[10px] font-mono font-bold rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 border border-emerald-400/50">
-                  Repair Task: ${repairReport.id}
+                  ${childRepairs.length > 1 ? `All ${childRepairs.length} Repairs Done` : `Repair Task: ${repairReport?.id || ''}`}
                 </span>
                 ${isRepairVerified ? `
                   <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-600 text-white shadow-xs">
-                    Verified ✓
+                    Completed
                   </span>
                 ` : ''}
               </div>
@@ -8076,33 +7739,63 @@
                 </span>
               </div>
               <p class="text-gray-600 dark:text-gray-300 font-medium leading-relaxed">
-                Defect has been successfully repaired and resolved via corrective repair task <strong class="text-emerald-700 dark:text-emerald-300 font-mono">${repairReport.id}</strong>.
-                ${repairReport.verificationRemarks ? `Remarks: "${repairReport.verificationRemarks}"` : (isRepairVerified ? 'Technician completed repairs and task has been verified.' : 'Technician completed repairs. Ready for administrator sign-off.')}
+                All defect repairs have been successfully completed and resolved${childRepairs.length > 1 ? ` (${childRepairs.map(c => c.id).join(', ')})` : (repairReport ? ` via corrective repair task <strong class="text-emerald-700 dark:text-emerald-300 font-mono">${repairReport.id}</strong>` : '')}.
+                ${repairReport?.verificationRemarks ? `Remarks: "${repairReport.verificationRemarks}"` : (isRepairVerified ? 'Technician completed repairs and task has been verified.' : 'Technician completed repairs. Ready for administrator sign-off.')}
               </p>
               <div class="flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400 mt-2 pt-1.5 border-t border-gray-100 dark:border-white/5">
                 <span>📍 Unit: <strong class="text-gray-800 dark:text-white">${report.airconId}</strong> (${report.room || 'Room'})</span>
-                <span>Assigned Staff: <strong class="text-gray-700 dark:text-gray-300">${repairReport.staffName || report.staffName || 'Technician'}</strong></span>
+                <span>Assigned Staff: <strong class="text-gray-700 dark:text-gray-300">${repairReport?.staffName || report.staffName || 'Technician'}</strong></span>
               </div>
             </div>
             <div class="flex items-center justify-between flex-wrap gap-2 pt-0.5">
-              <button type="button" class="btn-detail-view-repair px-3.5 py-1.5 bg-white dark:bg-slate-900 hover:bg-emerald-50 dark:hover:bg-slate-800 text-emerald-800 dark:text-emerald-300 font-bold text-xs rounded-xl border border-emerald-500/40 cursor-pointer shadow-xs transition-all flex items-center gap-1.5" data-repair-id="${repairReport.id}">
-                <svg class="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-                <span>View Repair Task ${repairReport.id}</span>
-              </button>
+              ${repairReport ? `
+                <button type="button" class="btn-detail-view-repair px-3.5 py-1.5 bg-white dark:bg-slate-900 hover:bg-emerald-50 dark:hover:bg-slate-800 text-emerald-800 dark:text-emerald-300 font-bold text-xs rounded-xl border border-emerald-500/40 cursor-pointer shadow-xs transition-all flex items-center gap-1.5" data-repair-id="${repairReport.id}">
+                  <svg class="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                  <span>View Repair Task ${repairReport.id}</span>
+                </button>
+              ` : '<span></span>'}
               <div class="flex items-center gap-2">
-                ${!matchedRepairedTask?.verified ? `
-                  <button type="button" class="btn-detail-rework px-3.5 py-2 bg-white dark:bg-slate-900 hover:bg-amber-50 dark:hover:bg-slate-800 text-amber-700 dark:text-amber-300 font-bold text-xs rounded-xl border border-amber-500/40 cursor-pointer shadow-xs transition-all" data-id="${report.id}">
-                    Request Rework
-                  </button>
-                ` : ''}
-                <button type="button" class="btn-verify-repaired-task px-4 py-2 ${matchedRepairedTask?.verified ? 'bg-emerald-600 text-white' : 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950'} font-black text-xs rounded-xl border-0 cursor-pointer uppercase tracking-wider shadow-md hover:shadow-lg transition-all flex items-center gap-1.5" data-report-id="${report.id}" data-task-name="${encodeURIComponent(repairComponentName)}">
+                <button type="button" ${isReportSubmittedForVerification(report) || matchedRepairedTask?.verified ? '' : 'disabled'} class="eco-primary-action btn-verify-repaired-task px-4 py-2 ${matchedRepairedTask?.verified ? 'bg-emerald-600 text-white' : 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950'} font-black text-xs rounded-xl border-0 cursor-pointer uppercase tracking-wider shadow-md hover:shadow-lg transition-all flex items-center gap-1.5" data-report-id="${report.id}" data-task-name="${encodeURIComponent(repairComponentName)}">
                   <svg class="w-4 h-4 ${matchedRepairedTask?.verified ? 'text-white' : 'text-slate-950'}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
                   <span>${matchedRepairedTask?.verified ? 'Repaired & Verified' : 'Verify Repair'}</span>
                 </button>
               </div>
             </div>
           </div>
-        ` : ''}
+        ` : (activeChildRepairs.length > 0 ? `
+          <div class="bg-cyan-50/90 dark:bg-cyan-950/30 border-2 border-cyan-500/60 dark:border-cyan-400/60 rounded-2xl p-4 shadow-sm transition-all">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center gap-2 text-cyan-800 dark:text-cyan-300 font-black text-xs uppercase tracking-wider">
+                <span class="w-5 h-5 rounded-full bg-cyan-500 text-slate-950 flex items-center justify-center font-bold text-xs shadow-xs animate-pulse">⚙</span>
+                <span>Corrective Repair In Progress • ${completedChildRepairs.length} of ${childRepairs.length} Repaired</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <span class="px-2.5 py-0.5 text-[10px] font-mono font-bold rounded-full bg-cyan-100 dark:bg-cyan-900/60 text-cyan-800 dark:text-cyan-200 border border-cyan-400/50">
+                  ${activeChildRepairs.length} Active Repair${activeChildRepairs.length > 1 ? 's' : ''}
+                </span>
+              </div>
+            </div>
+            <div class="bg-white/95 dark:bg-slate-950/80 border border-cyan-300 dark:border-cyan-500/40 rounded-xl p-3 text-xs mb-3 shadow-sm">
+              <p class="text-gray-600 dark:text-gray-300 font-medium leading-relaxed">
+                Technician is currently performing corrective repairs on this aircon unit.
+                ${completedChildRepairs.length > 0 ? ` Completed repair(s): <strong class="text-emerald-700 dark:text-emerald-300 font-mono">${completedChildRepairs.map(c => c.id).join(', ')}</strong>.` : ''}
+                Active in-progress repair(s): <strong class="text-cyan-700 dark:text-cyan-300 font-mono">${activeChildRepairs.map(c => c.id).join(', ')}</strong>.
+              </p>
+              <div class="flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400 mt-2 pt-1.5 border-t border-gray-100 dark:border-white/5">
+                <span>📍 Unit: <strong class="text-gray-800 dark:text-white">${report.airconId}</strong> (${report.room || 'Room'})</span>
+                <span>Active Repairs: <strong class="text-gray-700 dark:text-gray-300">${activeChildRepairs.map(c => c.parentTaskName || c.issue?.component || c.id).join(', ')}</strong></span>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap pt-0.5">
+              ${activeChildRepairs.map(cr => `
+                <button type="button" class="btn-detail-view-repair px-3 py-1.5 bg-white dark:bg-slate-900 hover:bg-cyan-50 dark:hover:bg-slate-800 text-cyan-800 dark:text-cyan-300 font-bold text-xs rounded-xl border border-cyan-500/40 cursor-pointer shadow-xs transition-all flex items-center gap-1.5" data-repair-id="${cr.id}">
+                  <span>View ${cr.id} (${cr.parentTaskName || cr.issue?.component || 'Repair'})</span>
+                  <svg class="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                </button>
+              `).join('')}
+            </div>
+          </div>
+        ` : '')}
 
         <!-- CHECKLIST TASKS -->
         <div class="bg-white dark:bg-slate-900/70 border border-gray-200 dark:border-white/10 rounded-2xl p-4 shadow-sm">
@@ -8118,28 +7811,49 @@
           <div class="space-y-2 max-h-[220px] overflow-y-auto pr-1.5 eco-slim-scrollbar" id="detailModalChecklistContainer">
             ${report.tasks.map((task, idx) => {
           const tChildRepair = getRepairReportForTask(report, task, reports);
-          const isTaskRepairDone = Boolean(tChildRepair && isRepairReportDone(tChildRepair));
-          const isTaskRepairVerified = Boolean((task.repaired && task.verified) || (tChildRepair && isRepairReportVerified(tChildRepair)));
           const taskLinkedId = task.linkedRepairId || (tChildRepair && tChildRepair.id) || null;
+          const isChildActive = Boolean(tChildRepair && !isRepairReportDone(tChildRepair));
+
+          let isTaskRepairDone = false;
+          let isTaskRepairVerified = false;
+          if (tChildRepair) {
+            if (isRepairReportVerified(tChildRepair)) {
+              isTaskRepairDone = true;
+              isTaskRepairVerified = true;
+            } else if (isRepairReportDone(tChildRepair)) {
+              isTaskRepairDone = true;
+              isTaskRepairVerified = false;
+            } else {
+              isTaskRepairDone = false;
+              isTaskRepairVerified = false;
+              task.status = 'Under Repair';
+              task.repaired = false;
+              task.verified = false;
+            }
+          } else {
+            isTaskRepairDone = Boolean(task.repaired);
+            isTaskRepairVerified = Boolean(task.repaired && task.verified);
+          }
 
           let badge = `<span class="inline-flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-bold rounded-full bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-400 border border-gray-300 dark:border-slate-700 shrink-0 select-none pointer-events-none">⚪ Not Started</span>`;
-          if (isTaskRepairVerified || (task.repaired && task.verified)) {
+          if (isChildActive || (task.status === 'Under Repair' && taskLinkedId)) {
+            badge = `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-400/40 shrink-0 select-none pointer-events-none"><span>🔵 Under Repair</span>${taskLinkedId ? `<span class="text-[9px] font-mono opacity-80">(${taskLinkedId})</span>` : ''}</span>`;
+          } else if (isTaskRepairVerified) {
             badge = `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-400/40 shrink-0 select-none pointer-events-none"><span>🟢 Repaired</span>${taskLinkedId ? `<span class="text-[9px] font-mono opacity-80">(${taskLinkedId})</span>` : ''}</span>`;
-          } else if (task.repaired || isTaskRepairDone) {
+          } else if (isTaskRepairDone) {
             badge = `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-400/40 shrink-0 select-none pointer-events-none"><span>🟡 Repaired (Pending Sign-off)</span>${taskLinkedId ? `<span class="text-[9px] font-mono opacity-80">(${taskLinkedId})</span>` : ''}</span>`;
           } else if (task.status === 'Completed') {
-            badge = `<span class="inline-flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-400/40 shrink-0 select-none pointer-events-none">🟢 Completed</span>`;
-          } else if ((task.status === 'Under Repair' && taskLinkedId) || (tChildRepair && !isTaskRepairDone)) {
-            badge = `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-400/40 shrink-0 select-none pointer-events-none"><span>🔵 Under Repair</span>${taskLinkedId ? `<span class="text-[9px] font-mono opacity-80">(${taskLinkedId})</span>` : ''}</span>`;
+            badge = `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-400/40 shrink-0 select-none pointer-events-none">🟢 Completed</span>`;
           } else if (task.status === 'In Progress') {
-            badge = `<span class="inline-flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-bold rounded-full bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-400/40 shrink-0 select-none pointer-events-none">🟠 In Progress</span>`;
+            badge = `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-400/40 shrink-0 select-none pointer-events-none">🟠 In Progress</span>`;
           } else if (task.status === 'Needs Repair') {
             badge = !isRepReport
               ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-rose-100 dark:bg-rose-500/20 text-rose-800 dark:text-rose-300 border border-rose-400/40 shrink-0 select-none pointer-events-none">🔴 Needs Repair</span>`
               : `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-400/40 shrink-0 select-none pointer-events-none"><span>🔵 In Progress</span></span>`;
           }
 
-          const verifiedBadge = (task.verified || isTaskRepairVerified) ? `
+          const isTaskActuallyDone = !isChildActive && (isTaskRepairVerified || isTaskRepairDone || task.status === 'Completed');
+          const verifiedBadge = (!isChildActive && (isTaskRepairVerified || (task.verified && task.status === 'Completed'))) ? `
             <span class="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
               <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
               Verified
@@ -8158,14 +7872,13 @@
             </span>
           ` : '';
 
-          const isTaskUnderRepair = !isRepReport && (task.status === 'Under Repair' || Boolean(taskLinkedId));
-          const canQuickVerify = !isRepReport && (isTaskRepairDone || task.repaired) && !task.verified && !isTaskRepairVerified;
+          const canQuickVerify = isReportSubmittedForVerification(report) && !isRepReport && !isChildActive && isTaskRepairDone && !isTaskRepairVerified;
 
           return `
                 <div class="checklist-task-item group bg-gray-50 dark:bg-slate-950/70 hover:bg-emerald-50/50 dark:hover:bg-slate-800/80 border border-gray-200 dark:border-white/10 hover:border-emerald-500/40 rounded-xl p-2.5 flex items-center justify-between gap-2 text-xs shadow-sm cursor-pointer transition-all" data-task-id="${task.id}" data-task-name="${encodeURIComponent(task.name)}" title="Click to view details & verify">
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center flex-wrap gap-2 mb-0.5">
-                      <span class="checklist-step-badge w-5 h-5 rounded-md ${task.status === 'Completed' || task.repaired ? 'badge-emerald bg-emerald-500 text-white' : (task.status === 'Needs Repair' ? 'badge-rose bg-rose-600 text-white' : (task.status === 'In Progress' ? 'badge-cyan bg-cyan-600 text-white' : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200'))} font-black text-[10px] flex items-center justify-center shrink-0 shadow-xs mr-1">${idx + 1}</span>
+                      <span class="checklist-step-badge w-5 h-5 rounded-md ${isTaskActuallyDone ? 'badge-emerald bg-emerald-500 text-white' : (isChildActive || task.status === 'Under Repair' ? 'badge-cyan bg-cyan-600 text-white' : (task.status === 'Needs Repair' ? 'badge-rose bg-rose-600 text-white' : (task.status === 'In Progress' ? 'badge-cyan bg-cyan-600 text-white' : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200')))} font-black text-[10px] flex items-center justify-center shrink-0 shadow-xs mr-1">${idx + 1}</span>
                       <span class="font-bold text-gray-800 dark:text-white group-hover:text-emerald-700 dark:group-hover:text-emerald-300 transition-colors">${task.name}</span>
                       ${badge}
                       ${verifiedBadge}
@@ -8217,8 +7930,8 @@
                     Action required: Review checklist findings and sign off.
                   </div>
                   <div class="flex items-center gap-2">
-                    <button type="button" class="btn-detail-rework px-3.5 py-2 bg-white dark:bg-slate-900 hover:bg-amber-50 dark:hover:bg-slate-800 text-amber-700 dark:text-amber-300 font-bold text-xs rounded-xl border border-amber-500/40 cursor-pointer shadow-sm transition-all" data-id="${report.id}">Request Rework</button>
-                    <button type="button" class="btn-detail-verify px-5 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs rounded-xl border-0 cursor-pointer uppercase tracking-wider shadow-md hover:shadow-lg transition-all flex items-center gap-1.5" data-id="${report.id}">
+                    
+                    <button type="button" class="eco-primary-action btn-detail-verify px-5 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs rounded-xl border-0 cursor-pointer uppercase tracking-wider shadow-md hover:shadow-lg transition-all flex items-center gap-1.5" data-id="${report.id}">
                       <svg class="w-4 h-4 text-slate-950" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
                       <span>Verify Maintenance</span>
                     </button>
@@ -8324,7 +8037,7 @@
           }
           const tRep = targetTask ? getRepairReportForTask(report, targetTask, reports) : null;
           if (tRep) {
-            tRep.status = 'Verified';
+            tRep.status = 'Completed';
             tRep.verified = true;
             if (Array.isArray(tRep.tasks)) {
               tRep.tasks.forEach(rt => {
@@ -8343,24 +8056,40 @@
             await saveReports(reports, tRep);
           }
           const remNeedsRepair = report.tasks.some(t => t.status === 'Needs Repair' && !t.repaired);
-          const remUnderRepair = report.tasks.some(t => t.status === 'Under Repair' && !t.repaired);
-          const allParentDone = report.tasks.every(t => t.status === 'Completed' || t.repaired);
+          const remUnderRepair = report.tasks.some(t => {
+            const cr = getRepairReportForTask(report, t, reports);
+            if (cr && !isRepairReportDone(cr)) return true;
+            return t.status === 'Under Repair' && !t.repaired;
+          });
+          const allParentDone = report.tasks.length > 0 && report.tasks.every(t => {
+            const cr = getRepairReportForTask(report, t, reports);
+            if (cr && !isRepairReportDone(cr)) return false;
+            return t.status === 'Completed' || t.repaired;
+          });
           const allParentVerified = allParentDone && report.tasks.every(t => t.verified);
           if (remNeedsRepair) {
             report.status = 'Needs Repair';
             report.verified = false;
+            if (report.issue) {
+              report.issue.repaired = false;
+              report.issue.status = 'Needs Repair';
+            }
           } else if (remUnderRepair) {
             report.status = 'Under Repair';
             report.verified = false;
+            if (report.issue) {
+              report.issue.repaired = false;
+              report.issue.status = 'Under Repair';
+            }
           } else if (allParentVerified) {
-            report.status = 'Verified';
+            report.status = 'Completed';
             report.verified = true;
             if (report.issue) {
               report.issue.repaired = true;
               report.issue.status = 'Repaired';
             }
           } else if (allParentDone) {
-            report.status = 'For Verification';
+            report.status = isReportSubmittedForVerification(report) ? 'For Verification' : 'In Progress';
             if (report.issue) {
               report.issue.repaired = true;
               report.issue.status = 'Repaired';
@@ -8385,11 +8114,13 @@
 
       body.querySelector('.btn-detail-verify')?.addEventListener('click', async () => {
         const unresolvedTasks = report.tasks ? report.tasks.filter(t => (t.status === 'Needs Repair' || t.status === 'Under Repair') && !t.repaired) : [];
-        if (unresolvedTasks.length > 0 || (report.issue && !report.issue.repaired)) {
-          showToast('Cannot Verify', 'Please resolve all repair issues before verifying.', 'error');
+        const activeChildRepairs = getChildRepairReportsFor(report, reports).filter(cr => !isRepairReportDone(cr));
+        if (unresolvedTasks.length > 0 || activeChildRepairs.length > 0 || (report.issue && !report.issue.repaired)) {
+          showToast('Cannot Verify', activeChildRepairs.length > 0 ? `Please complete all repair tasks first (${activeChildRepairs.map(c => c.id).join(', ')} still in progress).` : 'Please resolve all repair issues before verifying.', 'error');
           return;
         }
-        report.status = 'Verified';
+        report.status = 'Completed';
+        report.verified = true;
         if (Array.isArray(report.tasks)) {
           report.tasks.forEach(t => {
             if (t.status === 'Completed') {
@@ -8409,6 +8140,9 @@
           report.verificationRemarks = 'Inspected, tested, and officially approved by Administrator.';
         }
 
+        try { await saveReports(reports, report); }
+        catch { return; }
+
         // If this report is a child repair task, update ONLY the specific parent task!
         const parentId = report.parentReportId || report.linkedParentId;
         let parentRep = parentId ? findReportById(reports, parentId) : null;
@@ -8426,7 +8160,8 @@
               targetParentTask = parentRep.tasks.find(pt => String(pt.name).trim().toLowerCase() === String(report.parentTaskName).trim().toLowerCase());
             }
             if (!targetParentTask && report.issue?.component) {
-              targetParentTask = parentRep.tasks.find(pt => isComponentInIssue(pt.name, report.issue));
+              const comp = String(report.issue.component).trim().toLowerCase();
+              targetParentTask = parentRep.tasks.find(pt => String(pt.name || '').trim().toLowerCase() === comp);
             }
           }
 
@@ -8440,8 +8175,16 @@
 
           // Recalculate parent report status based on ALL parent tasks
           const hasRemainingNeedsRepair = Array.isArray(parentRep.tasks) && parentRep.tasks.some(pt => pt.status === 'Needs Repair' && !pt.repaired);
-          const hasRemainingUnderRepair = Array.isArray(parentRep.tasks) && parentRep.tasks.some(pt => pt.status === 'Under Repair' && !pt.repaired);
-          const allParentDone = Array.isArray(parentRep.tasks) && parentRep.tasks.length > 0 && parentRep.tasks.every(pt => pt.status === 'Completed' || pt.repaired);
+          const hasRemainingUnderRepair = Array.isArray(parentRep.tasks) && parentRep.tasks.some(pt => {
+            const cr = getRepairReportForTask(parentRep, pt, reports);
+            if (cr && String(cr.id).toLowerCase() !== String(report.id).toLowerCase() && !isRepairReportDone(cr)) return true;
+            return pt.status === 'Under Repair' && !pt.repaired;
+          });
+          const allParentDone = Array.isArray(parentRep.tasks) && parentRep.tasks.length > 0 && parentRep.tasks.every(pt => {
+            const cr = getRepairReportForTask(parentRep, pt, reports);
+            if (cr && String(cr.id).toLowerCase() !== String(report.id).toLowerCase() && !isRepairReportDone(cr)) return false;
+            return pt.status === 'Completed' || pt.repaired;
+          });
           const allParentVerified = allParentDone && parentRep.tasks.every(pt => pt.verified);
 
           if (hasRemainingNeedsRepair) {
@@ -8451,14 +8194,14 @@
             parentRep.status = 'Under Repair';
             parentRep.verified = false;
           } else if (allParentVerified) {
-            parentRep.status = 'Verified';
+            parentRep.status = 'Completed';
             parentRep.verified = true;
             if (parentRep.issue) {
               parentRep.issue.repaired = true;
               parentRep.issue.status = 'Repaired';
             }
           } else if (allParentDone) {
-            parentRep.status = 'For Verification';
+            parentRep.status = isReportSubmittedForVerification(parentRep) ? 'For Verification' : 'In Progress';
             if (parentRep.issue) {
               parentRep.issue.repaired = true;
               parentRep.issue.status = 'Repaired';
@@ -8473,10 +8216,10 @@
             by: 'Admin'
           });
 
-          await saveReports(reports, parentRep);
+          try { await saveReports(reports, parentRep); }
+          catch { return; }
         }
 
-        await saveReports(reports, report);
         renderDetailModalContent();
         refreshPageReportsView();
         window.dispatchEvent(new Event('storage'));
@@ -8521,7 +8264,7 @@
 
           const targetRepair = targetTask ? getRepairReportForTask(report, targetTask, reports) : (repairReport || null);
           if (targetRepair) {
-            targetRepair.status = 'Verified';
+            targetRepair.status = 'Completed';
             targetRepair.verified = true;
             if (Array.isArray(targetRepair.tasks)) {
               targetRepair.tasks.forEach(rt => {
@@ -8542,8 +8285,16 @@
 
           // Recalculate parent report status based on ALL tasks
           const hasRemainingNeedsRepair = Array.isArray(report.tasks) && report.tasks.some(pt => pt.status === 'Needs Repair' && !pt.repaired);
-          const hasRemainingUnderRepair = Array.isArray(report.tasks) && report.tasks.some(pt => pt.status === 'Under Repair' && !pt.repaired);
-          const allParentDone = Array.isArray(report.tasks) && report.tasks.length > 0 && report.tasks.every(pt => pt.status === 'Completed' || pt.repaired);
+          const hasRemainingUnderRepair = Array.isArray(report.tasks) && report.tasks.some(pt => {
+            const cr = getRepairReportForTask(report, pt, reports);
+            if (cr && !isRepairReportDone(cr)) return true;
+            return pt.status === 'Under Repair' && !pt.repaired;
+          });
+          const allParentDone = Array.isArray(report.tasks) && report.tasks.length > 0 && report.tasks.every(pt => {
+            const cr = getRepairReportForTask(report, pt, reports);
+            if (cr && !isRepairReportDone(cr)) return false;
+            return pt.status === 'Completed' || pt.repaired;
+          });
           const allParentVerified = allParentDone && report.tasks.every(pt => pt.verified);
 
           if (hasRemainingNeedsRepair) {
@@ -8553,14 +8304,15 @@
             report.status = 'Under Repair';
             report.verified = false;
           } else if (allParentVerified) {
-            report.status = 'Verified';
+            report.status = 'Completed';
+            report.verified = true;
             report.verified = true;
             if (report.issue) {
               report.issue.repaired = true;
               report.issue.status = 'Repaired';
             }
           } else if (allParentDone) {
-            report.status = 'For Verification';
+            report.status = isReportSubmittedForVerification(report) ? 'For Verification' : 'In Progress';
             if (report.issue) {
               report.issue.repaired = true;
               report.issue.status = 'Repaired';
@@ -8585,11 +8337,7 @@
         });
       });
 
-      body.querySelectorAll('.btn-detail-rework').forEach(btn => {
-        btn.addEventListener('click', () => {
-          openReworkModal(report.id);
-        });
-      });
+
 
       body.querySelectorAll('.btn-detail-repair').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -8646,12 +8394,120 @@
 
   // Delete Multiple Reports
   async function deleteReports(reportIds) {
-    if (!reportIds) return;
-    const ids = Array.isArray(reportIds) ? reportIds.filter(Boolean) : [reportIds];
-    if (ids.length === 0) return;
+    const raw = reportIds && typeof reportIds === 'object' && !Array.isArray(reportIds)
+      ? (reportIds.ids ?? reportIds.report_ids ?? reportIds.id) : reportIds;
+    const entries = Array.isArray(raw) ? raw.flat(Infinity) : [raw];
+    const ids = [...new Set(entries
+      .filter(id => typeof id === 'string' || (typeof id === 'number' && Number.isFinite(id)))
+      .map(id => String(id).trim()).filter(Boolean))];
+    if (ids.length === 0) return false;
 
+    // Include dependent repair reports, removing children before parents.
+    const allReports = getReports();
     const idSet = new Set(ids);
-    const reports = getReports().filter(r => !idSet.has(r.id));
+    let added;
+    do {
+      added = false;
+      allReports.forEach(r => {
+        if (idSet.has(r.parent_report_id || r.parentReportId) && !idSet.has(r.id)) {
+          idSet.add(r.id);
+          ids.unshift(r.id);
+          added = true;
+        }
+      });
+    } while (added);
+
+    await Promise.resolve(window?.ecotrackAuthReady).catch(() => {});
+    const client = typeof getSb === 'function' ? getSb() : null;
+    if (client?.auth && typeof client.auth.getSession === 'function') {
+      try {
+        const { data: sessionData } = await client.auth.getSession().catch(() => ({ data: { session: null } }));
+        if (!sessionData?.session && typeof client.auth.refreshSession === 'function') {
+          const { data: refreshed } = await client.auth.refreshSession().catch(() => ({ data: { session: null } }));
+          if (refreshed?.session && window?.electron?.invoke) {
+            await window.electron.invoke('auth-set-session', {
+              access_token: refreshed.session.access_token,
+              refresh_token: refreshed.session.refresh_token
+            }).catch(() => {});
+          }
+        }
+      } catch (_) {}
+    }
+
+    let deletedRows = null;
+    let deletionError = null;
+    try {
+      if (window?.electron && typeof window.electron.invoke === 'function') {
+        try {
+          const result = await window.electron.invoke('maintenance-delete-reports', ids);
+          if (result?.success && Array.isArray(result.data) && result.data.length) {
+            deletedRows = result.data;
+          } else if (result?.error && String(result.error).includes('No maintenance reports were deleted')) {
+            // Target reports do not exist in the remote database (e.g. mock/test records, already removed, or uncommitted local drafts).
+            // Confirm their deletion locally so the user is never trapped with undeletable ghost records.
+            deletedRows = ids.map(id => ({ id }));
+          } else {
+            deletionError = new Error(result?.error || 'No reports were deleted');
+          }
+        } catch (error) { deletionError = error; }
+      }
+      if (!deletedRows) {
+        const testIds = ids.filter(id => {
+          const s = String(id || '').trim().toUpperCase();
+          return s.includes('-TEST-') || s.startsWith('TEST-') || s.endsWith('-TEST') || s.includes('TEST_') || s.includes('MOCK');
+        });
+        if (testIds.length === ids.length) {
+          deletedRows = ids.map(id => ({ id }));
+        } else {
+          if (!client) throw deletionError || new Error('Database service unavailable');
+          try {
+            const result = await client.rpc('delete_maintenance_reports', { report_ids: ids });
+            if (!result.error && Array.isArray(result.data) && result.data.length) {
+              deletedRows = result.data;
+            }
+          } catch (_) {}
+
+          if (!deletedRows) {
+            const { data: directData, error: directErr } = await client
+              .from('maintenance_reports')
+              .delete()
+              .in('id', ids)
+              .select('id');
+            if (!directErr && Array.isArray(directData) && directData.length) {
+              deletedRows = directData;
+            } else if (directErr) {
+              throw directErr;
+            }
+          }
+
+          if (!deletedRows || !deletedRows.length) {
+            throw deletionError || new Error('No reports were deleted. Check report IDs and database permissions.');
+          }
+        }
+      }
+      idSet.clear();
+      deletedRows.forEach(r => idSet.add(String(r.id).trim()));
+    } catch (error) {
+      showToast('Deletion Failed', error.message, 'error');
+      if (String(error?.message || '').toLowerCase().includes('sign in') && typeof window !== 'undefined' && window.location && !window.location.pathname.endsWith('login.html')) {
+        setTimeout(() => {
+          if (window.location && !window.location.pathname.endsWith('login.html')) {
+            window.location.href = 'login.html';
+          }
+        }, 2000);
+      }
+      return false;
+    }
+    const reports = getReports().filter(r => !idSet.has(r.id)).map(r => {
+      if (idSet.has(r.linked_repair_id || r.linkedRepairId)) {
+        r.linked_repair_id = null;
+        r.linkedRepairId = null;
+      }
+      (r.tasks || []).forEach(task => {
+        if (idSet.has(task.linkedRepairId)) task.linkedRepairId = null;
+      });
+      return r;
+    });
     _reportsCache = reports;
     try {
       localStorage.setItem('ecoTrack_maintenance_reports', JSON.stringify(reports));
@@ -8663,16 +8519,10 @@
       console.error('Error deleting reports locally:', e);
     }
 
-    const sb = getSb();
-    if (sb) {
-      try {
-        await sb.from('maintenance_reports').delete().in('id', ids);
-      } catch (err) {
-        console.warn('Error deleting reports from Supabase:', err.message);
-      }
-    }
-    const msg = ids.length === 1 ? `Report ${ids[0]} was successfully deleted.` : `${ids.length} maintenance reports were successfully deleted.`;
-    showToast(ids.length === 1 ? 'Report Deleted' : 'Reports Deleted', msg, 'warning');
+    const deletedIds = [...idSet];
+    const msg = deletedIds.length === 1 ? `Report ${deletedIds[0]} was successfully deleted.` : `${deletedIds.length} maintenance reports were successfully deleted.`;
+    showToast(deletedIds.length === 1 ? 'Report Deleted' : 'Reports Deleted', msg, 'warning');
+    return ids.every(id => idSet.has(id));
   }
 
   // Delete Single Report
@@ -8685,13 +8535,13 @@
   // ===================================================================
 
   function init() {
-    // Purge duplicate reports from localStorage on startup
+    // Purge duplicate and mock/test reports from localStorage on startup
     try {
       const stored = localStorage.getItem('ecoTrack_maintenance_reports');
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed)) {
-          const clean = deduplicateReports(parsed.map(normalizeReport).filter(Boolean));
+          const clean = deduplicateReports(parsed.map(normalizeReport).filter(r => r && !isMockOrTestReport(r)));
           localStorage.setItem('ecoTrack_maintenance_reports', JSON.stringify(clean));
         }
       }
@@ -8701,14 +8551,16 @@
     injectCreateModalHTML();
     injectDetailModalHTML();
     injectChecklistItemModalHTML();
-    injectReworkModalHTML();
-    injectReworkTaskModalHTML();
     injectRepairTaskModalHTML();
     injectEditRepairTaskModalHTML();
-    injectEditReworkModalHTML();
-    fetchReportsFromSupabase();
-    fetchStaffFromSupabase();
-    fetchAirconsFromSupabase();
+    Promise.all([fetchReportsFromSupabase(), fetchStaffFromSupabase(), fetchAirconsFromSupabase()]).then(() => {
+      if (!/staff\.html$/i.test(window.location.pathname)) return;
+      const reportId = new URLSearchParams(window.location.search).get('verifyReport');
+      if (!reportId) return;
+      const report = findReportById(getReports(), reportId);
+      if (!report) { showToast('Report Unavailable', `Report ${reportId} could not be loaded.`, 'error'); return; }
+      openDetailModal(reportId);
+    });
     setupMaintenanceRealtime();
 
     // If Supabase wasn't ready synchronously at script parse time, poll and retry
@@ -8780,13 +8632,13 @@
       }
     } else {
       report.issue = null;
-      if (allVerified) report.status = 'Verified';
-      else if (allDone) report.status = 'For Verification';
+      if (allVerified) report.status = 'Completed';
+      else if (allDone) report.status = isReportSubmittedForVerification(report) ? 'For Verification' : 'In Progress';
       else if (report.tasks.some(t => t.status === 'In Progress' || t.status === 'Completed')) report.status = 'In Progress';
       else report.status = 'Pending';
     }
 
-    saveReports(reports, report);
+    saveReports(reports, report, false, true).catch(() => {});
     renderDetailModalContent();
   }
 
@@ -8799,26 +8651,20 @@
     openChecklistItemModal: openChecklistItemModal,
     closeChecklistItemModal: closeChecklistItemModal,
     cycleTaskStatus: cycleTaskStatus,
-    openReworkModal: openReworkModal,
-    closeReworkModal: closeReworkModal,
-    submitRework: submitRework,
-    openReworkTaskModal: openReworkTaskModal,
-    closeReworkTaskModal: closeReworkTaskModal,
     openRepairTaskModal: openRepairTaskModal,
     closeRepairTaskModal: closeRepairTaskModal,
     submitRepairTask: submitRepairTask,
     openEditRepairTaskModal: openEditRepairTaskModal,
     closeEditRepairTaskModal: closeEditRepairTaskModal,
-    openEditReworkModal: openEditReworkModal,
-    closeEditReworkModal: closeEditReworkModal,
     cycleRepairStepStatus: cycleRepairStepStatus,
-    cycleReworkTaskStatus: cycleReworkTaskStatus,
     _updateEditRepStepName: _updateEditRepStepName,
     _removeEditRepStep: _removeEditRepStep,
     generateNextReportId: generateNextReportId,
     deleteReport: deleteReport,
     deleteReports: deleteReports,
-    getReports: getReports,
+    getReports: () => {const reports=getReports();if(window.EcoTrackMode?.mode!=='monitoring')return reports;const identities=new Set(getAirconsDatabase().flatMap(ac=>[ac.nodeId,ac.id]).filter(Boolean));return reports.filter(report=>[report.aircon_id,report.nodeId,report.airconId].some(id=>identities.has(id)));},
+    deviceLabel:maintenanceDeviceLabel,
+    resolveReportEquipment: maintenanceReportEquipment,
     fetchReports: fetchReportsFromSupabase,
     refreshReports: fetchReportsFromSupabase,
     invalidateCache: invalidateReportsCache,
@@ -8827,6 +8673,8 @@
     getAircons: () => AIRCONS_DATABASE,
     resolveStaffAvatar: resolveStaffAvatar,
     resolveStaffLocation: resolveStaffLocation,
+    resolveStaffHierarchy: resolveStaffHierarchy,
+    setLocationHierarchy: updateStaffLocationHierarchy,
     getAirconsForStaff: getAirconsForStaff,
     formatAcLocation: formatAcLocation,
     getStaffBuilding: getStaffBuilding,

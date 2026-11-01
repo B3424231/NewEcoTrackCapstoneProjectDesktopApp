@@ -17,14 +17,13 @@ console.log('archivedDetailRestoreBtn in HTML:', staffHtml.includes('id="archive
 console.log('Old deleteStaffModal removed:', !staffHtml.includes('id="deleteStaffModal"'));
 console.log('Old confirmDeleteBtn removed:', !staffHtml.includes('id="confirmDeleteBtn"'));
 
-const logsJs = fs.readFileSync('public/js/logs.js', 'utf8');
+const logsJs = fs.readFileSync('public/js/sensor-workspace.js', 'utf8');
 new Function(logsJs);
-console.log('logs.js syntax: OK');
+console.log('sensor-workspace.js syntax: OK');
 
-const logsHtml = fs.readFileSync('public/logs.html', 'utf8');
-console.log('startTimeFilter in HTML:', logsHtml.includes('id="startTimeFilter"'));
-console.log('endTimeFilter in HTML:', logsHtml.includes('id="endTimeFilter"'));
-console.log('clearTimeFilterBtn in HTML:', logsHtml.includes('id="clearTimeFilterBtn"'));
+const logsHtml = fs.readFileSync('public/sensor-logs.html', 'utf8');
+require('node:assert/strict').ok(logsHtml.includes('id="sensorTimeStart"') && logsHtml.includes('id="sensorTimeEnd"') && logsHtml.includes('id="sensorClearTime"'), 'Current forecast time filters are present');
+console.log('Current forecast time filters: OK');
 
 const profileJs = fs.readFileSync('public/js/profile.js', 'utf8');
 new Function(profileJs);

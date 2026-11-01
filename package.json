@@ -9,12 +9,15 @@
     "dev": "concurrently \"npm run electron-dev\" \"npm run python-dev\"",
     "electron-dev": "electron . --watch",
     "python-dev": "venv\\Scripts\\python.exe backend/app.py",
-    "test": "node public/js/data-tests.js",
+    "test": "node scripts/verify_no_mock_data.js",
     "transfer:sqlite": "node scripts/transfer_supabase_to_sqlite.js",
     "test:all": "concurrently \"npm run dev\" \"npm run test\"",
     "build": "electron-builder",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "pack": "npm run package:prepare && electron-builder --win --x64 --dir",
+    "dist": "npm run package:prepare && electron-builder --win --x64",
+    "test:database": "node scripts/test_database_cleanup.js && venv\\Scripts\\python.exe scripts/test_database_cleanup.py",
+    "package:prepare": "node scripts/prepare-package.cjs",
+    "configure:installed": "node scripts/configure-packaged-install.cjs"
   },
   "keywords": [
     "ecotrack",
@@ -25,31 +28,83 @@
   "author": "Rey O. Solamillo",
   "license": "MIT",
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
     "concurrently": "^7.0.0",
-    "electron": "^29.4.6",
+    "dotenv": "9.0.2",
+    "electron": "^44.5.1",
     "electron-builder": "^24.0.0",
     "electron-is-dev": "^2.0.0"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",
     "axios": "^1.4.0",
-    "pocketbase": "^0.26.8"
+    "ws": "^8.22.0"
   },
   "build": {
     "appId": "com.ecotrack.app",
     "productName": "EcoTrack",
     "directories": {
-      "buildResources": "public"
+      "buildResources": "assets",
+      "output": "dist/ecotrack-20261030"
     },
+    "files": [
+      "src/**/*",
+      "public/**/*",
+      "backend/**/*",
+      "assets/ecoTrack.png",
+      "scripts/wlan_scan.ps1",
+      "scripts/ble_scanner.exe",
+      "requirements.txt",
+      "!**/.env*",
+      "!**/*.db{,-wal,-shm,-journal}",
+      "!**/.ecotrack-*.key",
+      "!backend/backups{,/**/*}"
+    ],
     "win": {
+      "icon": "assets/installer/ecotrack.ico",
       "target": [
-        "nsis",
-        "portable"
-      ]
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "EcoTrack-Setup-${version}-2026-10-30.${ext}"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
-    }
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "EcoTrack",
+      "installerIcon": "assets/installer/ecotrack.ico",
+      "uninstallerIcon": "assets/installer/ecotrack.ico",
+      "installerHeader": "assets/installer/installer-header.bmp",
+      "installerSidebar": "assets/installer/installer-sidebar.bmp",
+      "uninstallerSidebar": "assets/installer/uninstaller-sidebar.bmp",
+      "include": "assets/installer/installer.nsh"
+    },
+    "asar": true,
+    "extraResources": [
+      {
+        "from": "artifacts/packaging/backend/ecotrack-backend",
+        "to": "backend"
+      },
+      {
+        "from": "artifacts/packaging/ecotrack-public.json",
+        "to": "ecotrack-public.json"
+      },
+      {
+        "from": "scripts",
+        "to": "scripts",
+        "filter": [
+          "wlan_scan.ps1",
+          "ble_scanner.exe"
+        ]
+      }
+    ]
   }
 }

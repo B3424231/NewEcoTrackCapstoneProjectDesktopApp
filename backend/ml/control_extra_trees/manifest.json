@@ -1,0 +1,110 @@
+{
+  "model": "extra_trees",
+  "algorithm": "ExtraTreesRegressor",
+  "reference_model": "Haier AS35XCAHRA / 1U35S2SM1FA-2",
+  "trained_utc": "2026-10-29T04:35:38.838008+00:00",
+  "python_version": "3.14.7",
+  "versions": {
+    "scikit-learn": "1.9.0",
+    "joblib": "1.5.3",
+    "numpy": "2.5.2",
+    "scipy": "1.18.1",
+    "pandas": "3.0.5"
+  },
+  "features": [
+    "setpoint_c",
+    "fan_command",
+    "operating_mode",
+    "eco",
+    "turbo",
+    "swing",
+    "quiet",
+    "horizontal_swing",
+    "display"
+  ],
+  "control_features": [
+    "setpoint_c",
+    "fan_command",
+    "operating_mode",
+    "eco",
+    "turbo",
+    "swing",
+    "quiet",
+    "horizontal_swing",
+    "display"
+  ],
+  "output_unit": "kWh",
+  "horizon_hours": 1,
+  "training_data_type": "research_informed_estimates",
+  "evaluation_kind": "held_out_generated_formula_targets",
+  "physical_accuracy_validated": false,
+  "measured_validation_hours": 0,
+  "input_scope": "controls_only",
+  "environment_source": "not_used",
+  "environment_scenarios": [],
+  "limitations": [
+    "No measured or assumed indoor/outdoor temperature or humidity is a model input. Energy still varies with those unobserved conditions, so controls alone cannot establish exact physical consumption.",
+    "Room/load evolution and compressor cycling are not simulated; one-hour labels are model estimates.",
+    "Eco energy/duration anchors derive from original shorter/longer experiments, not measured next-hour energy.",
+    "Eco Gear is distinct from Eco Sensor. ESPHome IR support and firmware equivalence remain unverified.",
+    "Motor rated output is not measured electrical input; efficiency and affinity-law application are assumptions.",
+    "Numerical Turbo, Quiet, Swing, Display, Dry and new-condition effects are not verified by measured energy comparisons.",
+    "Pairwise/compound function compatibility is a conservative modeling policy unless a rule is cited explicitly.",
+    "Filter is not verified as an independently toggled energy function; it remains not applicable, not OFF.",
+    "Other device features such as Self-Clean, UV/Health, Sleep and timers require separate operating models and are outside the panel subset."
+  ],
+  "timestamp_role": "Observed elapsed intervals, cadence, grouping and gaps; no learned time-of-day or weekday effect.",
+  "selection_metric": "validation_mae",
+  "validation_candidates": [
+    {
+      "min_samples_leaf": 1,
+      "validation_mae_kwh": 0.3332236756855834
+    },
+    {
+      "min_samples_leaf": 2,
+      "validation_mae_kwh": 0.33322684896113997
+    }
+  ],
+  "validation_mae_kwh": 0.3332236756855834,
+  "train_rows": 12320,
+  "validation_rows": 2464,
+  "test_rows": 3712,
+  "test_metrics": {
+    "mae": 0.34645098249074563,
+    "mse": 0.18041735360367253,
+    "rmse": 0.4247556398727067,
+    "r2": 0.42088820468059474
+  },
+  "selected_configuration": {
+    "bootstrap": false,
+    "ccp_alpha": 0.0,
+    "criterion": "squared_error",
+    "max_depth": null,
+    "max_features": 1.0,
+    "max_leaf_nodes": null,
+    "max_samples": null,
+    "min_impurity_decrease": 0.0,
+    "min_samples_leaf": 1,
+    "min_samples_split": 2,
+    "min_weight_fraction_leaf": 0.0,
+    "monotonic_cst": null,
+    "n_estimators": 128,
+    "n_jobs": 2,
+    "oob_score": false,
+    "random_state": 20261029,
+    "verbose": 0,
+    "warm_start": false
+  },
+  "source_dataset_sha256": "ed3a9dd2a2eec5e78fa66d7ffbed7d34adc77d31134a13bc2fddfd62a225b3f4",
+  "dataset_sha256": "ff6dd1a862058e02f84a75a59735ea27808bd3b3be280bc9fb35c19c2aaf8d54",
+  "mean_baseline_test_mae_kwh": 0.4914667173437049,
+  "artifacts": {
+    "model.joblib": "b4e2a032ed319e2e13330efe30215929e715d5543159b7b1124c65157c51d15d",
+    "supported_inputs.json.gz": "78e6fea25055dce2fa6b055df5daa4031c74163fc2fe4baa44955da916a271e5",
+    "assumptions.json": "0861299a35fb77efc3c81ba5c0bd53b2414627b11f7d42b1e24ecdbbbedccd01"
+  },
+  "report_artifacts": {
+    "held_out_predictions.csv": "c9fb85f59a418cd2bf7c521276dd62cf33c48adb2de398b05e545507cbd49ba8",
+    "control_test_inputs.csv": "ae2fb7024ea6a99d5ea2a3d579017e57e174167823d4e92de16973fc961a59db"
+  }
+}

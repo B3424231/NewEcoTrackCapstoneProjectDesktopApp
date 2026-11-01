@@ -1,0 +1,40 @@
+[
+  {
+    "source_id": "haier_sgs_2023",
+    "url": "https://cld.bz/84MTzso",
+    "locator": "Report AHES231000138671, pages 4-6",
+    "basis": "8 reported electrical interval energy totals, mode, setpoint, high fan and Eco gears",
+    "limits": "Public report copy; meter traces/calibration and original hosting not independently verified; other function states unknown"
+  },
+  {
+    "source_id": "haier_service_2021",
+    "url": "https://haier-ac.pl/wp-content/uploads/materialy/instrukcje/expert_plus/instrukcja-serwisowa-expert-plus-j-wew-as35xcahra.pdf",
+    "locator": "PDF page 11 (printed 9): 30 W fan shaft output, 1050/925/800 rpm; PDF page 17 (printed 15): 16-30 C heating control",
+    "basis": "Manufacturer service-manual copy, not electrical fan-power measurements",
+    "limits": "2021 revision may differ from test-sample firmware; 30 W is rated output, not measured input",
+    "source_document_sha256": "3827cccb40182344ba6a9fe5cb0c2809c66a2c4b33b23a627950414fea83ed2b"
+  },
+  {
+    "source_id": "haier_operation_2023",
+    "url": "https://www.aircovent.nl/content/pdf/7818522_as35xcahra-mb_haier_gebruikshandleiding_01.pdf",
+    "locator": "PDF page 7: modes, 1 C increments and FAN restrictions; page 10: Turbo/Quiet fan behavior; page 11: Swing; page 6: LIGHT display",
+    "basis": "Manufacturer operation-manual copy",
+    "limits": "Eco Sensor differs from SGS Eco Gear; native protocol and firmware mapping remain unverified",
+    "source_document_sha256": "613b5b9adebf767c5b987178bab50c01bde562a40de8d393f411c394434cf8a9"
+  },
+  {
+    "source_id": "haier_catalog_2024",
+    "url": "https://haierhvac.eu/sites/haierhvac-eu/files/2024-05/20240425_PF_RES_Expert-ENG_0.pdf",
+    "locator": "AS35XCAHRA / 1U35S2SM1FA-2 performance table",
+    "basis": "Rated absorbed cooling 0.875 kW (0.30-1.40), heating 1.037 kW (0.50-1.60); operating envelope",
+    "limits": "Ratings are not observed next-hour energy or a guarantee of in-field instantaneous maximum under all circumstances",
+    "source_document_sha256": "be8444dd64ad3089d8eee6aa1a1e5e701362d03a1abce2f0bb4aed1b5781151a"
+  },
+  {
+    "source_id": "greenheck_fan_law",
+    "url": "https://www.greenheck.com/resources/blog/elements-of-motor-sizing",
+    "locator": "Fan-law explanation of horsepower versus RPM",
+    "basis": "Ideal fan shaft power scales with speed cubed",
+    "limits": "Applied only to modeled indoor fan; assumes similar conditions/efficiency, not an empirical model of the AC's total electrical power"
+  }
+]

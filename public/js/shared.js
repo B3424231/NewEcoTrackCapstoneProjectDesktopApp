@@ -5,12 +5,12 @@ const API_BASE = 'http://localhost:5000/api';
 // ===== SHARED STATE =====
 const appState = {
   currentTemp: 0,
-  currentPressure: 0,
+  currentRotation: null,
   batteryVoltage: 3.8,
   batteryUsable: true,
   rssi: 0,
   isConnected: false,
-  historicalData: { temps: [], pressures: [], timestamps: [] },
+  historicalData: { temps: [], rotations: [], timestamps: [] },
   isSleeping: true,
   lastUpdate: Date.now(),
   logMessages: [],
@@ -18,35 +18,45 @@ const appState = {
 };
 
 // ===== API CALLS =====
-async function fetchAPI(endpoint) {
+async function fetchAPI(endpoint, options = {}) {
   try {
-    const response = await fetch(`${API_BASE}${endpoint}`);
+    const url = `${API_BASE}${endpoint}`;
+    if (window.EcoNetwork) {
+      return await window.EcoNetwork.fetchJson(url, options);
+    }
+    const response = await fetch(url, options);
     if (response.ok) {
       return await response.json();
     }
   } catch (error) {
-    console.error(`API Error: ${endpoint}`, error);
+    console.warn(`[shared.js] API Error on ${endpoint}:`, error.message);
   }
   return null;
 }
 
-async function postAPI(endpoint, data) {
+async function postAPI(endpoint, data, options = {}) {
   try {
-    const response = await fetch(`${API_BASE}${endpoint}`, {
+    const url = `${API_BASE}${endpoint}`;
+    const fetchOpts = {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    });
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+      body: JSON.stringify(data),
+      ...options
+    };
+    if (window.EcoNetwork) {
+      return await window.EcoNetwork.fetchJson(url, fetchOpts);
+    }
+    const response = await fetch(url, fetchOpts);
     if (response.ok) {
       return await response.json();
     }
   } catch (error) {
-    console.error(`API Error: ${endpoint}`, error);
+    console.warn(`[shared.js] API Error on POST ${endpoint}:`, error.message);
   }
   return null;
 }
 
-// ===== SENSOR SIMULATION =====
+// ===== CONTROL SIMULATION =====
 // Mock data removed in favor of live telemetry.
 
 // Page loader removed.
@@ -131,71 +141,49 @@ function updateLogDisplay() {
 }
 
 async function checkBackendConnection() {
-  let pythonOk = false;
-  let pocketbaseOk = false;
-  let supabaseOk = false;
-
-  // 1. Check Python Backend
+  let backendOk = false, supabaseOk = false;
   try {
-    const pyResponse = await fetch(`${API_BASE}/health`);
-    if (pyResponse.ok) {
-      pythonOk = true;
-    }
-  } catch (error) {
-    console.warn('Python backend not responding');
-  }
-
-  // 2. Check PocketBase Database (Sensor Logs Engine)
-  try {
-    const pbResponse = await fetch(`http://127.0.0.1:8090/api/health`);
-    if (pbResponse.ok) {
-      pocketbaseOk = true;
-    }
-  } catch (error) {
-    console.warn('PocketBase (sensor logs engine) not responding');
-  }
-
-  // 3. Check Supabase
-  if (typeof window.supabaseClient !== 'undefined' && window.ECOTRACK_CONFIG?.isSupabaseConfigured()) {
+    const backendUrl = window.ECOTRACK_CONFIG?.backendUrl || window.BACKEND_URL || 'http://localhost:5000';
+    backendOk = (await fetch(`${backendUrl}/api/health`)).ok;
+  } catch (_) {}
+  if (window.supabaseClient && window.ECOTRACK_CONFIG?.isSupabaseConfigured()) {
     try {
+      await window.ecotrackAuthReady;
       const { error } = await window.supabaseClient.from('nodes').select('id', { count: 'exact', head: true });
-      if (!error) {
-        supabaseOk = true;
-      }
-    } catch (e) { }
-  } else {
-    // If not configured yet or offline, allow operational mode
-    supabaseOk = true;
+      supabaseOk = !error;
+    } catch (_) {}
   }
-
-  // Update App State & Logs
-  if (pythonOk && pocketbaseOk) {
-    if (!appState.isConnected) addLog('System Online: Connected to Python, PocketBase (Sensor Logs) & Supabase');
-    appState.isConnected = true;
-    updateConnectionStatus(true);
-  } else if (pythonOk && !pocketbaseOk) {
-    addLog('Warning: Connected to Python & Supabase, but PocketBase (Sensor Logs) is offline');
-    appState.isConnected = false;
-    updateConnectionStatus(false);
-  } else if (!pythonOk && pocketbaseOk) {
-    addLog('Warning: Connected to PocketBase but Python Backend is offline');
-    appState.isConnected = false;
-    updateConnectionStatus(false);
-  } else {
-    addLog('System Offline: Python & PocketBase are unreachable');
-    appState.isConnected = false;
-    updateConnectionStatus(false);
-  }
+  const connected = backendOk && supabaseOk, status = `${backendOk}:${supabaseOk}`;
+  if (appState.connectionHealth !== status) addLog(connected ? 'System Online: Connected to SQLite backend and Supabase'
+    : `System connection: SQLite backend ${backendOk ? 'online' : 'offline'}, Supabase ${supabaseOk ? 'online' : 'offline'}`);
+  appState.connectionHealth = status;
+  appState.isConnected = connected;
+  updateConnectionStatus(connected);
 }
 
 // ===== SESSION TIMEOUT & INACTIVITY WATCHER =====
 let _sessionTimeoutTimer = null;
 let _sessionWarningTimer = null;
 
+function getSessionTimeoutSetting(user = null) {
+  if (!user) {
+    try { user = JSON.parse(localStorage.getItem('ecoTrack_profile_user') || '{}'); }
+    catch (_) { user = {}; }
+  }
+  // A local choice takes priority over profile data fetched later. Zero explicitly disables it.
+  for (const value of [localStorage.getItem('ecoTrack_session_timeout'), user?.session_timeout]) {
+    if (value === null || value === undefined) continue;
+    const setting = String(value).trim().toLowerCase();
+    if (setting === 'never' || setting === '0') return 'Never';
+    const minutes = /^(15|30|60)(?: minutes)?$/.exec(setting);
+    if (minutes) return minutes[1] + ' minutes';
+  }
+  return '30 minutes';
+}
+
 function getSessionTimeoutMs() {
-  const user = JSON.parse(localStorage.getItem('ecoTrack_profile_user') || '{}');
-  const timeoutSetting = localStorage.getItem('ecoTrack_session_timeout') || user.session_timeout || '30 minutes';
-  
+  const timeoutSetting = getSessionTimeoutSetting();
+
   if (timeoutSetting === '15 minutes') return 15 * 60 * 1000;
   if (timeoutSetting === '30 minutes') return 30 * 60 * 1000;
   if (timeoutSetting === '60 minutes') return 60 * 60 * 1000;
@@ -204,6 +192,11 @@ function getSessionTimeoutMs() {
 }
 
 function resetSessionTimeoutTimer() {
+  if (_sessionTimeoutTimer !== null) clearTimeout(_sessionTimeoutTimer);
+  if (_sessionWarningTimer !== null) clearTimeout(_sessionWarningTimer);
+  _sessionTimeoutTimer = null;
+  _sessionWarningTimer = null;
+
   // Do not run timeout on login page
   const path = window.location.pathname.toLowerCase();
   if (path.endsWith('login.html') || path.endsWith('/login')) {
@@ -211,14 +204,7 @@ function resetSessionTimeoutTimer() {
   }
 
   const timeoutMs = getSessionTimeoutMs();
-  if (timeoutMs === 0) {
-    if (_sessionTimeoutTimer) clearTimeout(_sessionTimeoutTimer);
-    if (_sessionWarningTimer) clearTimeout(_sessionWarningTimer);
-    return;
-  }
-
-  if (_sessionTimeoutTimer) clearTimeout(_sessionTimeoutTimer);
-  if (_sessionWarningTimer) clearTimeout(_sessionWarningTimer);
+  if (timeoutMs === 0) return;
 
   // Warning 1 minute before timeout
   const warningMs = Math.max(10000, timeoutMs - 60000);
@@ -231,6 +217,7 @@ function resetSessionTimeoutTimer() {
   _sessionTimeoutTimer = setTimeout(() => {
     console.warn('[EcoTrack] Session timed out due to inactivity.');
     try {
+      localStorage.setItem('ecoTrack_require_login', 'timeout');
       sessionStorage.clear();
     } catch (e) {}
     window.location.href = 'login.html?timeout=true';
@@ -241,6 +228,9 @@ function initSessionTimeoutWatcher() {
   const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'];
   events.forEach(event => {
     window.addEventListener(event, resetSessionTimeoutTimer, { passive: true });
+  });
+  window.addEventListener('storage', event => {
+    if (event.key === 'ecoTrack_session_timeout' || event.key === 'ecoTrack_profile_user') resetSessionTimeoutTimer();
   });
   resetSessionTimeoutTimer();
 }
@@ -270,14 +260,32 @@ function getStoredViolationAuditHistory() {
     const raw = localStorage.getItem(ECOTRACK_VIOLATION_AUDIT_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    // Sanitize: filter out wake, sleep, schedule, interval, and battery notifications
+    return parsed.filter(item => {
+      if (!item || item.type === 'controller_installation') return false;
+      const text = String(item.content || item.message || '').toLowerCase();
+      if (
+        text.includes('wake') ||
+        text.includes('sleep') ||
+        text.includes('schedule') ||
+        text.includes('scheduled') ||
+        text.includes('scheduler') ||
+        text.includes('interval') ||
+        text.includes('cycle') ||
+        text.includes('battery')
+      ) {
+        return false;
+      }
+      return true;
+    });
   } catch (_) {
     return [];
   }
 }
 
 function saveViolationToAuditHistory(notif) {
-  if (!notif) return;
+  if (!notif || notif.type === 'controller_installation') return;
   try {
     const history = getStoredViolationAuditHistory();
     const rawContent = String(notif.rawContent || notif.content || notif.message || '')
@@ -285,9 +293,18 @@ function saveViolationToAuditHistory(notif) {
       .trim();
     if (!rawContent) return;
 
-    // Routine schedule alerts and battery notices are notifications only, not environmental compliance violations
+    // Routine schedule alerts, wake/sleep events, and battery notices are notifications only, NOT compliance violations
     const textLower = rawContent.toLowerCase();
-    if (textLower.includes('sensor wake up') || textLower.includes('sensor sleep') || textLower.includes('schedule applied') || textLower.includes('battery')) {
+    if (
+      textLower.includes('wake') ||
+      textLower.includes('sleep') ||
+      textLower.includes('schedule') ||
+      textLower.includes('scheduled') ||
+      textLower.includes('scheduler') ||
+      textLower.includes('interval') ||
+      textLower.includes('cycle') ||
+      textLower.includes('battery')
+    ) {
       return;
     }
 
@@ -313,7 +330,11 @@ function saveViolationToAuditHistory(notif) {
       time: timeStr,
       created: notif.created || new Date().toISOString(),
       triggered: true,
-      archived: true
+      archived: true,
+      node_id: notif.node_id || notif.node || null,
+      is_dismissed_from_inbox: notif.is_dismissed_from_inbox === true ||
+        String(notif.rawContent || notif.content || '').startsWith('__INBOX_DISMISSED__|||') ||
+        (existsIndex >= 0 && history[existsIndex].is_dismissed_from_inbox === true)
     };
 
     if (existsIndex >= 0) {
@@ -332,6 +353,52 @@ function saveViolationToAuditHistory(notif) {
   }
 }
 
+function clearStoredViolationAuditHistory() {
+  try {
+    localStorage.removeItem(ECOTRACK_VIOLATION_AUDIT_KEY);
+    localStorage.removeItem('ecoTrack_violationAuditHistory');
+  } catch (_) {}
+}
+
+function removeViolationFromAuditHistory(notifId) {
+  if (!notifId) return;
+  try {
+    const history = getStoredViolationAuditHistory();
+    const updated = history.filter(h => String(h.id) !== String(notifId) && String(h.pbId) !== String(notifId));
+    localStorage.setItem(ECOTRACK_VIOLATION_AUDIT_KEY, JSON.stringify(updated));
+    localStorage.setItem('ecoTrack_violationAuditHistory', JSON.stringify(updated));
+  } catch (_) {}
+}
+
+// Auto-purge stale violation history on initialization (requested reset)
+try {
+  if (!localStorage.getItem('ecoTrack_violationHistoryCleaned_v1')) {
+    clearStoredViolationAuditHistory();
+    localStorage.setItem('ecoTrack_violationHistoryCleaned_v1', 'true');
+  }
+} catch (_) {}
+
 window.getStoredViolationAuditHistory = getStoredViolationAuditHistory;
 window.saveViolationToAuditHistory = saveViolationToAuditHistory;
+window.clearStoredViolationAuditHistory = clearStoredViolationAuditHistory;
+window.removeViolationFromAuditHistory = removeViolationFromAuditHistory;
+
+// Keep incomplete location records visible without changing their stored IDs.
+window.ensureLocationHierarchy = function(buildings, floors, rooms) {
+  const defaultBuilding = () => {
+    const id = '__unassigned_building__';
+    buildings[id] ||= { id, name: 'Unassigned Locations' };
+    return id;
+  };
+  Object.values(floors).forEach(floor => {
+    if (!buildings[floor.building_id]) floor.building_id = defaultBuilding();
+  });
+  Object.values(rooms).forEach(room => {
+    if (floors[room.floor_id]) return;
+    const buildingId = buildings[room.building_id] ? room.building_id : defaultBuilding();
+    const id = `__general_floor__${buildingId}`;
+    floors[id] ||= { id, name: 'Unassigned / General Area', building_id: buildingId };
+    room.floor_id = id;
+  });
+};
 

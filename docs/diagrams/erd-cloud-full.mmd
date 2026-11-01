@@ -1,0 +1,461 @@
+erDiagram
+  %% Solid = declared FK; dashed = selected logical reference (no FK).
+  %% PK/UK markers on multiple fields can be components of one tuple; see dictionary.
+  %% External auth/public projections list selected reference fields only.
+  ecotrack_private_device_credentials {
+    text device_id PK
+    text node_id UK, FK
+    bytea token_hash
+    timestamp_with_time_zone issued_at
+  }
+  ecotrack_private_measurement_delivery_cursor {
+    text device_id PK, FK
+    bytea token_hash
+    bigint boot
+    bigint sequence
+  }
+  ecotrack_private_rule_evidence {
+    text rule_id PK, FK
+    text node_id PK, FK
+    jsonb signature
+    timestamp_with_time_zone observed_at
+    timestamp_with_time_zone started_at
+    numeric interval_seconds
+    timestamp_with_time_zone last_alert_at
+  }
+  public_administrators {
+    text id PK
+    text username UK
+    text email UK
+    text password
+    text role
+    boolean is_active
+    timestamp_with_time_zone last_login
+    timestamp_with_time_zone created
+    timestamp_with_time_zone updated
+    text avatar
+    text photo_url
+    text phone
+    uuid auth_user_id UK, FK
+    boolean is_archived
+    timestamp_with_time_zone auth_valid_after
+    text phone_digits
+    text location
+    integer session_timeout
+  }
+  public_aircons {
+    text id PK
+    text asset_tag UK
+    text brand
+    text model
+    numeric cooling_capacity_hp
+    text aircon_type
+    text room_id FK
+    text node_id UK, FK
+    text status
+    text protocol
+    date install_date
+    timestamp_with_time_zone created_at
+    timestamp_with_time_zone updated_at
+    text protocol_name
+    text controller_node_id FK
+    jsonb desired_state
+    uuid command_id
+    text command_status
+    timestamp_with_time_zone command_status_at
+    timestamp_with_time_zone commanded_at
+    jsonb reported_state
+    timestamp_with_time_zone reported_at
+    text name
+    jsonb capability_profile
+  }
+  public_buildings {
+    text id PK
+    text name
+    text admin_id FK
+    timestamp_with_time_zone created
+    timestamp_with_time_zone updated
+  }
+  public_controller_installations {
+    uuid id PK
+    text node_id UK
+    text device_id
+    text attempt_id UK
+    jsonb request_setup
+    uuid installer_auth_user_id
+    text installer_profile_id
+    text installer_name
+    text installer_account_role
+    text installer_role
+    text controller_name
+    text room_id
+    text room_name
+    text floor_id
+    text floor_name
+    text building_id
+    text building_name
+    text aircon_id
+    text aircon_name
+    text aircon_type
+    timestamp_with_time_zone installed_at
+    text event_kind
+  }
+  public_ecotrack_auth_attempts {
+    text key PK
+    timestamp_with_time_zone started_at
+    integer attempts
+  }
+  public_ecotrack_device_commands {
+    uuid id PK
+    text node_id FK
+    text kind
+    jsonb payload
+    text status
+    uuid created_by
+    timestamp_with_time_zone created_at
+    timestamp_with_time_zone expires_at
+    timestamp_with_time_zone claimed_at
+    timestamp_with_time_zone acknowledged_at
+    jsonb result
+    timestamp_with_time_zone finished_at
+  }
+  public_ecotrack_device_state {
+    text node_id PK, FK
+    text device_id UK
+    timestamp_with_time_zone last_seen
+    timestamp_with_time_zone sleeping_until
+    text firmware_version
+    text wifi_ssid
+    text ip_address
+    integer rssi
+    jsonb capabilities
+    jsonb latest_ir
+    jsonb applied_config
+  }
+  public_ecotrack_ir_codes {
+    uuid id PK
+    text aircon_id UK, FK
+    text command_type UK
+    text protocol
+    text raw_data
+    jsonb capture
+    text source_platform
+    uuid created_by
+    uuid updated_by
+    timestamp_with_time_zone created_at
+    timestamp_with_time_zone updated_at
+  }
+  public_ecotrack_maintenance_operations {
+    uuid actor_id PK, FK
+    text operation_id PK
+    jsonb request
+    jsonb result
+    timestamp_with_time_zone created_at
+  }
+  public_ecotrack_push_deliveries {
+    uuid id PK
+    text notification_id UK, FK
+    text token UK, FK
+    text status
+    integer attempts
+    timestamp_with_time_zone next_attempt_at
+    timestamp_with_time_zone lease_until
+    text ticket_id
+    text last_error
+  }
+  public_ecotrack_push_wake_tokens {
+    uuid nonce PK
+    timestamp_with_time_zone expires_at
+  }
+  public_floors {
+    text id PK
+    text name
+    text building_id FK
+    timestamp_with_time_zone created
+    timestamp_with_time_zone updated
+  }
+  public_maintenance_reports {
+    text id PK
+    text aircon_id FK
+    text aircon_name
+    text room_id FK
+    text room_name
+    text type
+    text priority
+    text staff_id FK
+    text staff_name
+    text due_date
+    text created_date
+    text status
+    text description
+    jsonb tasks
+    jsonb issue
+    text verification_remarks
+    jsonb timeline
+    text admin_id FK
+    timestamp_with_time_zone created
+    timestamp_with_time_zone updated
+    text photo_url
+    text attachment_url
+    jsonb photos
+    text aircon_type
+    text parent_report_id
+    text linked_repair_id
+  }
+  public_mobile_notification_state {
+    text notification_id PK, FK
+    uuid recipient_auth_user_id PK, FK
+    timestamp_with_time_zone read_at
+    timestamp_with_time_zone snooze_until
+    timestamp_with_time_zone archived_at
+    timestamp_with_time_zone updated_at
+  }
+  public_mobile_notifications {
+    text id PK
+    text staff_id FK
+    text staff_name
+    text title
+    text message
+    text type
+    text priority
+    text category
+    text related_report_id
+    text aircon_id
+    text aircon_name
+    text location
+    text due_date
+    boolean is_read
+    boolean is_snoozed
+    timestamp_with_time_zone snooze_until
+    timestamp_with_time_zone created_at
+    timestamp_with_time_zone updated_at
+    text aircon_type
+    text verification_remarks
+    text event_key UK
+    jsonb event_payload
+    boolean is_broadcast
+  }
+  public_nodes {
+    text id PK
+    text name UK
+    text status
+    numeric temp
+    numeric rssi
+    numeric battery
+    text wake_time
+    text sleep_time
+    integer interval_val
+    text interval_unit
+    text room_id FK
+    text aircon_type
+    text install_date
+    timestamp_with_time_zone created
+    timestamp_with_time_zone updated
+    text photo_url
+    text aircon_id UK, FK
+    text maintainer_id FK
+    text mac_address
+    text ip_address
+    text wifi_ssid
+    text ble_uuid
+    text protocol_name
+    text brand
+    timestamp_with_time_zone admin_verified_at
+    uuid admin_verified_by
+    timestamp_with_time_zone deployment_saved_at
+    text device_mode
+    text monitor_aircon_id FK
+    uuid monitoring_id UK
+    jsonb sensor_config
+    double_precision rotation_rpm
+    timestamp_with_time_zone last_measurement_at
+    text last_measurement_report_id
+    text rotation_quality
+  }
+  public_notifications {
+    text id PK
+    text date
+    text time
+    text content
+    boolean triggered
+    text room_id FK
+    text rule_id FK
+    text admin_id FK
+    timestamp_with_time_zone created
+    timestamp_with_time_zone updated
+    boolean is_dismissed_from_inbox
+    text node_id
+    text report_id
+    text type
+    text event_key
+    uuid installation_id
+    jsonb installation
+  }
+  public_rooms {
+    text id PK
+    text name
+    integer node_limit
+    text floor_id FK
+    text admin_id FK
+    timestamp_with_time_zone created
+    timestamp_with_time_zone updated
+  }
+  public_rule_nodes {
+    text id PK
+    text rule_id UK, FK
+    text node_id UK, FK
+    timestamp_with_time_zone created
+    timestamp_with_time_zone updated
+  }
+  public_rules {
+    text id PK
+    text type
+    text condition
+    numeric value
+    text unit
+    boolean enabled
+    text message
+    integer duration
+    text start_date
+    text start_time
+    text end_date
+    text end_time
+    text room_id FK
+    text building_id FK
+    text floor_id FK
+    text admin_id FK
+    timestamp_with_time_zone created
+    timestamp_with_time_zone updated
+  }
+  public_staff {
+    text id PK
+    text name
+    text email
+    text phone
+    text status
+    timestamp_with_time_zone last_active
+    timestamp_with_time_zone created
+    timestamp_with_time_zone updated
+    text avatar
+    text photo_url
+    text avatar_url
+    text role
+    text building_name
+    text floor_name
+    text room_name
+    text assignment
+    text room_id
+    boolean is_archived
+    text archive_reason
+    text archive_notes
+    timestamp_with_time_zone archived_at
+    boolean is_online
+    boolean is_active
+    text online_status
+    text password
+    uuid auth_user_id UK, FK
+    boolean force_logout
+    timestamp_with_time_zone auth_valid_after
+    text phone_digits
+    text assignment_scope
+    text assigned_floor_id FK
+    text assigned_building_id FK
+  }
+  public_staff_push_tokens {
+    text token PK
+    uuid auth_user_id FK
+    text staff_id FK
+    text platform
+    boolean critical_enabled
+    boolean maintenance_enabled
+    timestamp_with_time_zone updated_at
+  }
+  public_telemetry {
+    text id PK
+    text node_id
+    text sensor_name
+    text room_name
+    text floor_name
+    text building_name
+    text aircon_type
+    numeric temperature
+    numeric battery
+    integer rssi
+    text status
+    timestamp_with_time_zone created
+    numeric interval_seconds
+    boolean ac_on
+    text aircon_id
+    jsonb control_snapshot
+    double_precision rotation_rpm
+    text rotation_quality
+    timestamp_with_time_zone observed_at
+    text boot_id
+    bigint sequence
+  }
+  auth_users {
+    uuid id PK
+    character_varying email
+  }
+  public_nodes ||--o| ecotrack_private_device_credentials : "node_id"
+  ecotrack_private_device_credentials ||--o| ecotrack_private_measurement_delivery_cursor : "device_id"
+  public_nodes ||--o{ ecotrack_private_rule_evidence : "node_id"
+  public_rules ||--o{ ecotrack_private_rule_evidence : "rule_id"
+  auth_users |o--o| public_administrators : "auth_user_id"
+  public_nodes |o--o{ public_aircons : "controller_node_id"
+  public_nodes |o--o| public_aircons : "node_id"
+  public_rooms |o--o{ public_aircons : "room_id"
+  public_administrators |o--o{ public_buildings : "admin_id"
+  public_nodes ||--o{ public_ecotrack_device_commands : "node_id"
+  public_nodes ||--o| public_ecotrack_device_state : "node_id"
+  public_aircons ||--o{ public_ecotrack_ir_codes : "aircon_id"
+  auth_users ||--o{ public_ecotrack_maintenance_operations : "actor_id"
+  public_mobile_notifications ||--o{ public_ecotrack_push_deliveries : "notification_id"
+  public_staff_push_tokens ||--o{ public_ecotrack_push_deliveries : "token"
+  public_buildings |o--o{ public_floors : "building_id"
+  public_administrators |o--o{ public_maintenance_reports : "admin_id"
+  public_nodes |o--o{ public_maintenance_reports : "aircon_id"
+  public_rooms |o--o{ public_maintenance_reports : "room_id"
+  public_staff |o--o{ public_maintenance_reports : "staff_id"
+  public_mobile_notifications ||--o{ public_mobile_notification_state : "notification_id"
+  auth_users ||--o{ public_mobile_notification_state : "recipient_auth_user_id"
+  public_staff |o--o{ public_mobile_notifications : "staff_id"
+  public_aircons |o--o| public_nodes : "aircon_id"
+  public_staff |o--o{ public_nodes : "maintainer_id"
+  public_aircons |o--o{ public_nodes : "monitor_aircon_id"
+  public_rooms |o--o{ public_nodes : "room_id"
+  public_administrators |o--o{ public_notifications : "admin_id"
+  public_rooms |o--o{ public_notifications : "room_id"
+  public_rules |o--o{ public_notifications : "rule_id"
+  public_administrators |o--o{ public_rooms : "admin_id"
+  public_floors |o--o{ public_rooms : "floor_id"
+  public_nodes ||--o{ public_rule_nodes : "node_id"
+  public_rules ||--o{ public_rule_nodes : "rule_id"
+  public_administrators |o--o{ public_rules : "admin_id"
+  public_buildings |o--o{ public_rules : "building_id"
+  public_floors |o--o{ public_rules : "floor_id"
+  public_rooms |o--o{ public_rules : "room_id"
+  public_buildings |o--o{ public_staff : "assigned_building_id"
+  public_floors |o--o{ public_staff : "assigned_floor_id"
+  auth_users |o--o| public_staff : "auth_user_id"
+  auth_users ||--o{ public_staff_push_tokens : "auth_user_id"
+  public_staff ||--o{ public_staff_push_tokens : "staff_id"
+  public_nodes |o..o{ public_telemetry : "node_id REF no FK"
+  public_aircons |o..o{ public_telemetry : "aircon_id REF no FK"
+  public_rooms |o..o{ public_staff : "room_id REF no FK"
+  public_maintenance_reports |o..o{ public_mobile_notifications : "related_report_id REF no FK"
+  public_maintenance_reports |o..o{ public_maintenance_reports : "parent_report_id REF no FK"
+  public_maintenance_reports |o..o{ public_maintenance_reports : "linked_repair_id REF no FK"
+  public_nodes |o..o{ public_notifications : "node_id REF no FK"
+  public_maintenance_reports |o..o{ public_notifications : "report_id REF no FK"
+  public_controller_installations |o..o{ public_notifications : "installation_id REF no FK"
+  public_nodes |o..o{ public_controller_installations : "node_id REF no FK"
+  public_aircons |o..o{ public_controller_installations : "aircon_id REF no FK"
+  public_rooms |o..o{ public_controller_installations : "room_id REF no FK"
+  public_floors |o..o{ public_controller_installations : "floor_id REF no FK"
+  public_buildings |o..o{ public_controller_installations : "building_id REF no FK"
+  auth_users |o..o{ public_controller_installations : "installer_auth_user_id REF no FK"
+  auth_users |o..o{ public_ecotrack_device_commands : "created_by REF no FK"
+  auth_users |o..o{ public_ecotrack_ir_codes : "created_by REF no FK"
+  auth_users |o..o{ public_ecotrack_ir_codes : "updated_by REF no FK"
+  auth_users |o..o{ public_nodes : "admin_verified_by REF no FK"

@@ -1,0 +1,4 @@
+# Build with the existing project virtual environment; model library versions must
+# match backend/ml/control_extra_trees/manifest.json and are verified by the build.
+pyinstaller==6.22.3
+waitress==3.0.2

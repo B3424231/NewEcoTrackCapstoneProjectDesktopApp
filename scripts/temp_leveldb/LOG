@@ -1,0 +1,59 @@
+2026/10/01-13:38:40.315 840 Reusing MANIFEST C:\Users\reygay\AppData\Roaming\ecotrack\Local Storage\leveldb/MANIFEST-000001
+2026/10/01-13:38:40.326 840 Recovering log #662
+2026/10/01-13:38:40.327 840 Level-0 table #665: started
+2026/10/01-13:38:40.333 840 Level-0 table #665: 9730 bytes OK
+2026/10/01-13:38:40.337 840 Delete type=0 #662
+2026/10/01-13:38:40.338 840 Compacting 4@0 + 1@1 files
+2026/10/01-13:38:40.372 840 Generated table #667@0: 2245 keys, 121244 bytes
+2026/10/01-13:38:40.372 840 Compacted 4@0 + 1@1 files => 121244 bytes
+2026/10/01-13:38:40.373 840 compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/10/01-13:38:40.374 840 Delete type=2 #657
+2026/10/01-13:38:40.374 840 Delete type=2 #659
+2026/10/01-13:38:40.374 840 Delete type=2 #661
+2026/10/01-13:38:40.375 840 Delete type=2 #663
+2026/10/01-13:38:40.375 840 Delete type=2 #665
+2026/10/01-13:40:41.649 3a54 Level-0 table #669: started
+2026/10/01-13:40:41.653 3a54 Level-0 table #669: 14976 bytes OK
+2026/10/01-13:40:41.654 3a54 Delete type=0 #666
+2026/10/01-13:51:41.314 3a54 Level-0 table #671: started
+2026/10/01-13:51:41.329 3a54 Level-0 table #671: 10440 bytes OK
+2026/10/01-13:51:41.332 3a54 Delete type=0 #668
+2026/10/01-13:59:49.439 3a54 Level-0 table #673: started
+2026/10/01-13:59:49.446 3a54 Level-0 table #673: 10856 bytes OK
+2026/10/01-13:59:49.448 3a54 Delete type=0 #670
+2026/10/01-14:01:57.791 3a54 Level-0 table #675: started
+2026/10/01-14:01:57.799 3a54 Level-0 table #675: 11222 bytes OK
+2026/10/01-14:01:57.801 3a54 Delete type=0 #672
+2026/10/01-14:01:57.807 3a54 Compacting 4@0 + 1@1 files
+2026/10/01-14:01:57.813 3a54 Generated table #676@0: 2260 keys, 123866 bytes
+2026/10/01-14:01:57.814 3a54 Compacted 4@0 + 1@1 files => 123866 bytes
+2026/10/01-14:01:57.814 3a54 compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/10/01-14:01:57.815 3a54 Delete type=2 #667
+2026/10/01-14:01:57.815 3a54 Delete type=2 #669
+2026/10/01-14:01:57.815 3a54 Delete type=2 #671
+2026/10/01-14:01:57.815 3a54 Delete type=2 #673
+2026/10/01-14:01:57.815 3a54 Delete type=2 #675
+2026/10/01-14:16:09.786 3a54 Level-0 table #678: started
+2026/10/01-14:16:09.792 3a54 Level-0 table #678: 11922 bytes OK
+2026/10/01-14:16:09.794 3a54 Delete type=0 #674
+2026/10/01-14:16:24.120 3a54 Level-0 table #680: started
+2026/10/01-14:16:24.126 3a54 Level-0 table #680: 12027 bytes OK
+2026/10/01-14:16:24.127 3a54 Delete type=0 #677
+2026/10/01-14:16:39.760 3a54 Level-0 table #682: started
+2026/10/01-14:16:39.767 3a54 Level-0 table #682: 12072 bytes OK
+2026/10/01-14:16:39.769 3a54 Delete type=0 #679
+2026/10/01-14:17:33.059 3a54 Level-0 table #684: started
+2026/10/01-14:17:33.066 3a54 Level-0 table #684: 11190 bytes OK
+2026/10/01-14:17:33.068 3a54 Delete type=0 #681
+2026/10/01-14:17:33.068 3a54 Compacting 4@0 + 1@1 files
+2026/10/01-14:17:33.073 3a54 Generated table #685@0: 2263 keys, 123894 bytes
+2026/10/01-14:17:33.073 3a54 Compacted 4@0 + 1@1 files => 123894 bytes
+2026/10/01-14:17:33.074 3a54 compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/10/01-14:17:33.074 3a54 Delete type=2 #676
+2026/10/01-14:17:33.074 3a54 Delete type=2 #678
+2026/10/01-14:17:33.074 3a54 Delete type=2 #680
+2026/10/01-14:17:33.074 3a54 Delete type=2 #682
+2026/10/01-14:17:33.074 3a54 Delete type=2 #684
+2026/10/01-14:18:01.610 3a54 Level-0 table #687: started
+2026/10/01-14:18:01.617 3a54 Level-0 table #687: 10534 bytes OK
+2026/10/01-14:18:01.618 3a54 Delete type=0 #683
